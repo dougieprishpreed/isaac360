@@ -1,0 +1,31 @@
+{
+  "format": "saved-rng-reference-v2",
+  "origin": "VS2010 x86 host execution of narrow inline instruction sequences transcribed from saved disassembly; not maintained RNG code, original EXE/DLL, emulator run or full native game trace.",
+  "ranges": [
+    "00796e6f..00796e8a (state shifts)",
+    "00796e21..00796e41 (unsigned conversion and scalar float)",
+    "00927f14..00927f24 (checksum)",
+    "00928190 (14 stage seeds then player-init seed)",
+    "00928290 (stage forget)",
+    "006ee510 (room descriptor seed order)"
+  ],
+  "vectors": 2624,
+  "limits": [
+    "Stage/room fixture expectations compose the independent x86 shift oracle according to the saved call sequence; not a captured native run.",
+    "Prepared-content/native-source version equivalence and full generator call order remain unresolved."
+  ],
+  "files": [
+    {
+      "path": "tests/fixtures/native_rng_vectors.tsv",
+      "sha256": "e21b8a1914800cce6cd7d944fd8d3fce58349e9329a4930e2b909c3a0491ed7b"
+    },
+    {
+      "path": "recovered/main/disassembly.txt",
+      "sha256": "c22c6822729bf2dd8c5e7250c38a5b912b450d066afe968586b94d1ad39de467"
+    },
+    {
+      "path": "recovered/main/memory/009e8000.bin",
+      "sha256": "eb8e16627faf6b328351c147146c5a32eeabf93b3327c501527daf38abd313ce"
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "format": "normal-host-generation-regression-v1",
+  "trace_sha256": "f0d89ad9a693acfac912530fad2472ef78a52809400cd7822fdfdd3a102b5f0a",
+  "recorded_run_sha256": "d184dad68f18e3db77413e836cbaed55e3a1c8c0ab7adc9092c423ce9971f7b0",
+  "source_run": "logs/normal_flow_20261026T193651812784Z/results.json",
+  "contexts": 2304,
+  "seeds": 128,
+  "scope": "Preserved maintained Windows generation trace before owned-session/static-wall changes. Regression evidence only, not original-game execution or whole-layout fidelity."
+}

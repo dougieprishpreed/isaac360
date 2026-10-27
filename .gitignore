@@ -1,0 +1,21 @@
+# Detailed development docs stay local; README.md is tracked.
+/AGENTS.md
+/docs/
+
+# Original game data, prepared resources, evidence and development outputs.
+/game/
+.tools/
+tools/data/
+private/
+evidence/
+recovered/
+assets/
+runtime/
+logs/
+scratch/
+build/
+*.xex
+*.pdb
+*.obj
+__pycache__/
+*.pyc
