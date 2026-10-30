@@ -103,7 +103,7 @@ bool NativeRoomUpdate::PrepareInitialActors(PortNormalRuntime& runtime,NativeAct
         const bool collided=NativePlayerGridCollision(runtime,false,next);
         body.flagsLow&=~0x4000U;
         if(!collided)return false;
-        if(!TickSimulationTail(runtime,actions,next))return false;
+        if(!TickSimulationTail(runtime,actions,0,0,next))return false;
         if(!runtime.completePlayerInitializations)runtime.completePlayerInitializations=1;
         ++runtime.completePlayerTicks;
         ++runtime.completeWholeGameplayTicks;
@@ -111,11 +111,12 @@ bool NativeRoomUpdate::PrepareInitialActors(PortNormalRuntime& runtime,NativeAct
     }
     *next=address;return false;
 }
-bool NativeRoomUpdate::TickSimulationTail(PortNormalRuntime& runtime,NativeActionSource* actions,unsigned int* next){
+bool NativeRoomUpdate::TickSimulationTail(PortNormalRuntime& runtime,NativeActionSource* actions,const NativeSceneFiles* files,NativeMt* global,unsigned int* next){
     if(!next)return false;*next=0;
     NativeWorldResident& live=runtime.world.resident[runtime.world.currentList];
     NativeRoomState* room=runtime.world.Current();
     if(!room||!live.effects)return false;
+    if(runtime.doorTransitionGrace>0)--runtime.doorTransitionGrace;
     //7af3ab ->8d8470: the reached particle emitter is disabled by Room1798+8
     //for this selected room. If it becomes enabled, stop at that caller.
     if(room->particlesEnabled){*next=0x8d8470;return false;}
@@ -135,9 +136,38 @@ bool NativeRoomUpdate::TickSimulationTail(PortNormalRuntime& runtime,NativeActio
         NativeDoorActor& door=live.doors->actors[slot];
         if(door.state==1&&door.targetType==1){door.previousState=door.state;door.state=2;++runtime.doorsOpened;}
     }
+    //Interactive passage on a cleared normal door. The target resident is
+    //constructed from the exact linked descriptor and the player is placed at
+    //the reciprocal door cell before the next whole tick.
+    if(files&&global&&room->clear&&live.doors&&runtime.doorTransitionGrace==0){
+        for(int slot=0;slot<8;++slot)if(live.doors->attached&(1U<<slot)){
+            NativeDoorActor& door=live.doors->actors[slot];
+            if(door.state!=2||door.targetType!=1)continue;
+            float px,py;if(!room->geometry.Position(door.grid,&px,&py))continue;px+=20.0f;py+=20.0f;
+            float ax=runtime.playerBody.position.x-px,ay=runtime.playerBody.position.y-py;
+            if(ax*ax+ay*ay>30.0f*30.0f)continue;
+            int reverse=-1;const NativePlacedRoom* target=runtime.world.layout.DoorTarget(runtime.world.currentList,slot,&reverse);
+            if(!target)return false;
+            NativeWorldIssue issue;
+            if(runtime.world.EnterLinked(slot,*files,&issue)!=NWR_OK){runtime.entryIssue=issue;*next=0x6f3b30;return false;}
+            NativeWorldResident& entered=runtime.world.resident[runtime.world.currentList];
+            if(!entered.doors&&runtime.world.PrepareDoorActors(*global,files->frame)!=NDR_OK){*next=0x6c8140;return false;}
+            if(runtime.world.PreparePerimeter(*global,files->frame)!=NWR_OK){*next=0x7c8a90;return false;}
+            if(entered.doors&&reverse>=0&&reverse<8){
+                NativeDoorActor& back=entered.doors->actors[reverse];
+                if(back.grid>=0){float bx,by;NativeRoomState* enteredRoom=runtime.world.Current();if(enteredRoom&&enteredRoom->geometry.Position(back.grid,&bx,&by)){
+                    runtime.playerBody.position.x=bx+20.0f;runtime.playerBody.position.y=by+20.0f;
+                    NativePoint clamped;if(enteredRoom->space.Clamp(runtime.playerBody.position,0,0,0,0,&clamped))runtime.playerBody.position=clamped;
+                    runtime.playerBody.previousPosition=runtime.playerBody.position;runtime.playerBody.velocity.x=runtime.playerBody.velocity.y=0;
+                }}
+            }
+            runtime.projectiles.Reset();runtime.doorTransitionGrace=30;++runtime.roomTransitions;
+            return true;
+        }
+    }
     return true;
 }
-bool NativeRoomUpdate::TickActors(PortNormalRuntime& runtime,NativeActionSource* actions,unsigned int* next){
+bool NativeRoomUpdate::TickActors(PortNormalRuntime& runtime,NativeActionSource* actions,const NativeSceneFiles* files,NativeMt* global,unsigned int* next){
     if(!next)return false;*next=0;
     NativeWorld& world=runtime.world;NativeRoomState* room=world.Current();
     if(!room||!runtime.playerBody.ready||runtime.playerBody.type!=1||!runtime.playerState.runInitializing)return false;
@@ -152,7 +182,7 @@ bool NativeRoomUpdate::TickActors(PortNormalRuntime& runtime,NativeActionSource*
     const bool collided=NativePlayerGridCollision(runtime,false,next);
     body.flagsLow&=~0x4000U;
     if(!collided)return false;
-    if(!TickSimulationTail(runtime,actions,next))return false;
+    if(!TickSimulationTail(runtime,actions,files,global,next))return false;
     if(!runtime.completePlayerInitializations)runtime.completePlayerInitializations=1;
     ++runtime.completePlayerTicks;
     ++runtime.completeWholeGameplayTicks;

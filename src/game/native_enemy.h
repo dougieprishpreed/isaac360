@@ -8,9 +8,10 @@ class NativeEnemy {
 public:
     NativeEntityBody body;
     bool ready,dead;
+    int type;
     unsigned int seed;
     NativeEnemy();
-    bool Begin(int variant,unsigned int seed,const NativePoint& position,unsigned int frame,int stage);
+    bool Begin(int type,int variant,unsigned int seed,const NativePoint& position,unsigned int frame,int stage);
     void Update(const NativeRoomState&,const NativeEntityBody& player);
     void Damage(float amount);
     void Swap(NativeEnemy&);

@@ -4,12 +4,15 @@
 #include <stdio.h>
 #include <string.h>
 namespace {
-enum Factory { FACTORY_MISSING,FACTORY_MARKER,FACTORY_DECORATION,FACTORY_WALL,FACTORY_ENEMY };
+enum Factory { FACTORY_MISSING,FACTORY_MARKER,FACTORY_DECORATION,FACTORY_WALL,FACTORY_ENEMY,FACTORY_ROCK };
 Factory SelectedFactory(const RoomRecord& record,const NativeSpawnChoice& choice,int backdrop,int mode) {
     const RoomRecordOption& e=choice.entry;
     if(e.type==970)return FACTORY_MARKER;
-    //Inherited type10 Gaper records are the first maintained actor factory.
-    if(e.type==10&&(e.variant==0||e.variant==1)&&e.subtype==0)return FACTORY_ENEMY;
+    //Inherited ordinary actor records with maintained physical factories.
+    if(e.subtype==0&&((e.type==10&&(e.variant==0||e.variant==1))||(e.type==13&&e.variant==0)||
+        (e.type==14&&e.variant==0)||(e.type==208&&e.variant==0)))return FACTORY_ENEMY;
+    //Ordinary rock/block grids: solid static obstacles without destruction yet.
+    if((e.type==1000||e.type==1002)&&e.variant==0&&e.subtype==0)return FACTORY_ROCK;
     //0079c1b3 maps1999 to grid15. Ordinary wall Init has no asset/MT calls;
     //room16's graphics path remains an explicit dependency.
     if(e.type==1999&&record.type!=16)return FACTORY_WALL;
@@ -80,10 +83,18 @@ NativeSceneResult NativeSceneBuildRoom(const RoomRecord& record,const NativeRoom
             if(!room.geometry.Position(choice.grid,&px,&py)){delete plan;return NSC_UNSUPPORTED_EXTENT;}
             position.x=px+20.0f;position.y=py+20.0f;
             NativeEnemy* enemy=new NativeEnemy;
-            if(!enemy->Begin((int)entry.variant,choice.seed,position,frame,configStage)){
+            if(!enemy->Begin((int)entry.type,(int)entry.variant,choice.seed,position,frame,configStage)){
                 delete enemy;delete plan;return NSC_BAD_REQUEST;
             }
             enemies->entries[enemies->count++]=enemy;room.encounter=true;continue;
+        }
+        if(factory==FACTORY_ROCK){
+            if(room.collision.occupied[choice.grid])continue;
+            NativeStaticGrid& rock=room.staticGrids[room.staticGridCount];
+            rock.grid=choice.grid;rock.type=(int)entry.type;rock.variant=(int)entry.variant;rock.state=0;
+            rock.initializations=0;rock.collisionClass=4;rock.seed=choice.seed;rock.native18=0;rock.native20=0;
+            rock.initializedFrame=frame;rock.initialized=true;
+            ++room.staticGridCount;room.collision.Set(choice.grid,true,4,0,(int)entry.type);continue;
         }
         if(factory==FACTORY_WALL){
             //0079b508 refuses a grid already occupied by an earlier stack.

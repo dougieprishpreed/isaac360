@@ -16,6 +16,7 @@ def main():
     projectiles=re.search(r'^PROJECTILES ticks=(\d+) spawned=(\d+) wallHits=(\d+) expired=(\d+) active=(\d+) cooldown=([^\r\n]+)',log,re.M)
     sim=re.search(r'^SIM_STATE clear=(\d+) enemyKills=(\d+) doorsOpened=(\d+) enemies=(\d+)',log,re.M)
     encounter=re.search(r'^ENCOUNTER seed=(\d+) room=(\d+) enemies=(\d+) kills=(\d+) remaining=(\d+) clear=(\d+) doors=(\d+) open=(\d+) doorsOpened=(\d+) projectiles=(\d+)',log,re.M)
+    transition=re.search(r'^TRANSITION seed=(\d+) from=(-?\d+) slot=(\d+) to=(-?\d+) definition=(-?\d+) room=(\d+) enemies=(\d+) transitions=(\d+)',log,re.M)
     paths=set()
     for folder in ('src/game','src/content','build/generated'):
         paths.update(f for f in (ROOT/folder).rglob('*') if f.suffix in ('.cpp','.h','.inc'))
@@ -43,6 +44,11 @@ def main():
             'encounter_kills':int(encounter.group(4)) if encounter else 0,
             'encounter_remaining':int(encounter.group(5)) if encounter else -1,
             'encounter_clear':bool(int(encounter.group(6))) if encounter else False,
+            'transition_from':int(transition.group(2)) if transition else -1,
+            'transition_to':int(transition.group(4)) if transition else -1,
+            'transition_definition':int(transition.group(5)) if transition else -1,
+            'transition_enemies':int(transition.group(7)) if transition else 0,
+            'transition_count':int(transition.group(8)) if transition else 0,
             'collision_stop':('%.9g'%float(gameplay.group(4)),'%.9g'%float(gameplay.group(5))) if gameplay else None,
             'collision_stable':bool(int(gameplay.group(6))) if gameplay else False,
             'checkpoint_returned':'CHECKPOINT buffer=' in log,'resident_restart_checked':'RESTART invalidRetained=1' in log,
@@ -50,7 +56,7 @@ def main():
             'tail_trail_segments':int(tail.group(2)) if tail else 0,
             'tail_render_callbacks':int(tail.group(3)) if tail else 0,
             'tail_reached_fields_present':[bool(int(tail.group(i))) for i in (4,5,6,7)] if tail else []},
-        'scope':'Focused owned session execution: normal New Run reaches an initialized player and repeated whole simulation ticks in its generated starting room. Each tick completes 414dc0 actor/player update, 6712a0 collision, the disabled 8d8470 particle gate, the 8798f0 room-effect cache Update and the primary projectile lifecycle using the evaluated shot vector and fireDelay/shotSpeed/damage/range stats; host evidence observes spawn, wall collision and range expiry. A stage-owned generated Gaper room constructs its actual spawn plan, advances the enemy, kills it with projectiles, sets room clear and opens a normal door. Native 72c430 executes the reached no-item timer/counter/direction state; 736d70 executes a bounded post-755870 tail through the 73891f state checks, effect-cache update, reached 747490/74ffa0 clean owner checks, no-item sprite anchors, first 7697a0 trail block and 7f0e50 no-callback return. Deferred presentation/room visuals: 747490/74ffa0 item/effect branches, full 739451/73d612 consumers, remaining 7ae620 visual services, GPU rendering/audio. Deferred gameplay: remaining enemy variants/AI/death FX, transitions, 72c430 item/controlled branches, 713120 D6 grant, profile content stops, native file save/Continue, target execution.',
+        'scope':'Focused owned session execution: normal New Run reaches an initialized player and repeated whole simulation ticks in its generated starting room. Each tick completes 414dc0 actor/player update, 6712a0 collision, the disabled 8d8470 particle gate, the 8798f0 room-effect cache Update and the primary projectile lifecycle using the evaluated shot vector and fireDelay/shotSpeed/damage/range stats; host evidence observes spawn, wall collision and range expiry. A stage-owned generated Gaper room constructs its actual spawn plan, advances the enemy, kills it with projectiles, sets room clear and opens a normal door. A cleared normal door accepts the player, constructs the exact linked resident (rocks and enemies), places the player at the reciprocal door and continues whole ticks. Native 72c430 executes the reached no-item timer/counter/direction state; 736d70 executes a bounded post-755870 tail through the 73891f state checks, effect-cache update, reached 747490/74ffa0 clean owner checks, no-item sprite anchors, first 7697a0 trail block and 7f0e50 no-callback return. Deferred presentation/room visuals: 747490/74ffa0 item/effect branches, full 739451/73d612 consumers, remaining 7ae620 visual services, GPU rendering/audio. Deferred gameplay: remaining enemy variants/AI/death FX, transitions, 72c430 item/controlled branches, 713120 D6 grant, profile content stops, native file save/Continue, target execution.',
         'sha256':{f.relative_to(ROOT).as_posix():hashlib.sha256(f.read_bytes()).hexdigest() for f in sorted(paths)}}
     (ROOT/'build/gameplay/result.json').write_text(json.dumps(packet,indent=2)+'\n')
 if __name__=='__main__':main()

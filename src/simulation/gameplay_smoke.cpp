@@ -54,6 +54,35 @@ unsigned int AdvanceToBoundary(PortGameSession& session,PortNormalRuntime& runti
     return steps;
 }
 }
+int RunTransitionProbe(NativeMt& random,PortFrontend& ui){
+    PortNormalRuntime* runtime=new PortNormalRuntime;PortGameSession session(random,ui);
+    PortSessionStart start=session.StartNormalCharacter(1,*runtime);
+    if(start.result!=NPS_WORLD_PENDING)return 31;
+    if(!AdvanceToBoundary(session,*runtime)||runtime->phase!=PNR_READY)return 32;
+    NativeWorldResident& live=runtime->world.resident[runtime->world.currentList];NativeRoomState* room=runtime->world.Current();
+    int slot=-1;float x=0,y=0;
+    if(live.doors)for(int i=0;i<8;++i)if((live.doors->attached&(1U<<i))&&live.doors->actors[i].state==2&&live.doors->actors[i].targetType==1){
+        float px,py;if(room->geometry.Position(live.doors->actors[i].grid,&px,&py)){slot=i;x=px+20.0f;y=py+20.0f;break;}
+    }
+    if(slot<0)return 33;
+    const int from=runtime->world.currentList;runtime->playerBody.position.x=x;runtime->playerBody.position.y=y;
+    for(int i=0;i<8&&runtime->roomTransitions==0;++i)if(!RunProjectileTicks(session,*runtime,-1,-1,1)){
+        printf("TRANSITION_PENDING next=%08x transitions=%u room=%d phase=%d issue=%d stage=%d type=%u variant=%u\n",
+            runtime->missingNativePrerequisite,runtime->roomTransitions,runtime->world.currentList,runtime->phase,
+            runtime->entryIssue.result,runtime->entryIssue.construction.stage,runtime->entryIssue.construction.type,
+            runtime->entryIssue.construction.variant);return 34;}
+    for(int i=0;i<3;++i)if(!RunProjectileTicks(session,*runtime,-1,-1,1))return 36;
+    NativeRoomState* entered=runtime->world.Current();NativeWorldResident& resident=runtime->world.resident[runtime->world.currentList];
+    const NativePlacedRoom* descriptor=runtime->world.CurrentDescriptor();
+    const int definition=descriptor?descriptor->definition:-1;
+    printf("TRANSITION seed=1 from=%d slot=%d to=%d definition=%d room=%d enemies=%d transitions=%u player=(%.9g,%.9g)\n",
+        from,slot,runtime->world.currentList,definition,entered?1:0,resident.enemies.count,runtime->roomTransitions,
+        runtime->playerBody.position.x,runtime->playerBody.position.y);
+    bool ok=runtime->roomTransitions==1&&runtime->world.currentList!=from&&entered&&definition>=0&&
+        runtime->playerBody.position.x>=entered->space.left&&runtime->playerBody.position.x<=entered->space.right&&
+        runtime->playerBody.position.y>=entered->space.top&&runtime->playerBody.position.y<=entered->space.bottom;
+    delete runtime;return ok?0:35;
+}
 int RunEncounterProbe(NativeMt& random,PortFrontend& ui){
     PortNormalRuntime* runtime=new PortNormalRuntime;PortGameSession session(random,ui);
     PortSessionStart start=session.StartNormalCharacter(1035486403,*runtime);
@@ -266,5 +295,6 @@ int main(int argc,char** argv){
             runtime->world.residentCount,runtime->missingNativePrerequisite,runtime->completePlayerInitializations,runtime->completePlayerTicks,random.index);
     }
     if(!failed){int encounter=RunEncounterProbe(random,ui);if(encounter){printf("ENCOUNTER_RESULT failed=%d\n",encounter);failed=true;}}
+    if(!failed){int transition=RunTransitionProbe(random,ui);if(transition){printf("TRANSITION_RESULT failed=%d\n",transition);failed=true;}}
     delete runtime;return failed?5:0;
 }

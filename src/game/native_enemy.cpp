@@ -5,12 +5,12 @@
 namespace {
 float Length(NativePoint p){return (float)sqrt((double)(p.x*p.x+p.y*p.y));}
 }
-NativeEnemy::NativeEnemy():ready(false),dead(false),seed(0){}
-bool NativeEnemy::Begin(int variant,unsigned int seed,const NativePoint& position,unsigned int frame,int stage){
-    if(variant<0||variant>1||!seed)return false;
+NativeEnemy::NativeEnemy():ready(false),dead(false),type(0),seed(0){}
+bool NativeEnemy::Begin(int type,int variant,unsigned int seed,const NativePoint& position,unsigned int frame,int stage){
+    if(!NativePreparedEnemyBody(type,variant)||!seed)return false;
     NativeEntityBody next;
-    if(next.BeginFresh(10,variant,0,seed,frame,stage,&position)!=NEB_OK)return false;
-    body.Swap(next);this->seed=seed;dead=false;ready=true;return true;
+    if(next.BeginFresh(type,variant,0,seed,frame,stage,&position)!=NEB_OK)return false;
+    body.Swap(next);this->type=type;this->seed=seed;dead=false;ready=true;return true;
 }
 void NativeEnemy::Update(const NativeRoomState& room,const NativeEntityBody& player){
     if(!ready||dead||body.removed||!player.ready)return;

@@ -856,7 +856,7 @@ void EntityBodies(const char* root){
             body.native2a0==0&&body.native2ec==1&&Bits(body.native2fc)==0x3f666666U,"entity-body-inherited-physics-and-base-HP-not-player-hearts");
         unsigned int hash=body.StateHash(),draw;
         Check(body.BeginFresh(1,variant,0,0,0,1)==NEB_BAD_REQUEST&&body.StateHash()==hash,"entity-body-zero-seed-atomic");
-        Check(body.BeginFresh(14,0,0,seeds[seed],0,1)==NEB_UNSUPPORTED_PROPERTIES&&body.StateHash()==hash,"entity-body-missing-properties-never-substitute-player");
+        Check(body.BeginFresh(11,0,0,seeds[seed],0,1)==NEB_UNSUPPORTED_PROPERTIES&&body.StateHash()==hash,"entity-body-missing-properties-never-substitute-player");
         Check(body.BeginFresh(1,variant,9,seeds[seed],0,1)==NEB_UNSUPPORTED_PROPERTIES&&body.StateHash()==hash,"entity-body-no-unimplemented-subtype-fallback");
         Check(body.random.Next(&draw)&&draw==NativeShift(seeds[seed],4,3,17),"entity-body-draw-uses-entity-owner-not-startup-bank-index35");
         const NativeEntityBodyProperties* props=NativePreparedPlayerBody(variant);

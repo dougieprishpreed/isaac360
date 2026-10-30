@@ -1,7 +1,7 @@
 #include "game_session.h"
 #include "native_room_update.h"
 #include <string.h>
-PortNormalRuntime::PortNormalRuntime():initialSaveFileWritten(false),phase(PNR_IDLE),missingNativePrerequisite(0),completePlayerInitializations(0),completePlayerTicks(0),completeWholeGameplayTicks(0),enemyKills(0),doorsOpened(0),tickFrame(0),playerTailTrailSegments(0),playerTailRenderCallbacks(0),playerTailTicks(0),roomEntryPrefixPrepared(false) {
+PortNormalRuntime::PortNormalRuntime():initialSaveFileWritten(false),phase(PNR_IDLE),missingNativePrerequisite(0),completePlayerInitializations(0),completePlayerTicks(0),completeWholeGameplayTicks(0),enemyKills(0),doorsOpened(0),roomTransitions(0),doorTransitionGrace(0),tickFrame(0),playerTailTrailSegments(0),playerTailRenderCallbacks(0),playerTailTicks(0),roomEntryPrefixPrepared(false) {
     memset(&run,0,sizeof(run));memset(&entryIssue,0,sizeof(entryIssue));
     gameRandom.Default();
 }
@@ -50,7 +50,7 @@ PortSessionStart PortGameSession::StartNormalCharacter(unsigned int seed,PortNor
         //Virtual Init, the reached resource/callback services and manager
         //registration have returned before006b4b5e generation begins.
         runtime.missingNativePrerequisite=0;runtime.phase=PNR_GENERATING;runtime.tickFrame=0;
-        runtime.completePlayerInitializations=runtime.completePlayerTicks=0;runtime.completeWholeGameplayTicks=0;runtime.enemyKills=runtime.doorsOpened=0;
+        runtime.completePlayerInitializations=runtime.completePlayerTicks=0;runtime.completeWholeGameplayTicks=0;runtime.enemyKills=runtime.doorsOpened=runtime.roomTransitions=0;runtime.doorTransitionGrace=0;
         runtime.playerTailTrailSegments=0;runtime.playerTailRenderCallbacks=0;runtime.playerTailTicks=0;}
     if(start.result==NPS_WORLD_PENDING)runtime.roomEntryPrefixPrepared=false;
     delete next;
@@ -134,12 +134,12 @@ NormalRunResult PortGameSession::AdvanceNormalSetup(PortNormalRuntime& runtime,c
     }
     frontend.CharacterStarted();return r==NWR_OK||r==NWR_CONSTRUCTION_GAP?NFR_PENDING:r==NWR_SOURCE_ERROR?NFR_MISSING_DATA:NFR_BAD_REQUEST;
 }
-NormalRunResult PortGameSession::TickNormal(PortNormalRuntime& runtime,const NativeSceneFiles&,NativeActionSource* actions){
+NormalRunResult PortGameSession::TickNormal(PortNormalRuntime& runtime,const NativeSceneFiles& files,NativeActionSource* actions){
     if(runtime.phase!=PNR_READY||runtime.world.currentList<0||runtime.world.currentList>=kNativeWorldRoomLimit)return NFR_BAD_REQUEST;
     NativeWorldResident& live=runtime.world.resident[runtime.world.currentList];
     if(!live.update||!runtime.playerBody.ready)return NFR_BAD_REQUEST;
     ++runtime.tickFrame;runtime.history.fields.Put(0x1a2e1c,runtime.tickFrame);
-    if(!live.update->TickActors(runtime,actions,&runtime.missingNativePrerequisite))return NFR_PENDING;
+    if(!live.update->TickActors(runtime,actions,&files,&globalRandom,&runtime.missingNativePrerequisite))return NFR_PENDING;
     runtime.missingNativePrerequisite=0;return NFR_OK;
 }
 PortSessionStart PortGameSession::StartNormalCharacter(unsigned int seed,NormalRunFlow& flow) {

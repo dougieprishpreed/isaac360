@@ -2,6 +2,8 @@
 #define GENERIC_NATIVE_ROOM_UPDATE_H
 #include <set>
 struct PortNormalRuntime;
+struct NativeSceneFiles;
+struct NativeMt;
 class NativeActionSource;
 //Live Room::Init/Update owners; a suspended call retains its grid cursor.
 class NativeRoomUpdate {
@@ -16,7 +18,7 @@ public:
     //Repeated whole gameplay tick for the owned resident: actor PreUpdate,
     //player Update and the reached grid collision response. Room-specific
     //presentation/audio services remain separate owners.
-    bool TickActors(PortNormalRuntime&,NativeActionSource*,unsigned int* next);
-    bool TickSimulationTail(PortNormalRuntime&,NativeActionSource*,unsigned int* next);
+    bool TickActors(PortNormalRuntime&,NativeActionSource*,const NativeSceneFiles*,NativeMt*,unsigned int* next);
+    bool TickSimulationTail(PortNormalRuntime&,NativeActionSource*,const NativeSceneFiles*,NativeMt*,unsigned int* next);
 };
 #endif
