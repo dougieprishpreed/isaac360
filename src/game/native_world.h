@@ -67,6 +67,10 @@ public:
     //Explicit native factory boundary; caller supplies the current global MT
     //owner after all preceding Init work. Does not assume a run-seed bootstrap.
     NativeDoorResult PrepareDoorActors(NativeMt&,unsigned int frame);
+    //Presentation binding for the current resident after a transition or
+    //reentry. Unsupported visual targets keep their actor/collision state and
+    //are counted as explicit gaps; they do not fail the resident.
+    NativeDoorResult PrepareDoorVisuals(int stage,int stageType,int nativeMode,int challenge,const NativePlayerState&);
     NativeWorldResult PreparePerimeter(NativeMt&,unsigned int frame);
     NativeWorldResult ContinueInitialRoom(NormalRunFlow&,const NativePlayerState&,const NativeEntityBody&,const NativePlayerCreation&,NativePlayerManager&,const NativeRoomFx&,NativeMt&,unsigned int* nextAddress);
     bool CaptureInitialRoom(unsigned int* nextAddress); //79d610, before6fca60.

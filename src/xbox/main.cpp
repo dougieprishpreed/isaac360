@@ -8,6 +8,7 @@
 #include "../game/game_session.h"
 #include "../game/native_room_view.h"
 #include "../game/native_room_background.h"
+#include "../game/native_door_resources.h"
 #include "frontend_assets.h"
 #include "gameplay_atlas_data.h"
 #include "sprite_vs.h"
@@ -168,7 +169,15 @@ static void DrawBackground(){
     if(!gGameplayAtlas)return;
     if(gNormalRuntime.world.currentList<0||gNormalRuntime.world.currentList>=kNativeWorldRoomLimit)return;
     NativeWorldResident& live=gNormalRuntime.world.resident[gNormalRuntime.world.currentList];
-    if(!live.view||!live.view->background.ready||!live.view->background.definition)return;
+    //Transitioned residents are constructed by EnterLinked without the initial
+    //Room::Init presentation block. Prepare the same original background
+    //commands lazily; this never advances simulation or RNG.
+    if(!live.view)live.view=new NativeRoomView;
+    if(live.room&&!live.view->background.ready){
+        const NativePlacedRoom* descriptor=gNormalRuntime.world.CurrentDescriptor();
+        if(descriptor)live.view->background.Prepare(*live.room,live.backdrop,descriptor->seeds.spawn);
+    }
+    if(!live.view->background.ready||!live.view->background.definition)return;
     const NativeRoomBackground& background=live.view->background;
     int ox,oy;if(!BackdropAtlasRect(background.definition->id,&ox,&oy))return;
     //Floor and wall commands both address the original backdrop sheet. The
@@ -216,6 +225,93 @@ static void DrawPlayer(){
             w,h,(float)kGameplayAtlasWidth,(float)kGameplayAtlasHeight);
     }
 }
+static void DrawDoors(){
+    if(!gGameplayAtlas||gNormalRuntime.world.currentList<0||gNormalRuntime.world.currentList>=kNativeWorldRoomLimit)return;
+    NativeWorldResident& live=gNormalRuntime.world.resident[gNormalRuntime.world.currentList];
+    if(!live.room||!live.doors||!live.view||!live.view->background.ready)return;
+    bool needsVisuals=!live.doorVisuals;
+    if(live.doorVisuals)for(int slot=0;slot<8;++slot)if((live.doors->attached&(1U<<slot))&&
+        !live.doorVisuals[slot].ready&&!live.doorVisuals[slot].unsupportedTarget){needsVisuals=true;break;}
+    if(needsVisuals)gNormalRuntime.world.PrepareDoorVisuals(gNormalRuntime.run.context.stage,
+        gNormalRuntime.run.context.stageType,gNormalRuntime.run.context.nativeMode,gNormalRuntime.run.context.challenge,
+        gNormalRuntime.playerState);
+    if(!live.doorVisuals)return;
+    const NativeRoomBackground& background=live.view->background;
+    const NativeRoomSpace& space=live.room->space;
+    const float roomW=background.right-background.left,worldW=space.right-space.left;
+    const float roomH=background.bottom-background.top,worldH=space.bottom-space.top;
+    if(worldW<=0||worldH<=0)return;
+    for(int slot=0;slot<8;++slot){
+        if(!(live.doors->attached&(1U<<slot)))continue;
+        NativeDoorVisual& visual=live.doorVisuals[slot];
+        if(!visual.ready||!visual.main.asset)continue;
+        if(visual.main.layerSheets.empty()||strstr(visual.main.layerSheets[0].path.c_str(),"door_01_normaldoor")==0)continue;
+        float wx,wy;if(!live.room->geometry.Position(live.doors->actors[slot].grid,&wx,&wy))continue;
+        const float px=background.left+(wx+20.0f-space.left)*roomW/worldW;
+        const float py=background.top+(wy+20.0f-space.top)*roomH/worldH;
+        for(unsigned int i=0;i<visual.main.asset->layerCount;++i){
+            const NativeSpriteFrame* f=visual.main.LayerFrame(visual.main.asset->layers[i].id);
+            if(!f||!f->visible)continue;
+            const float cropX=Bits(f->geometry[0]),cropY=Bits(f->geometry[1]);
+            const float w=Bits(f->geometry[2]),h=Bits(f->geometry[3]);
+            const float offX=Bits(f->geometry[4]),offY=Bits(f->geometry[5]);
+            float scaleX=Bits(f->geometry[6]),scaleY=Bits(f->geometry[7]);
+            const float pivotX=Bits(f->geometry[8]),pivotY=Bits(f->geometry[9]);
+            if(w<=0||h<=0)continue;
+            if(scaleX==0||scaleY==0){scaleX=scaleY=1;}
+            const float x=px+(offX-pivotX)*fabsf(scaleX),y=py+(offY-pivotY)*fabsf(scaleY);
+            const float dw=w*fabsf(scaleX),dh=h*fabsf(scaleY);
+            TexRect(gGameplayAtlas,x,y,dw,dh,cropX+(float)kGameplayDoornormalX,cropY+(float)kGameplayDoornormalY,
+                w,h,(float)kGameplayAtlasWidth,(float)kGameplayAtlasHeight);
+        }
+    }
+}
+static void DrawRocks(){
+    if(!gGameplayAtlas||gNormalRuntime.world.currentList<0||gNormalRuntime.world.currentList>=kNativeWorldRoomLimit)return;
+    NativeWorldResident& live=gNormalRuntime.world.resident[gNormalRuntime.world.currentList];
+    if(!live.room||!live.view||!live.view->background.ready)return;
+    const NativeRoomBackground& background=live.view->background;
+    const NativeRoomSpace& space=live.room->space;
+    const float roomW=background.right-background.left,worldW=space.right-space.left;
+    const float roomH=background.bottom-background.top,worldH=space.bottom-space.top;
+    if(worldW<=0||worldH<=0)return;
+    const float cellW=40.0f*roomW/worldW,cellH=40.0f*roomH/worldH;
+    for(int i=0;i<live.room->staticGridCount;++i){
+        const NativeStaticGrid& g=live.room->staticGrids[i];
+        if(g.type!=1000&&g.type!=1002)continue;
+        float wx,wy;if(!live.room->geometry.Position(g.grid,&wx,&wy))continue;
+        const float px=background.left+(wx-space.left)*roomW/worldW;
+        const float py=background.top+(wy-space.top)*roomH/worldH;
+        const int sx=g.type==1002?0:(g.variant&3)*32;
+        const int sy=g.type==1002?32:0;
+        TexRect(gGameplayAtlas,px,py,cellW,cellH,(float)(kGameplayRocksbasementX+sx),
+            (float)(kGameplayRocksbasementY+sy),32,32,(float)kGameplayAtlasWidth,(float)kGameplayAtlasHeight);
+    }
+}
+static void DrawEnemies(){
+    if(!gGameplayAtlas||gNormalRuntime.world.currentList<0||gNormalRuntime.world.currentList>=kNativeWorldRoomLimit)return;
+    NativeWorldResident& live=gNormalRuntime.world.resident[gNormalRuntime.world.currentList];
+    if(!live.room||!live.view||!live.view->background.ready)return;
+    const NativeRoomBackground& background=live.view->background;
+    const NativeRoomSpace& space=live.room->space;
+    const float roomW=background.right-background.left,worldW=space.right-space.left;
+    const float roomH=background.bottom-background.top,worldH=space.bottom-space.top;
+    if(worldW<=0||worldH<=0)return;
+    for(int i=0;i<live.enemies.count;++i){
+        NativeEnemy* enemy=live.enemies.entries[i];
+        if(!enemy||!enemy->ready||enemy->dead)continue;
+        int sx=0,sy=0;
+        if(enemy->type==10){sx=kGameplayGaperX;sy=kGameplayGaperY;}
+        else if(enemy->type==13){sx=kGameplayFlyX;sy=kGameplayFlyY;}
+        else if(enemy->type==14){sx=kGameplayPooterX;sy=kGameplayPooterY;}
+        else if(enemy->type==208){sx=kGameplayFattyX;sy=kGameplayFattyY;}
+        else continue;
+        const float px=background.left+(enemy->body.position.x-space.left)*roomW/worldW;
+        const float py=background.top+(enemy->body.position.y-space.top)*roomH/worldH;
+        TexRect(gGameplayAtlas,px-32,py-48,64,64,(float)sx,(float)sy,64,64,
+            (float)kGameplayAtlasWidth,(float)kGameplayAtlasHeight);
+    }
+}
 static void DrawProjectiles(){
     if(!gGameplayAtlas||gNormalRuntime.world.currentList<0||gNormalRuntime.world.currentList>=kNativeWorldRoomLimit)return;
     NativeWorldResident& live=gNormalRuntime.world.resident[gNormalRuntime.world.currentList];
@@ -253,7 +349,7 @@ static void DrawHud(){
         (float)kGameplayAtlasWidth,(float)kGameplayAtlasHeight);
 }
 static void Gameplay(){
-    DrawBackground();DrawProjectiles();DrawPlayer();DrawHud();
+    DrawBackground();DrawDoors();DrawRocks();DrawEnemies();DrawPlayer();DrawProjectiles();DrawHud();
     gDevice->SetTexture(0,gAtlas);
 }
 static void Anim(int id,int frame,float x,float y,float scale=kFrontendScale,float angle=0,const int* itemIcon=0,DWORD tint=0xffffffff,bool flipX=false,const float* extraAdd=0) {
@@ -371,7 +467,12 @@ VOID __cdecl main() {
             //Native profile disk format and complete run persistence remain open.
             if(action==UI_SELECT_SLOT){gUi.profile=gProfiles[gUi.selectedSlot];gUi.SlotLoaded(true,false);}
             if(action==UI_DELETE_SLOT){ZeroMemory(&gProfiles[gUi.selectedSlot],sizeof(NativeProfile));gUi.SlotDeleted(true);}
-            if(action==UI_START_CHARACTER){unsigned int runSeed=GetTickCount();if(!runSeed)runSeed=1;PortSessionStart start=PortGameSession(gMenuRandom,gUi).StartNormalCharacter(runSeed,gNormalRuntime);Log("PORT normal setup result=%d seed=%u player=%d",start.result,runSeed,start.player);}
+            if(action==UI_START_CHARACTER){unsigned int runSeed=0;
+                //Optional local QA seed; absent in ordinary release layouts.
+                FILE* seedFile=fopen("game:\\port\\target_seed.txt","rb");
+                if(seedFile){if(fscanf(seedFile,"%u",&runSeed)!=1)runSeed=0;fclose(seedFile);}
+                if(!runSeed)runSeed=GetTickCount();if(!runSeed)runSeed=1;
+                PortSessionStart start=PortGameSession(gMenuRandom,gUi).StartNormalCharacter(runSeed,gNormalRuntime);Log("PORT normal setup result=%d seed=%u player=%d",start.result,runSeed,start.player);}
             if(gUi.characterPending){const NormalRunFlow& run=gNormalRuntime.run;
                 NativeSceneFiles files={"game:\\game\\file_index.bin","game:\\game\\",run.context.stageType+1,run.context.nativeMode,0};
                 NormalRunResult result=PortGameSession(gMenuRandom,gUi).AdvanceNormalSetup(gNormalRuntime,files,&frameActions);
@@ -381,10 +482,24 @@ VOID __cdecl main() {
             if(gNormalRuntime.phase==PNR_READY){
                 static bool readyLogged=false;
                 if(!readyLogged){NativeWorldResident& first=gNormalRuntime.world.resident[gNormalRuntime.world.currentList];
-                    Log("PORT normal ready ticks=0 playerToken=%08x doorVisualGaps=%d",gNormalRuntime.playerBody.entityToken,first.doorVisualGaps);readyLogged=true;}
+                    Log("PORT normal ready ticks=0 playerToken=%08x doorVisualGaps=%d",gNormalRuntime.playerBody.entityToken,first.doorVisualGaps);
+                    if(first.doors)for(int slot=0;slot<8;++slot)if(first.doors->attached&(1U<<slot)){
+                        const NativeDoorActor& door=first.doors->actors[slot];const NativePlacedRoom* target=gNormalRuntime.world.layout.DoorTarget(gNormalRuntime.world.currentList,slot);
+                        float wx=0,wy=0;if(first.room)first.room->geometry.Position(door.grid,&wx,&wy);
+                        Log("PORT door slot=%d grid=%d pos=(%.1f,%.1f) target=%d definition=%d state=%d",slot,door.grid,wx,wy,
+                            door.targetType,target?target->definition:-1,door.state);}
+                    readyLogged=true;}
                 const NormalRunFlow& run=gNormalRuntime.run;
                 NativeSceneFiles files={"game:\\game\\file_index.bin","game:\\game\\",run.context.stageType+1,run.context.nativeMode,0};
                 NormalRunResult tick=PortGameSession(gMenuRandom,gUi).TickNormal(gNormalRuntime,files,&frameActions);
+                static unsigned int lastTickPrerequisite=0;
+                if(tick==NFR_PENDING&&gNormalRuntime.missingNativePrerequisite&&gNormalRuntime.missingNativePrerequisite!=lastTickPrerequisite){
+                    Log("PORT normal tick pending prerequisite=%08x",gNormalRuntime.missingNativePrerequisite);lastTickPrerequisite=gNormalRuntime.missingNativePrerequisite;
+                    if(gNormalRuntime.missingNativePrerequisite==0x6f3b30)
+                        Log("PORT transition issue result=%d source=%d construction=%d choice=%d type=%u variant=%u subtype=%u",
+                            gNormalRuntime.entryIssue.result,gNormalRuntime.entryIssue.source,gNormalRuntime.entryIssue.construction.stage,
+                            gNormalRuntime.entryIssue.construction.choice,gNormalRuntime.entryIssue.construction.type,
+                            gNormalRuntime.entryIssue.construction.variant,gNormalRuntime.entryIssue.construction.subtype);}
                 if(gNormalRuntime.tickFrame%30==0){
                     NativeWorldResident& live=gNormalRuntime.world.resident[gNormalRuntime.world.currentList];
                     Log("PORT normal tick=%u result=%d pos=(%.2f,%.2f) hp=%d/%d soul=%d enemies=%d clear=%d hits=%u transitions=%u",

@@ -11,7 +11,8 @@ const NativeSpriteAsset* NativePreparedDoorSprite(unsigned int i){return i<sizeo
 const NativeSpriteSheet* NativePreparedDoorSheet(unsigned int i){return i<sizeof(kDoorSheets)/sizeof(kDoorSheets[0])?kDoorSheets+i:0;}
 bool NativeDoorVisual::BindFresh(NativeDoorActor& door,int backdrop,unsigned int fromFlags,unsigned int toFlags,const NativePlayerState& player){
     nextAddress=0x6c8140;unsupportedTarget=false;
-    if(ready||!door.initialized||door.sourceType!=1||door.targetGrid<0||door.state!=1||door.variant!=8||backdrop<1||backdrop>2)return false;
+    if(ready||!door.initialized||door.sourceType!=1||door.targetGrid<0||door.state!=1||backdrop<1||backdrop>2)return false;
+    if(door.variant!=8){unsupportedTarget=true;return false;}
     int kind=door.targetType;const NativeSpriteAsset* asset=0;const char* replace=0;int trinket;
     //6c842c..8468: no secret endpoint;6c80b0=0 for these real definitions.
     //No labyrinth curse, alternate stage, custom definition or late chapter.

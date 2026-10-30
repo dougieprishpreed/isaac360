@@ -2,6 +2,7 @@
 #include "native_room_effects.h"
 #include "native_room_view.h"
 #include "native_door_resources.h"
+#include "native_player_state.h"
 #include "native_persistence.h"
 #include "native_room_update.h"
 #include <string.h>
@@ -114,6 +115,30 @@ NativeDoorResult NativeWorld::PrepareDoorActors(NativeMt& owner,unsigned int fra
         room->collision.Set(grid,true,0,1000,16);
     }
     r.doors=doors;return NDR_OK;
+}
+NativeDoorResult NativeWorld::PrepareDoorVisuals(int stage,int stageType,int nativeMode,int challenge,const NativePlayerState& player) {
+    NativeRoomState* room=Current();const NativePlacedRoom* p=CurrentDescriptor();
+    if(!room||!p||currentList<0||currentList>=kNativeWorldRoomLimit||!resident[currentList].doors)return NDR_BAD_REQUEST;
+    NativeWorldResident& live=resident[currentList];
+    if(!live.doorVisuals)live.doorVisuals=new NativeDoorVisual[8];
+    for(int slot=0;slot<8;++slot)if(live.doors->attached&(1U<<slot)){
+        NativeDoorVisual& v=live.doorVisuals[slot];if(v.ready)continue;
+        const NativePlacedRoom* target=layout.DoorTarget(currentList,slot);
+        const NativeRoomDef* d=target?NativeRoom(target->definition):0;if(!d)return NDR_MISSING_TARGET;
+        NativeDoorBinding c={0};c.sourceType=room->type;c.targetType=d->type;
+        c.sourceVariant=room->variant;c.targetVariant=d->variant;c.sourceFlags=p->flags;c.targetFlags=target->flags;
+        c.stage=stage;c.stageType=stageType;c.nativeMode=nativeMode;
+        c.currentGrid=currentGrid;c.targetGrid=p->doorTargets[slot];c.dimension=layout.currentDimension;
+        c.treasureGrid=-1;c.generatedRoomCount=layout.count;c.challenge=challenge;c.sourceData=c.targetData=true;
+        if(SelectDoorVariant(slot,c)!=NDR_OK)return NDR_BAD_REQUEST;
+        if(!v.BindFresh(live.doors->actors[slot],live.backdrop,p->flags,target->flags,player)){
+            live.doorFailureSlot=slot;live.doorFailureKind=live.doors->actors[slot].targetType;
+            live.doorFailureVariant=live.doors->actors[slot].variant;live.doorFailureAux=live.doors->actors[slot].auxiliary;
+            if(v.unsupportedTarget){++live.doorVisualGaps;continue;}
+            return NDR_BAD_REQUEST;
+        }
+    }
+    return NDR_OK;
 }
 NativeDoorResult NativeWorld::SelectDoorVariant(int slot,const NativeDoorBinding& c) {
     const NativePlacedRoom* source=CurrentDescriptor();
