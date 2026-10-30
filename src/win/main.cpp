@@ -43,7 +43,10 @@ static bool CreateHiddenWindow(bool hidden){
     if(!RegisterClassA(&wc)&&GetLastError()!=ERROR_CLASS_ALREADY_EXISTS)return false;
     gWindow=CreateWindowExA(0,"Boi360WindowsTarget","boi360 Windows target",WS_POPUP,0,0,kWidth,kHeight,0,0,wc.hInstance,0);
     if(!gWindow)return false;
-    if(!hidden){ShowWindow(gWindow,SW_SHOW);UpdateWindow(gWindow);}
+    //A D3D9 window must be shown for reliable presentation. Keep automated
+    //runs off-screen and non-activating so they never steal keyboard focus.
+    if(hidden){SetWindowPos(gWindow,0,-32000,-32000,0,0,SWP_NOSIZE|SWP_NOZORDER|SWP_NOACTIVATE);ShowWindow(gWindow,4);}
+    else{ShowWindow(gWindow,SW_SHOW);UpdateWindow(gWindow);}
     return true;
 }
 static bool InitD3D(){
@@ -80,7 +83,7 @@ static bool LoadAtlas(){
     }
     gAtlas->UnlockRect(0);delete[] data;D3DSURFACE_DESC ad;gAtlas->GetLevelDesc(0,&ad);Log("WIN gameplay atlas loaded %ux%u",ad.Width,ad.Height);return true;
 }
-struct Vertex{float x,y,z,rhw,u,v;DWORD color;};
+struct Vertex{float x,y,z,rhw;DWORD color;float u,v;};
 static const DWORD kFVF=D3DFVF_XYZRHW|D3DFVF_TEX1|D3DFVF_DIFFUSE;
 static float Bits(unsigned int u){float f;memcpy(&f,&u,4);return f;}
 static void TexQuad(const float* xy,const float* uv,float texW,float texH,DWORD color){
@@ -226,6 +229,18 @@ static bool SaveBMP(const char* path){
     for(int y=kHeight-1;y>=0;--y)fwrite((unsigned char*)lr.pBits+y*lr.Pitch,1,kWidth*4,f);
     fclose(f);gSystem->UnlockRect();return true;
 }
+static bool SaveWindowBMP(const char* path){
+    RECT rc;if(!GetClientRect(gWindow,&rc))return false;int w=rc.right-rc.left,h=rc.bottom-rc.top;if(w<=0||h<=0)return false;
+    HDC dc=GetDC(gWindow);if(!dc)return false;HDC mem=CreateCompatibleDC(dc);HBITMAP bmp=CreateCompatibleBitmap(dc,w,h);
+    if(!mem||!bmp){if(mem)DeleteDC(mem);if(bmp)DeleteObject(bmp);ReleaseDC(gWindow,dc);return false;}
+    HGDIOBJ old=SelectObject(mem,bmp);BOOL ok=PrintWindow(gWindow,mem,3);SelectObject(mem,old);
+    BITMAPINFO info;ZeroMemory(&info,sizeof(info));info.bmiHeader.biSize=sizeof(BITMAPINFOHEADER);
+    info.bmiHeader.biWidth=w;info.bmiHeader.biHeight=h;info.bmiHeader.biPlanes=1;info.bmiHeader.biBitCount=32;info.bmiHeader.biCompression=BI_RGB;
+    unsigned char* pixels=new unsigned char[w*h*4];bool got=ok&&GetDIBits(mem,bmp,0,h,pixels,&info,DIB_RGB_COLORS)!=0;
+    if(got){FILE* f=fopen(path,"wb");if(f){BITMAPFILEHEADER bf;ZeroMemory(&bf,sizeof(bf));bf.bfType=0x4d42;bf.bfOffBits=sizeof(bf)+sizeof(BITMAPINFOHEADER);bf.bfSize=bf.bfOffBits+w*h*4;
+        fwrite(&bf,1,sizeof(bf),f);fwrite(&info.bmiHeader,1,sizeof(BITMAPINFOHEADER),f);fwrite(pixels,1,w*h*4,f);fclose(f);}else got=false;}
+    delete[] pixels;DeleteObject(bmp);DeleteDC(mem);ReleaseDC(gWindow,dc);return got;
+}
 struct Segment{int first,last;bool held[12];Segment(){first=last=0;memset(held,0,sizeof(held));}};
 static bool ParseScript(const char* text,std::vector<Segment>& out){
     const char* p=text;while(p&&*p){int a=atoi(p);while(*p&&*p!=':')++p;if(*p==':')++p;int b=atoi(p);while(*p&&*p!=':')++p;if(*p==':')++p;
@@ -253,12 +268,13 @@ static void BuildActions(const bool* held,unsigned int frame,NativeActionFrame* 
     for(int i=0;i<12;++i)gPrev[i]=held[i];
 }
 int main(int argc,char** argv){
-    unsigned int seed=1;int frames=0,shotFrame=-1;bool hidden=false,fast=false,interactive=true,teleport=false,rewardTest=false;const char* scriptText=0;const char* shotFile="build/windows/frame.bmp";
+    unsigned int seed=1;int frames=0,shotFrame=-1;bool hidden=false,fast=false,interactive=true,teleport=false,rewardTest=false,windowShot=false;const char* scriptText=0;const char* shotFile="build/windows/frame.bmp";
     for(int i=1;i<argc;++i){if(!strcmp(argv[i],"--seed")&&i+1<argc)seed=(unsigned int)strtoul(argv[++i],0,10);
         else if(!strcmp(argv[i],"--frames")&&i+1<argc)frames=atoi(argv[++i]);else if(!strcmp(argv[i],"--hidden"))hidden=true;
         else if(!strcmp(argv[i],"--fast"))fast=true;else if(!strcmp(argv[i],"--script")&&i+1<argc){scriptText=argv[++i];interactive=false;}
         else if(!strcmp(argv[i],"--shot-frame")&&i+1<argc)shotFrame=atoi(argv[++i]);else if(!strcmp(argv[i],"--shot-file")&&i+1<argc)shotFile=argv[++i];
-        else if(!strcmp(argv[i],"--teleport-pickups"))teleport=true;else if(!strcmp(argv[i],"--reward-test"))rewardTest=true;}
+        else if(!strcmp(argv[i],"--teleport-pickups"))teleport=true;else if(!strcmp(argv[i],"--reward-test"))rewardTest=true;
+        else if(!strcmp(argv[i],"--window-shot"))windowShot=true;}
     CreateDirectoryA("build\\windows",0);CreateDirectoryA("build\\windows\\profile",0);gLog=fopen("build/windows/port.log","wt");
     std::vector<Segment> script;if(scriptText)ParseScript(scriptText,script);
     if(!CreateHiddenWindow(hidden)||!InitD3D())return 2;
@@ -299,8 +315,8 @@ int main(int argc,char** argv){
                 frame,runtime.phase,d?d->definition:-1,runtime.world.currentList,live.activations,runtime.playerBody.position.x,runtime.playerBody.position.y,runtime.playerState.redHearts,runtime.playerState.maxRedHearts,runtime.playerState.soulHearts,
                 live.enemies.count,live.pickups.count,runtime.pickupsCollected,runtime.playerState.coins,runtime.playerState.keys,runtime.playerState.bombs,runtime.roomTransitions);}
         Render();
+        if(frame==shotFrame){bool ok=windowShot?SaveWindowBMP(shotFile):SaveBMP(shotFile);Log("WIN screenshot frame=%d file=%s ok=%d",frame,shotFile,ok?1:0);}
         gDevice->Present(0,0,0,0);
-        if(frame==shotFrame){bool ok=SaveBMP(shotFile);Log("WIN screenshot frame=%d file=%s ok=%d",frame,shotFile,ok?1:0);}
         ++frame;
         if(!fast)Sleep(33);else Sleep(0);
     }

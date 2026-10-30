@@ -25,7 +25,7 @@ Original game data belongs in `boi360\game`, the repository root's `game/` direc
 
 ## Windows gameplay target
 
-`build/windows/boi360.exe` runs the same shared runtime directly on Windows with in-process keyboard/scripted input, no emulator focus and fast fixed-step execution. Build it with `tools/build_windows_target.ps1`. See `docs/WINDOWS_TARGET.md`. The target currently renders through a D3D9 adapter whose screenshot readback is still open, but gameplay state, transitions, pickups and rewards are directly observable in `build/windows/port.log`.
+`build/windows/boi360.exe` runs the same shared runtime directly on Windows with in-process keyboard/scripted input, no emulator focus and fast fixed-step execution. Build it with `tools/build_windows_target.ps1`. See `docs/WINDOWS_TARGET.md`. It renders the actual room, player, enemy, pickup and HUD art from the original assets and can save verified screenshots.
 
 ## Windows host verification
 
