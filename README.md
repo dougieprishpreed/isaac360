@@ -12,7 +12,7 @@ Resource readers, level generation, room components and the normal player lifecy
 
 The full native player-update presentation/effect tail, combat, room transitions, progression, save/Continue and complete presentation and audio remain unfinished. Passing host checks does not establish Xbox 360 playability.
 
-XEX builds and Xenia testing are scheduled to resume after the initial gameplay milestone. Physical-console testing remains necessary before release acceptance.
+The shared sources now compile into an Xbox 360 XEX with the installed XDK. Target execution, rendered-content and physical-console testing remain outstanding; no Xenia runtime was available for this pass.
 
 ## Development requirements
 
