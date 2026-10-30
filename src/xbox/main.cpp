@@ -369,6 +369,13 @@ static void DrawProjectiles(){
         TexRect(gGameplayAtlas,px-16,py-16,32,32,(float)kGameplayTearsX,(float)kGameplayTearsY,32,32,
             (float)kGameplayAtlasWidth,(float)kGameplayAtlasHeight);
     }
+    for(unsigned int i=0;i<gNormalRuntime.enemyShots.active.size();++i){
+        const NativeEnemyShot& p=gNormalRuntime.enemyShots.active[i];
+        const float px=background.left+(p.position.x-space.left)*roomW/worldW;
+        const float py=background.top+(p.position.y-space.top)*roomH/worldH;
+        TexRect(gGameplayAtlas,px-14,py-14,28,28,(float)(kGameplayTearsX+128),(float)(kGameplayTearsY+64),32,32,
+            (float)kGameplayAtlasWidth,(float)kGameplayAtlasHeight);
+    }
 }
 static void DrawHud(){
     if(!gGameplayAtlas||!gNormalRuntime.playerState.ready)return;

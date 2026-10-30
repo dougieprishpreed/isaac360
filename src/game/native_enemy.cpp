@@ -1,9 +1,25 @@
 #include "native_enemy.h"
+#include "native_projectile.h"
 #include "native_room_state.h"
 #include <math.h>
 #include <string.h>
 namespace {
 float Length(NativePoint p){return (float)sqrt((double)(p.x*p.x+p.y*p.y));}
+//Advance with the room collision owner, sliding along one axis when the
+//diagonal destination is blocked. Ordinary floor/solid classes are unchanged
+//from the previous actor update.
+bool Passable(const NativeRoomState& room,float x,float y){
+    int collision=0;NativePoint at={x,y};
+    return room.collision.AtPosition(room.geometry,at,room.space.zeroCollision,&collision)&&(collision==0||collision==5);
+}
+void MoveBody(const NativeRoomState& room,NativeEntityBody& body,float vx,float vy){
+    body.velocity.x=vx;body.velocity.y=vy;
+    if(Passable(room,body.position.x+vx,body.position.y+vy)){
+        body.position.x+=vx;body.position.y+=vy;return;
+    }
+    if(Passable(room,body.position.x+vx,body.position.y)){body.position.x+=vx;return;}
+    if(Passable(room,body.position.x,body.position.y+vy)){body.position.y+=vy;}
+}
 }
 NativeEnemy::NativeEnemy():ready(false),dead(false),type(0),seed(0){}
 bool NativeEnemy::Begin(int type,int variant,unsigned int seed,const NativePoint& position,unsigned int frame,int stage){
@@ -12,17 +28,54 @@ bool NativeEnemy::Begin(int type,int variant,unsigned int seed,const NativePoint
     if(next.BeginFresh(type,variant,0,seed,frame,stage,&position)!=NEB_OK)return false;
     body.Swap(next);this->type=type;this->seed=seed;dead=false;ready=true;return true;
 }
-void NativeEnemy::Update(const NativeRoomState& room,const NativeEntityBody& player){
+void NativeEnemy::Update(const NativeRoomState& room,const NativeEntityBody& player,NativeEnemyShotSystem* shots){
     if(!ready||dead||body.removed||!player.ready)return;
     NativePoint delta={player.position.x-body.position.x,player.position.y-body.position.y};
-    float distance=Length(delta);
-    if(distance>0.0f){
-        float speed=distance>20.0f?0.65f:0.0f;
-        body.velocity.x=delta.x/distance*speed;body.velocity.y=delta.y/distance*speed;
-        NativePoint next={body.position.x+body.velocity.x,body.position.y+body.velocity.y};
-        int collision=0;
-        if(room.collision.AtPosition(room.geometry,next,room.space.zeroCollision,&collision)&&(collision==0||collision==5))body.position=next;
+    const float distance=Length(delta);
+    const float dx=distance>0.0f?delta.x/distance:0.0f;
+    const float dy=distance>0.0f?delta.y/distance:0.0f;
+    const int phase=(int)body.time;
+    const unsigned int salt=seed&63U;
+    float vx=0.0f,vy=0.0f;
+    if(type==13){
+        //Fly: fast erratic drift with a per-entity phase offset.
+        const float wobble=sinf(phase*0.45f+(float)salt*0.19f);
+        const float sway=cosf(phase*0.37f+(float)salt*0.11f);
+        vx=(dx*0.75f+wobble*0.85f)*0.85f;
+        vy=(dy*0.75f+sway*0.85f)*0.85f;
+    }else if(type==14){
+        //Pooter: hold a firing distance and shoot at the player on its own
+        //cadence. The shot owner advances in the room tick.
+        const float want=120.0f;
+        const float approach=distance<want-24.0f?-1.0f:(distance>want+24.0f?1.0f:0.0f);
+        vx=dx*approach*0.40f;vy=dy*approach*0.40f;
+        if(shots&&distance>8.0f&&distance<440.0f&&((phase+(int)salt)%90)==0){
+            NativePoint origin={body.position.x+dx*20.0f,body.position.y+dy*20.0f};
+            shots->Fire(origin,dx*3.4f,dy*3.4f,1.0f,7.0f,240,body.entityToken);
+        }
+    }else if(type==208){
+        //Fatty: slow walk, with a periodic lunge toward the player.
+        const int cycle=phase%150;
+        if(cycle==0&&distance>0.0f){vx=dx*2.4f;vy=dy*2.4f;}
+        else if(cycle<18){vx=body.velocity.x*0.92f;vy=body.velocity.y*0.92f;}
+        else{vx=dx*0.30f;vy=dy*0.30f;}
+    }else if(type==226){
+        //Skinny/Rotty: charge windows separated by short recovery.
+        const int cycle=phase%70;const float speed=body.variant==1?1.55f:1.10f;
+        if(cycle>=16&&cycle<46){vx=dx*speed;vy=dy*speed;}
+        else{vx=dx*0.22f;vy=dy*0.22f;}
+    }else if(type==284){
+        //Cyclopia: longer wind-up, then a committed charge.
+        const int cycle=phase%110;
+        if(cycle>=20&&cycle<58){vx=dx*1.05f;vy=dy*1.05f;}
+        else if(cycle<20){vx=0.0f;vy=0.0f;}
+        else{vx=dx*0.30f;vy=dy*0.30f;}
+    }else{
+        //Gaper family walk with a short periodic pause.
+        const int cycle=phase%80;
+        if(distance>18.0f&&!(cycle>=52&&cycle<62)){vx=dx*0.55f;vy=dy*0.55f;}
     }
+    MoveBody(room,body,vx,vy);
     NativePoint clamped;if(room.space.Clamp(body.position,2,2,2,2,&clamped))body.position=clamped;
     body.time+=1.0f;
 }

@@ -2,8 +2,10 @@
 #define GENERIC_NATIVE_ENEMY_H
 #include "native_entity_body.h"
 struct NativeRoomState;
-//Authentic type10 Gaper physical record subset. Movement/AI and presentation
-//remain maintained gameplay services, not complete native enemy behavior.
+class NativeEnemyShotSystem;
+//Prepared enemy bodies for the room actors reached so far. Movement follows
+//the original per-type family behavior (walk, erratic fly, shooting pooter,
+//charge families); exact native AI timing remains a maintained approximation.
 class NativeEnemy {
 public:
     NativeEntityBody body;
@@ -12,7 +14,7 @@ public:
     unsigned int seed;
     NativeEnemy();
     bool Begin(int type,int variant,unsigned int seed,const NativePoint& position,unsigned int frame,int stage);
-    void Update(const NativeRoomState&,const NativeEntityBody& player);
+    void Update(const NativeRoomState&,const NativeEntityBody& player,NativeEnemyShotSystem* shots=0);
     void Damage(float amount);
     void Swap(NativeEnemy&);
 };

@@ -203,6 +203,9 @@ static void DrawProjectiles(){
     for(unsigned int i=0;i<gRuntime->projectiles.active.size();++i){const NativeProjectile& p=gRuntime->projectiles.active[i];
         float px=bg.left+(p.position.x-space.left)*rw/ww,py=bg.top+(p.position.y-space.top)*rh/wh;
         TexRect(px-16,py-16,32,32,(float)kGameplayTearsX,(float)kGameplayTearsY,32,32);}
+    for(unsigned int i=0;i<gRuntime->enemyShots.active.size();++i){const NativeEnemyShot& p=gRuntime->enemyShots.active[i];
+        float px=bg.left+(p.position.x-space.left)*rw/ww,py=bg.top+(p.position.y-space.top)*rh/wh;
+        TexRect(px-14,py-14,28,28,(float)(kGameplayTearsX+128),(float)(kGameplayTearsY+64),32,32);}
 }
 static void DrawHud(){
     if(!gRuntime->playerState.ready)return;float x=10,y=10;
@@ -319,9 +322,9 @@ int main(int argc,char** argv){
                 Log("WIN teleport frame=%d pickup=%d variant=%d",frame,index,tr.pickups.entries[index]->variant);}}
         if(runtime.phase==PNR_READY||runtime.phase==PNR_DYING||runtime.phase==PNR_GAME_OVER)session.TickNormal(runtime,files,&fa);
         if(frame%30==0){NativeWorldResident& live=runtime.world.resident[runtime.world.currentList];const NativePlacedRoom* d=runtime.world.CurrentDescriptor();
-            Log("WIN tick=%d phase=%d room=%d list=%d act=%u pos=(%.2f,%.2f) hp=%d/%d soul=%d enemies=%d pickups=%d collected=%u coins=%d keys=%d bombs=%d transitions=%u",
+            Log("WIN tick=%d phase=%d room=%d list=%d act=%u pos=(%.2f,%.2f) hp=%d/%d soul=%d enemies=%d shots=%u fired=%u wall=%u hits=%u pickups=%d collected=%u coins=%d keys=%d bombs=%d transitions=%u",
                 frame,runtime.phase,d?d->definition:-1,runtime.world.currentList,live.activations,runtime.playerBody.position.x,runtime.playerBody.position.y,runtime.playerState.redHearts,runtime.playerState.maxRedHearts,runtime.playerState.soulHearts,
-                live.enemies.count,live.pickups.count,runtime.pickupsCollected,runtime.playerState.coins,runtime.playerState.keys,runtime.playerState.bombs,runtime.roomTransitions);}
+                live.enemies.count,(unsigned int)runtime.enemyShots.active.size(),(unsigned int)runtime.enemyShots.spawned,(unsigned int)runtime.enemyShots.wallHits,runtime.playerHits,live.pickups.count,runtime.pickupsCollected,runtime.playerState.coins,runtime.playerState.keys,runtime.playerState.bombs,runtime.roomTransitions);}
         Render();
         if(frame==shotFrame){bool ok=windowShot?SaveWindowBMP(shotFile):SaveBMP(shotFile);Log("WIN screenshot frame=%d file=%s ok=%d",frame,shotFile,ok?1:0);}
         gDevice->Present(0,0,0,0);

@@ -130,7 +130,7 @@ bool NativeRoomUpdate::TickSimulationTail(PortNormalRuntime& runtime,NativeActio
     //addresses are presentation work and do not gate simulation completion.
     if(live.effects->roomEffects.Update(0)!=NEF_OK){*next=0x8798f0;return false;}
     //Enemy actors advance before the projectile contact/damage pass.
-    for(int i=0;i<live.enemies.count;++i)if(live.enemies.entries[i])live.enemies.entries[i]->Update(*room,runtime.playerBody);
+    for(int i=0;i<live.enemies.count;++i)if(live.enemies.entries[i])live.enemies.entries[i]->Update(*room,runtime.playerBody,&runtime.enemyShots);
     if(runtime.playerInvulnerable>0)--runtime.playerInvulnerable;
     if(!runtime.playerDead)for(int i=0;i<live.enemies.count;++i){NativeEnemy* enemy=live.enemies.entries[i];
         if(!enemy||!enemy->ready||enemy->dead)continue;
@@ -144,6 +144,7 @@ bool NativeRoomUpdate::TickSimulationTail(PortNormalRuntime& runtime,NativeActio
             break;
         }
     }
+    if(!runtime.enemyShots.Step(runtime)){*next=0x61f6d0;return false;}
     //Ordinary pickup contact. Hearts heal red health first then soul health;
     //coins/keys/bombs increment the native resource counters. Other type5
     //variants remain explicit identity owners until their services exist.
@@ -206,7 +207,7 @@ bool NativeRoomUpdate::TickSimulationTail(PortNormalRuntime& runtime,NativeActio
                     runtime.playerBody.previousPosition=runtime.playerBody.position;runtime.playerBody.velocity.x=runtime.playerBody.velocity.y=0;
                 }}
             }
-            runtime.projectiles.Reset();runtime.doorTransitionGrace=30;++runtime.roomTransitions;
+            runtime.projectiles.Reset();runtime.enemyShots.Clear();runtime.doorTransitionGrace=30;++runtime.roomTransitions;
             return true;
         }
     }

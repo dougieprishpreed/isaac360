@@ -74,3 +74,41 @@ bool NativeProjectileSystem::Step(PortNormalRuntime& runtime,NativeActionSource*
     }
     if(next)*next=0;return true;
 }
+
+NativeEnemyShotSystem::NativeEnemyShotSystem(){spawned=wallHits=0;}
+void NativeEnemyShotSystem::Clear(){active.clear();spawned=wallHits=0;}
+void NativeEnemyShotSystem::Fire(const NativePoint& position,float vx,float vy,float damage,float radius,int life,unsigned int owner){
+    NativeEnemyShot shot;shot.position=position;shot.velocity.x=vx;shot.velocity.y=vy;
+    shot.damage=damage;shot.radius=radius;shot.life=life;shot.owner=owner;
+    active.push_back(shot);++spawned;
+}
+void NativeEnemyShotSystem::Swap(NativeEnemyShotSystem& b){
+    active.swap(b.active);unsigned int n=spawned;spawned=b.spawned;b.spawned=n;n=wallHits;wallHits=b.wallHits;b.wallHits=n;
+}
+bool NativeEnemyShotSystem::Step(PortNormalRuntime& runtime){
+    NativeRoomState* room=runtime.world.Current();NativeEntityBody& body=runtime.playerBody;
+    if(!room||!body.ready)return false;
+    for(unsigned int i=0;i<active.size();){
+        NativeEnemyShot& shot=active[i];
+        shot.position.x+=shot.velocity.x;shot.position.y+=shot.velocity.y;
+        if(shot.life>0)--shot.life;
+        int collision=0;
+        if(!room->collision.AtPosition(room->geometry,shot.position,room->space.zeroCollision,&collision))return false;
+        if(collision!=0&&collision!=5){++wallHits;active.erase(active.begin()+i);continue;}
+        float dx=shot.position.x-body.position.x,dy=shot.position.y-body.position.y;
+        float radius=shot.radius+body.collision.radius;
+        if(dx*dx+dy*dy<=radius*radius){
+            if(!runtime.playerDead){
+                if(runtime.playerInvulnerable<=0){
+                    bool dead=runtime.playerState.Damage((int)shot.damage);
+                    ++runtime.playerHits;runtime.playerInvulnerable=30;
+                    if(dead){runtime.playerDead=true;runtime.playerBody.removed=true;runtime.phase=PNR_DYING;runtime.playerDeathTicks=0;}
+                }
+            }
+            active.erase(active.begin()+i);continue;
+        }
+        if(shot.life<=0){active.erase(active.begin()+i);continue;}
+        ++i;
+    }
+    return true;
+}

@@ -26,4 +26,25 @@ private:
     NativeProjectileSystem(const NativeProjectileSystem&);
     NativeProjectileSystem& operator=(const NativeProjectileSystem&);
 };
+//Enemy-fired tear (Pooter and later shooters). Behavior comes from the
+//owning enemy update; this owner advances, collides and damages the player.
+struct NativeEnemyShot {
+    NativePoint position,velocity;
+    float damage,radius;
+    int life;
+    unsigned int owner;
+};
+class NativeEnemyShotSystem {
+public:
+    std::vector<NativeEnemyShot> active;
+    unsigned int spawned,wallHits;
+    NativeEnemyShotSystem();
+    void Clear();
+    void Fire(const NativePoint& position,float vx,float vy,float damage,float radius,int life,unsigned int owner);
+    bool Step(PortNormalRuntime& runtime);
+    void Swap(NativeEnemyShotSystem&);
+private:
+    NativeEnemyShotSystem(const NativeEnemyShotSystem&);
+    NativeEnemyShotSystem& operator=(const NativeEnemyShotSystem&);
+};
 #endif

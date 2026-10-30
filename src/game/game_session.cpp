@@ -44,7 +44,7 @@ PortSessionStart PortGameSession::StartNormalCharacter(unsigned int seed,PortNor
         runtime.playerState.Swap(state);
         runtime.playerCreation.Swap(creation);
         runtime.playerManager.Swap(manager);
-        runtime.playerUpdate=NativePlayerUpdate();runtime.projectiles.Reset();
+        runtime.playerUpdate=NativePlayerUpdate();runtime.projectiles.Reset();runtime.enemyShots.Clear();
         runtime.roomFx.Swap(roomFx);
         runtime.minimaps.Reset();
         //Virtual Init, the reached resource/callback services and manager

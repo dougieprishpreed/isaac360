@@ -44,6 +44,7 @@ struct PortNormalRuntime {
     NativePlayerManager playerManager;
     NativePlayerUpdate playerUpdate;
     NativeProjectileSystem projectiles;
+    NativeEnemyShotSystem enemyShots;
     NativeRoomFx roomFx;
     NativeMinimaps minimaps;
     NativePauseUi pauseUi;
