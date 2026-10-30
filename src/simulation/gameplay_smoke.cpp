@@ -119,13 +119,15 @@ int main(int argc,char** argv){
         const NativePoint afterLeft=runtime->playerBody.position;
 
         const NativeRoomState& room=*runtime->world.Current();
-        printf("TICKS ready=%d right=%u start=(%.9g,%.9g) afterRight=(%.9g,%.9g) wall=%u atWall=(%.9g,%.9g) settle=%u settled=(%.9g,%.9g) left=%u afterLeft=(%.9g,%.9g) ticks=%u extent=(%.9g,%.9g,%.9g,%.9g)\n",
+        printf("TICKS ready=%d right=%u start=(%.9g,%.9g) afterRight=(%.9g,%.9g) wall=%u atWall=(%.9g,%.9g) settle=%u settled=(%.9g,%.9g) left=%u afterLeft=(%.9g,%.9g) ticks=%u whole=%u extent=(%.9g,%.9g,%.9g,%.9g)\n",
             runtime->phase==PNR_READY,right,start.x,start.y,afterRight.x,afterRight.y,wall,atWall.x,atWall.y,settle,settled.x,settled.y,left,afterLeft.x,afterLeft.y,
-            runtime->completePlayerTicks,room.space.left,room.space.top,room.space.right,room.space.bottom);
+            runtime->completePlayerTicks,runtime->completeWholeGameplayTicks,room.space.left,room.space.top,room.space.right,room.space.bottom);
         if(right<10||afterRight.x<=start.x+1||wall<10||settle<10||fabsf(settled.x-atWall.x)>0.01f||
-            left<10||afterLeft.x>=atWall.x-1||runtime->completePlayerTicks<right+wall+settle+left)return 14;
-        printf("GAMEPLAY complete=%u ticks=%u collisionStop=(%.9g,%.9g) stable=%d\n",
-            runtime->completePlayerInitializations,runtime->completePlayerTicks,settled.x,settled.y,fabsf(settled.x-atWall.x)<=0.01f);
+            left<10||afterLeft.x>=atWall.x-1||runtime->completePlayerTicks<right+wall+settle+left||
+            runtime->completeWholeGameplayTicks!=runtime->completePlayerTicks)return 14;
+        printf("GAMEPLAY complete=%u playerTicks=%u wholeTicks=%u collisionStop=(%.9g,%.9g) stable=%d\n",
+            runtime->completePlayerInitializations,runtime->completePlayerTicks,runtime->completeWholeGameplayTicks,
+            settled.x,settled.y,fabsf(settled.x-atWall.x)<=0.01f);
         printf("TAIL_RNG unchanged=%d\n",memcmp(&rngBeforeTail,&runtime->gameRandom,sizeof(NativeRng))==0);
         unsigned int headTimerX=0,headTimerY=0,headCalls=0,headDirection=0;
         const NativePlayerCreationCache& headFields=runtime->playerCreation.constructorFields;

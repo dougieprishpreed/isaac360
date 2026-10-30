@@ -1211,7 +1211,8 @@ void OwnedSession() {
             runtime->playerCreation.constructorFields.Scalar(0x1284,&headTimerY)&&
             runtime->playerCreation.constructorFields.Scalar(0x1e88,&headCalls);
         if(runtime->phase==PNR_READY)Check(advanced==NFR_PENDING&&runtime->world.residentCount==1&&
-            runtime->completePlayerInitializations==1&&runtime->completePlayerTicks>=1&&runtime->missingNativePrerequisite==0&&
+            runtime->completePlayerInitializations==1&&runtime->completePlayerTicks>=1&&
+            runtime->completeWholeGameplayTicks==runtime->completePlayerTicks&&runtime->missingNativePrerequisite==0&&
             runtime->playerBody.position.x==320&&runtime->playerBody.position.y==380&&headTimers&&
             headTimerX==0xffffffffU&&headTimerY==0xffffffffU&&headCalls==runtime->completePlayerTicks,
             "owned-session-complete-player-and-first-whole-tick");

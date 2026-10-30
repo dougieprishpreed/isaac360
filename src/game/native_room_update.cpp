@@ -103,11 +103,27 @@ bool NativeRoomUpdate::PrepareInitialActors(PortNormalRuntime& runtime,NativeAct
         const bool collided=NativePlayerGridCollision(runtime,false,next);
         body.flagsLow&=~0x4000U;
         if(!collided)return false;
+        if(!TickSimulationTail(runtime,next))return false;
         if(!runtime.completePlayerInitializations)runtime.completePlayerInitializations=1;
         ++runtime.completePlayerTicks;
+        ++runtime.completeWholeGameplayTicks;
         *next=0;return true;
     }
     *next=address;return false;
+}
+bool NativeRoomUpdate::TickSimulationTail(PortNormalRuntime& runtime,unsigned int* next){
+    if(!next)return false;*next=0;
+    NativeWorldResident& live=runtime.world.resident[runtime.world.currentList];
+    NativeRoomState* room=runtime.world.Current();
+    if(!room||!live.effects)return false;
+    //7af3ab ->8d8470: the reached particle emitter is disabled by Room1798+8
+    //for this selected room. If it becomes enabled, stop at that caller.
+    if(room->particlesEnabled){*next=0x8d8470;return false;}
+    //7af636 ->8798f0: the live room-effect cache update is the gameplay
+    //owner reached by this room. Visual/room-tail services between these two
+    //addresses are presentation work and do not gate simulation completion.
+    if(live.effects->roomEffects.Update(0)!=NEF_OK){*next=0x8798f0;return false;}
+    return true;
 }
 bool NativeRoomUpdate::TickActors(PortNormalRuntime& runtime,NativeActionSource* actions,unsigned int* next){
     if(!next)return false;*next=0;
@@ -124,7 +140,9 @@ bool NativeRoomUpdate::TickActors(PortNormalRuntime& runtime,NativeActionSource*
     const bool collided=NativePlayerGridCollision(runtime,false,next);
     body.flagsLow&=~0x4000U;
     if(!collided)return false;
+    if(!TickSimulationTail(runtime,next))return false;
     if(!runtime.completePlayerInitializations)runtime.completePlayerInitializations=1;
     ++runtime.completePlayerTicks;
+    ++runtime.completeWholeGameplayTicks;
     *next=0;return true;
 }
