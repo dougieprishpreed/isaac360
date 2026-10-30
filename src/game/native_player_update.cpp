@@ -53,6 +53,98 @@ bool Dec(Live& f,unsigned int at,int* value,bool* hit=0){
     if(*value>0){--*value;f.Put(at,(unsigned int)*value);if(hit)*hit=(*value==0);}return true;
 }
 bool Reached(Live& f,unsigned int at,int* value){unsigned int n;if(!f.Get(at,4,&n))return false;*value=(int)n;return true;}
+//72c430's reached ordinary head/aim path after the 72cc2f transform block.
+//The clean player still executes stateful native work here: the 1280/1284
+//head timers decrement once, 1e88 increments every call, and the 154c head
+//direction owner is selected from the actual last-movement vector once the
+//timers have reached -1. The reached clean branch's item/head-object gates
+//stop at their real addresses if any owner becomes present.
+bool RunReachedOrdinaryHead(NativePlayerUpdate& call,PortNormalRuntime& runtime,Live& f,unsigned int* next){
+    (void)call;
+    NativePlayerState& state=runtime.playerState;NativeEntityBody& body=runtime.playerBody;
+    unsigned int raw;bool present;
+    //72cc2f..72ce9e: type0 with the fresh19fc=-1, no held/action object.
+    if(!f.Zero(0x1808)){*next=0x72cd06;return false;}
+    if(!f.Zero(0x12e0,1)||!f.Zero(0x12e2,1)){*next=0x72ce2b;return false;}
+    if(!state.effects.Entries().empty()){*next=0x72ce9e;return false;}
+    //72cf3f/72d876/72dda2: EDI+360 is the entity body's owned360 timer.
+    if(body.native360>0){*next=0x72cf3f;return false;}
+    if(!f.Zero(0x1528)){*next=0x72cf5d;return false;}
+    if(!f.Zero(0x1e24)){*next=0x72d190;return false;}
+    const unsigned int heads[]={0x1320,0x1324,0x1328,0x132c,0x1330,0x134c};
+    for(int i=0;i<6;++i)if(!f.Zero(heads[i])){*next=0x72d171;return false;}
+    if(!f.Zero(0x1804)){*next=0x72d85a;return false;}
+    if(!f.Zero(0x1dec)){*next=0x72d85a;return false;}
+    if(!f.Zero(0x17c8)){*next=0x72d5e3;return false;}
+    if(!f.Zero(0x1800)){*next=0x72d829;return false;}
+    if(!f.Zero(0x1818,1)){*next=0x72d886;return false;}
+    if(!f.Zero(0x1810)){*next=0x72d8c5;return false;}
+    if(!f.Zero(0x1f78)){*next=0x72db45;return false;}
+    //72de58: collectible368/399/643/680 own the long effect/timer blocks.
+    //They are absent from this initialized inventory; a present owner stops
+    //at its exact native branch rather than being treated as a no-op.
+    const unsigned int owners[]={368,399,643,680};
+    const unsigned int ownerStops[]={0x72dea7,0x72e001,0x72e1f1,0x72e35d};
+    for(int i=0;i<4;++i){if(!state.HasCollectible((int)owners[i],&present)){*next=0x72de91;return false;}
+        if(present){*next=ownerStops[i];return false;}}
+    if(!f.Get(0x1304,4,&raw))return false;if(raw==0x1a){*next=0x72e545;return false;}
+    //729d40 is the reached head/action query. It has no state write on this
+    //ordinary empty-effect/no-item path and returns false; each gating owner
+    //that would make it true is an explicit item/effect branch elsewhere.
+    if(!state.effects.Entries().empty()){*next=0x729d40;return false;}
+    if(!f.Get(0x1524,4,&raw))return false;if(raw!=0){*next=0x72e5e7;return false;}
+    //72e64f/72e6a0 query effects93/0x280; the reached1440 cache is empty.
+    if(!f.Get(0x1304,4,&raw))return false;if(raw==0x20){*next=0x72e6ee;return false;}
+    //72e845..72e8b1: the head timer block is skipped only for the4000
+    //collision pass; the ordinary pre-collision update reaches it every call.
+    if(!(body.flagsLow&0x4000U)){
+        if(!f.Get(0x1524,4,&raw))return false;if(raw==0x31){*next=0x72e84e;return false;}
+        if(!f.Get(0x1280,4,&raw))return false;if((int)raw>-1)f.Put(0x1280,raw-1);
+        if(!f.Get(0x1284,4,&raw))return false;if((int)raw>-1)f.Put(0x1284,raw-1);
+    }
+    //72ed51: shooting/action head owners405/568/726. All absent, so the
+    //72ed8b..72f4b2 action loop is not entered.
+    const unsigned int shooting[]={405,568,726};
+    for(int i=0;i<3;++i){if(!state.HasCollectible((int)shooting[i],&present)){*next=0x72ed51;return false;}
+        if(present){*next=0x72ed8b;return false;}}
+    //72f4b2: this counter increments once per completed72c430 call.
+    if(!f.Get(0x1e88,4,&raw))return false;f.Put(0x1e88,raw+1);
+    //72f4ba collectible400 owns the tear entity branch; absent here.
+    if(!state.HasCollectible(400,&present)){*next=0x72f4ba;return false;}
+    if(present){*next=0x72f6cf;return false;}
+    //72fdb0 switches on the active item;1524=0 selects the no-item case.
+    if(!f.Get(0x1524,4,&raw))return false;if(raw!=0){*next=0x72fdb0;return false;}
+    //77c300(139) is zero for this empty inventory, so14a0 is unchanged.
+    if(!state.HasCollectible(139,&present)){*next=0x72fd51;return false;}
+    if(present){*next=0x72fd75;return false;}
+    //731bf1..731d31: once both head timers are negative the head direction is
+    //derived from the actual last-movement vector (729a60 returns1578/157c
+    //when no head object exists). This is the reached repeated-tick branch.
+    if(!f.Get(0x1280,4,&raw))return false;int timerX=(int)raw;
+    if(!f.Get(0x1284,4,&raw))return false;int timerY=(int)raw;
+    if(timerX<0&&timerY<0){
+        float hx,hy;if(!f.Float(0x1578,&hx)||!f.Float(0x157c,&hy))return false;
+        unsigned int headDirection;
+        if(hx!=0.0f||hy!=0.0f){
+            if(hx<0.0f)hx=-hx;if(hy<0.0f)hy=-hy;
+            //The native takes the Y branch when the absolute components are
+            //equal, then chooses by the signed component.
+            float sx,sy;f.Float(0x1578,&sx);f.Float(0x157c,&sy);
+            if(hx>hy)headDirection=(sx>0.0f)?2U:0U;
+            else headDirection=(sy>0.0f)?3U:1U;
+        }else{
+            if(!f.Get(0x1548,4,&raw))return false;
+            headDirection=(int)raw>=0&&raw<=3?raw:3U;
+        }
+        if(!f.Get(0x154c,4,&raw)){*next=0x731ce4;return false;}
+        if(raw!=headDirection)f.Put(0x154c,headDirection);
+    }
+    //732124..7321bb: the head vector is zero on this path, including the
+    //reached write1554/1558/155c; the empty+158c trail owner is cleared by
+    //4836e0 with no live entries.
+    f.Put(0x1554,0);f.Put(0x1558,0);f.Put(0x155c,0,1);
+    return true;
+}
 bool RunReachedPlayerTail(NativePlayerUpdate& call,PortNormalRuntime& runtime,Live& f,unsigned int* next){
     (void)call;
     NativePlayerState& state=runtime.playerState;NativeEntityBody& body=runtime.playerBody;
@@ -421,9 +513,10 @@ bool NativePlayerUpdate::Resume(PortNormalRuntime& runtime,NativeActionSource* a
         if(!fields.Zero(0x12e0,1)||!fields.Zero(0x12e1,1)||!fields.Zero(0x12e2,1)){*next=0x72c430;return false;}
         for(int i=0;i<4;++i)if(state.activeItems[i]){*next=0x72c430;return false;}
         if(!state.effects.Entries().empty()){*next=0x72c430;return false;}
-        //The no-item/no-aim path leaves the local head vector at its global
-        //zero owner.1554/1558 are the native head offsets,155c the flag.
-        fields.Put(0x1554,0);fields.Put(0x1558,0);fields.Put(0x155c,0,1);
+        //Execute the reached ordinary no-item/no-aim body instead of zeroing
+        //only its final head offsets. The helper performs the actual1280/1284
+        //timer and1e88 counter work and preserves the repeated-tick154c owner.
+        if(!RunReachedOrdinaryHead(*this,runtime,fields,next))return false;
         address=0x755870;
     }
     if(address==0x755870){

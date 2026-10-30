@@ -1206,9 +1206,14 @@ void OwnedSession() {
             files.backdrop=runtime->run.context.stageType+1;
         }
         const bool d6=runtime->run.player.isaacD6;
+        unsigned int headTimerX=0,headTimerY=0,headCalls=0;
+        const bool headTimers=runtime->playerCreation.constructorFields.Scalar(0x1280,&headTimerX)&&
+            runtime->playerCreation.constructorFields.Scalar(0x1284,&headTimerY)&&
+            runtime->playerCreation.constructorFields.Scalar(0x1e88,&headCalls);
         if(runtime->phase==PNR_READY)Check(advanced==NFR_PENDING&&runtime->world.residentCount==1&&
             runtime->completePlayerInitializations==1&&runtime->completePlayerTicks>=1&&runtime->missingNativePrerequisite==0&&
-            runtime->playerBody.position.x==320&&runtime->playerBody.position.y==380,
+            runtime->playerBody.position.x==320&&runtime->playerBody.position.y==380&&headTimers&&
+            headTimerX==0xffffffffU&&headTimerY==0xffffffffU&&headCalls==runtime->completePlayerTicks,
             "owned-session-complete-player-and-first-whole-tick");
         else if(d6&&runtime->missingNativePrerequisite==0x713120){++d6Stops;
             Check(advanced==NFR_PENDING&&runtime->phase==PNR_NEED_NATIVE_INIT&&runtime->world.residentCount==1&&

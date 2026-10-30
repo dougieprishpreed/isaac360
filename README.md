@@ -8,9 +8,9 @@ The goal is to preserve the original game's content and behavior, including proc
 
 The port is incomplete, and no playable Xbox 360 release is available.
 
-Resource readers, level generation, room components and the normal player lifecycle have been implemented and checked on Windows. A normal New Run now generates its first floor, registers the player, constructs and enters the selected starting room, completes placement and post-generation initialization, and executes repeated whole movement and grid-collision ticks in that room, including the reached ordinary player-update tail and its stateful timer/effect owners. The Windows host has observed a complete initialized player moving to the real room boundary, stopping stably and reversing.
+Resource readers, level generation, room components and the normal player lifecycle have been implemented and checked on Windows. A normal New Run now generates its first floor, registers the player, constructs and enters the selected starting room, completes placement and post-generation initialization, and executes repeated player movement and grid-collision updates in that room. The reached ordinary `72c430` no-item path now performs its actual `0x1280`/`0x1284` head-timer and `0x1e88` call-counter work, and the Windows host observes a complete initialized player moving to the real room boundary, stopping stably and reversing.
 
-The remaining player-update item/controlled branches, the D6 starting grant, GPU layer composition, combat, room transitions, progression, save/Continue and complete presentation and audio remain unfinished. Passing host checks does not establish Xbox 360 playability.
+Milestone 1 is still not accepted. The `747490` item/effect-owner traversal, other reached post-`755870` sprite/effect consumers, GPU layer composition, the full `7ae620` room tick after actor collision, the D6 starting grant, combat, room transitions, progression, save/Continue and complete presentation and audio remain unfinished. The 361 host observations are player update/collision ticks, not accepted whole gameplay ticks. Passing host checks does not establish Xbox 360 playability.
 
 The shared sources now compile into an Xbox 360 XEX with the installed XDK. Target execution, rendered-content and physical-console testing remain outstanding; no Xenia runtime was available for this pass.
 

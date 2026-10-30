@@ -71,7 +71,7 @@ int main(int argc,char** argv){
         runtime->playerUpdate.address,runtime->playerUpdate.missingOffset,runtime->playerUpdate.active,runtime->playerUpdate.returned,
         runtime->playerBody.time,(unsigned int)runtime->playerManager.updateMembers.size());
     {
-        static const unsigned int scalars[]={0x1304,0x1524,0x1528,0x19fc,0x1808,0x1e24,0x1320,0x134c,0x14a0,0x1280,0x1284,0x1548,0x1550,0x1554,0x1558,0x1560,0x1564,0x1d70,0x1dd8,0x1e68};
+        static const unsigned int scalars[]={0x1304,0x1524,0x1528,0x19fc,0x1808,0x1e24,0x1320,0x134c,0x14a0,0x1280,0x1284,0x1e88,0x1548,0x154c,0x1550,0x1554,0x1558,0x1560,0x1564,0x1d70,0x1dd8,0x1e68};
         static const unsigned int bytes[]={0x1735,0x1f80,0x12e2,0x12e0,0x12e1,0x155c,0x1734,0x1804};
         printf("FIELDS bodyType=%d subtype=%d variant=%d flags=%08x/%08x position=(%.6g,%.6g) velocity=(%.6g,%.6g)\n",
             runtime->playerBody.type,runtime->playerBody.subtype,runtime->playerBody.variant,runtime->playerBody.flagsLow,runtime->playerBody.flagsHigh,
@@ -127,6 +127,14 @@ int main(int argc,char** argv){
         printf("GAMEPLAY complete=%u ticks=%u collisionStop=(%.9g,%.9g) stable=%d\n",
             runtime->completePlayerInitializations,runtime->completePlayerTicks,settled.x,settled.y,fabsf(settled.x-atWall.x)<=0.01f);
         printf("TAIL_RNG unchanged=%d\n",memcmp(&rngBeforeTail,&runtime->gameRandom,sizeof(NativeRng))==0);
+        unsigned int headTimerX=0,headTimerY=0,headCalls=0,headDirection=0;
+        const NativePlayerCreationCache& headFields=runtime->playerCreation.constructorFields;
+        const bool headPresent=headFields.Scalar(0x1280,&headTimerX)&&headFields.Scalar(0x1284,&headTimerY)&&
+            headFields.Scalar(0x1e88,&headCalls)&&headFields.Scalar(0x154c,&headDirection);
+        printf("HEAD_STATE timers=%d/%d calls=%u/%u direction=%u\n",(int)headTimerX,(int)headTimerY,headCalls,runtime->completePlayerTicks,headDirection);
+        //The reached 72c430 ordinary path decrements0x1280/0x1284 to-1 on the
+        //first update and increments0x1e88 once per whole tick.
+        if(!headPresent||headTimerX!=0xffffffffU||headTimerY!=0xffffffffU||headCalls!=runtime->completePlayerTicks)return 16;
         unsigned int t12c0=0,t2cc=0,t12bc=0,t1ca4=0;float f2cc=0;
         const NativePlayerCreationCache& cf=runtime->playerCreation.constructorFields;
         if(cf.Scalar(0x2cc,&t2cc))memcpy(&f2cc,&t2cc,4);
