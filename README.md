@@ -6,7 +6,7 @@ The goal is to preserve the original game's content and behavior, including proc
 
 ## Project status
 
-The port is incomplete, and no playable Xbox 360 release is available.
+The port is incomplete, and no playable Xbox 360 release is available. The target is the complete game: Normal, Hard and Greed modes, every character and unlock, original progression, and the full item/enemy/boss/room/audio presentation.
 
 Resource readers, level generation, room components and the normal player lifecycle have been implemented and checked on Windows. A normal New Run now generates its first floor, registers the player, constructs and enters the selected starting room, completes placement and post-generation initialization, and executes repeated whole simulation ticks in that room. Each tick completes the `414dc0` actor/player update, `6712a0` collision, the disabled `8d8470` particle gate, the `8798f0` room-effect cache update, enemy updates and the primary projectile lifecycle. The reached ordinary `72c430` no-item path performs its actual `0x1280`/`0x1284` head-timer and `0x1e88` call-counter work. Primary fire consumes the evaluated shot vector and the real `fireDelay`/`shotSpeed`/`damage`/`range` stats; host evidence observes spawned tears, wall collision and range expiry. A generated Gaper encounter is killed by those tears, clears the room and opens a normal door. The player then crosses the cleared door into the exact linked room, where rocks and the next enemy set are constructed and the player is placed at the reciprocal door. The Windows host also observes the complete initialized player moving to the real room boundary, stopping stably and reversing.
 
