@@ -18,6 +18,26 @@ static PortFrontend gUi;
 static NativeMt gMenuRandom;
 static PortNormalRuntime gNormalRuntime;
 static NativeProfile gProfiles[3];
+static bool gPrevActions[12]={false,false,false,false,false,false,false,false,false,false,false,false};
+static bool PreviousAction(int action){return action>=0&&action<12?gPrevActions[action]:false;}
+static float Axis(float value){const float dead=0.25f;float v=value/32767.0f;return fabsf(v)<dead?0.0f:v;}
+static void BuildActions(const XINPUT_GAMEPAD& p,unsigned int frameNumber,NativeActionFrame* frame){
+    frame->Clear(gNormalRuntime.playerCreation.native153c,gNormalRuntime.playerBody.entityToken,frameNumber);
+    frame->SupplyConnection(true);
+    const bool held[12]={
+        p.sThumbLX< -8000,p.sThumbLX>8000,p.sThumbLY>8000,p.sThumbLY< -8000,
+        p.sThumbRX< -8000,p.sThumbRX>8000,p.sThumbRY>8000,p.sThumbRY< -8000,
+        (p.wButtons&XINPUT_GAMEPAD_X)!=0,(p.wButtons&XINPUT_GAMEPAD_A)!=0,
+        (p.wButtons&XINPUT_GAMEPAD_LEFT_SHOULDER)!=0,(p.wButtons&XINPUT_GAMEPAD_B)!=0};
+    const float values[8]={Axis(p.sThumbLX)<0?-Axis(p.sThumbLX):0,Axis(p.sThumbLX)>0?Axis(p.sThumbLX):0,
+        Axis(p.sThumbLY)>0?Axis(p.sThumbLY):0,Axis(p.sThumbLY)<0?-Axis(p.sThumbLY):0,
+        Axis(p.sThumbRX)<0?-Axis(p.sThumbRX):0,Axis(p.sThumbRX)>0?Axis(p.sThumbRX):0,
+        Axis(p.sThumbRY)>0?Axis(p.sThumbRY):0,Axis(p.sThumbRY)<0?-Axis(p.sThumbRY):0};
+    frame->SupplyDrop((p.wButtons&XINPUT_GAMEPAD_B)!=0);
+    for(int i=0;i<12;++i){frame->SupplyHeld(i,held[i]);frame->SupplyPressed(i,held[i]&&!PreviousAction(i));}
+    for(int i=0;i<8;++i)frame->SupplyValue(i,values[i]);
+    for(int i=0;i<12;++i)gPrevActions[i]=held[i];
+}
 static void Log(const char* fmt,...) {
     char line[1024]; va_list args; va_start(args,fmt);
     vsnprintf(line,sizeof(line)-2,fmt,args); va_end(args);
@@ -185,6 +205,16 @@ VOID __cdecl main() {
     gTrace=fopen("game:\\port\\trace.log","wt");
     if(!InitGraphics())for(;;)Sleep(1000);
     bool ready=LoadAtlas()&&CheckOriginalBindings();gUi.Init(false);
+    //Console-writable local save root. e:\ is the normal writable console
+    //storage; a devkit/emulator without e:\ falls back to its game:// scratch.
+    bool saveBound=false;
+    if(CreateDirectoryA("e:\\boi360",0)||GetLastError()==ERROR_ALREADY_EXISTS)
+        saveBound=gUi.BindSaveDirectory("e:\\boi360\\");
+    if(!saveBound){
+        CreateDirectoryA("game:\\profile",0);
+        saveBound=gUi.BindSaveDirectory("game:\\profile\\");
+    }
+    if(!saveBound)Log("PORT save directory bind failed");
     //Platform entropy adapter; original global initialization still requires validation.
     unsigned int seed=GetTickCount();if(!seed)seed=1;gMenuRandom.Seed(seed);
     LARGE_INTEGER frequency,last,now;QueryPerformanceFrequency(&frequency);QueryPerformanceCounter(&last);double accumulator=0;
@@ -195,14 +225,40 @@ VOID __cdecl main() {
                 (p.wButtons&XINPUT_GAMEPAD_DPAD_LEFT)!=0||p.sThumbLX< -16000,(p.wButtons&XINPUT_GAMEPAD_DPAD_RIGHT)!=0||p.sThumbLX>16000,
                 (p.wButtons&XINPUT_GAMEPAD_X)!=0,(p.wButtons&XINPUT_GAMEPAD_Y)!=0};
             PortAction action=gUi.Step(input);
+            //The native player update requests its own connected action owner.
+            //Supply the real pad frame to the same shared runtime the host uses.
+            static unsigned int actionFrameNumber=0;
+            NativeActionFrame actionFrame;NativeFrameActions frameActions(actionFrame);
+            BuildActions(p,++actionFrameNumber,&actionFrame);
             //Native profile disk format and complete run persistence remain open.
             if(action==UI_SELECT_SLOT){gUi.profile=gProfiles[gUi.selectedSlot];gUi.SlotLoaded(true,false);}
             if(action==UI_DELETE_SLOT){ZeroMemory(&gProfiles[gUi.selectedSlot],sizeof(NativeProfile));gUi.SlotDeleted(true);}
             if(action==UI_START_CHARACTER){unsigned int runSeed=GetTickCount();if(!runSeed)runSeed=1;PortSessionStart start=PortGameSession(gMenuRandom,gUi).StartNormalCharacter(runSeed,gNormalRuntime);Log("PORT normal setup result=%d seed=%u player=%d",start.result,runSeed,start.player);}
             if(gUi.characterPending){const NormalRunFlow& run=gNormalRuntime.run;
                 NativeSceneFiles files={"game:\\game\\file_index.bin","game:\\game\\",run.context.stageType+1,run.context.nativeMode,0};
-                NormalRunResult result=PortGameSession(gMenuRandom,gUi).AdvanceNormalSetup(gNormalRuntime,files);
+                NormalRunResult result=PortGameSession(gMenuRandom,gUi).AdvanceNormalSetup(gNormalRuntime,files,&frameActions);
                 if(!gUi.characterPending)Log("PORT normal setup boundary phase=%d generation=%d result=%d resident=%d source=%d prerequisite=%08x",gNormalRuntime.phase,run.phase,result,gNormalRuntime.world.residentCount,gNormalRuntime.entryIssue.source,gNormalRuntime.missingNativePrerequisite);}
+            if(gNormalRuntime.phase==PNR_READY){
+                static bool readyLogged=false;
+                if(!readyLogged){Log("PORT normal ready ticks=0 playerToken=%08x",gNormalRuntime.playerBody.entityToken);readyLogged=true;}
+                const NormalRunFlow& run=gNormalRuntime.run;
+                NativeSceneFiles files={"game:\\game\\file_index.bin","game:\\game\\",run.context.stageType+1,run.context.nativeMode,0};
+                NormalRunResult tick=PortGameSession(gMenuRandom,gUi).TickNormal(gNormalRuntime,files,&frameActions);
+                if(gNormalRuntime.tickFrame%30==0){
+                    NativeWorldResident& live=gNormalRuntime.world.resident[gNormalRuntime.world.currentList];
+                    Log("PORT normal tick=%u result=%d pos=(%.2f,%.2f) hp=%d/%d soul=%d enemies=%d clear=%d hits=%u transitions=%u",
+                        gNormalRuntime.tickFrame,tick,gNormalRuntime.playerBody.position.x,gNormalRuntime.playerBody.position.y,
+                        gNormalRuntime.playerState.redHearts,gNormalRuntime.playerState.maxRedHearts,gNormalRuntime.playerState.soulHearts,
+                        live.enemies.count,live.room?live.room->clear:0,gNormalRuntime.playerHits,gNormalRuntime.roomTransitions);
+                }
+                if(tick==NFR_BAD_REQUEST)Log("PORT normal tick rejected prerequisite=%08x",gNormalRuntime.missingNativePrerequisite);
+            }else if(gNormalRuntime.phase==PNR_DYING||gNormalRuntime.phase==PNR_GAME_OVER){
+                static bool dyingLogged=false;
+                if(!dyingLogged){Log("PORT normal death phase=%d hits=%u hp=%d/%d",gNormalRuntime.phase,gNormalRuntime.playerHits,gNormalRuntime.playerState.redHearts,gNormalRuntime.playerState.maxRedHearts);dyingLogged=true;}
+                const NormalRunFlow& run=gNormalRuntime.run;
+                NativeSceneFiles files={"game:\\game\\file_index.bin","game:\\game\\",run.context.stageType+1,run.context.nativeMode,0};
+                PortGameSession(gMenuRandom,gUi).TickNormal(gNormalRuntime,files,&frameActions);
+            }
             if(action!=UI_NONE&&action!=UI_SELECT_SLOT&&action!=UI_DELETE_SLOT&&action!=UI_START_CHARACTER)Log("PORT pending native frontend destination=%d",action);
         }
         Render(ready);
