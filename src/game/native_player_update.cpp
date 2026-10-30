@@ -145,6 +145,37 @@ bool RunReachedOrdinaryHead(NativePlayerUpdate& call,PortNormalRuntime& runtime,
     f.Put(0x1554,0);f.Put(0x1558,0);f.Put(0x155c,0,1);
     return true;
 }
+bool EmptyGrantedInventory(const NativePlayerState& state){
+    for(unsigned int i=0;i<state.collectibleCounts.size();++i)if(state.collectibleCounts[i])return false;
+    if(!state.pendingCollectibles.empty()||!state.collectibleOverrides.empty())return false;
+    for(int i=0;i<4;++i)if(state.activeItems[i])return false;
+    if(state.temporaryCollectible)return false;
+    for(unsigned int i=0;i<state.trinketCounts.size();++i)if(state.trinketCounts[i])return false;
+    return true;
+}
+//747490 and 74ffa0 are reached ordinary consumers. Both are pure/query-only
+//for this clean profile: the item/effect owners that write1498/14a8/398/169
+//or update1804 are absent. Present owners stop at the native call address.
+bool RunReachedItemOwnerTail(NativePlayerUpdate& call,PortNormalRuntime& runtime,Live& f,unsigned int* next){
+    (void)call;
+    NativePlayerState& state=runtime.playerState;
+    if(!f.Zero(0x12e0,1)){*next=0x7474df;return false;}
+    if(!f.Zero(0x14b4)){*next=0x7839a0;return false;}
+    bool present;if(!state.HasCollectible(120,&present)){*next=0x723680;return false;}
+    if(present){*next=0x723680;return false;}
+    if(!f.Zero(0x1804)){*next=0x74e96d;return false;}
+    if(!state.effects.Entries().empty()){*next=0x74761b;return false;}
+    if(!EmptyGrantedInventory(state)){*next=0x7474f5;return false;}
+    return true;
+}
+bool RunReachedAuxEffectTail(NativePlayerUpdate& call,PortNormalRuntime& runtime,Live& f,unsigned int* next){
+    (void)call;
+    NativePlayerState& state=runtime.playerState;
+    if(!f.Zero(0x12e0,1)||!f.Zero(0x12e2,1)){*next=0x74ffa0;return false;}
+    if(!state.effects.Entries().empty()){*next=0x74ffa0;return false;}
+    if(!EmptyGrantedInventory(state)){*next=0x74ffa0;return false;}
+    return true;
+}
 bool RunReachedPlayerTail(NativePlayerUpdate& call,PortNormalRuntime& runtime,Live& f,unsigned int* next){
     (void)call;
     NativePlayerState& state=runtime.playerState;NativeEntityBody& body=runtime.playerBody;
@@ -196,6 +227,8 @@ bool RunReachedPlayerTail(NativePlayerUpdate& call,PortNormalRuntime& runtime,Li
     if(changed){*next=0x738fca;return false;} //716840 stat evaluation dependency.
     NativeEffectResult ur=state.effects.Update(0);
     if(ur!=NEF_OK){*next=0x738ff5;return false;}
+    //738ff5 ->747490: reached item/effect owner traversal.
+    if(!RunReachedItemOwnerTail(call,runtime,f,next))return false;
     if(!f.Zero(0x1dd8)){*next=0x73900a;return false;}
     //739451..73a6b3: the reached ordinary sprite stop/anchor/layer pass has
     //no player simulation write. Its numeric Sprite owner is updated here
@@ -207,7 +240,9 @@ bool RunReachedPlayerTail(NativePlayerUpdate& call,PortNormalRuntime& runtime,Li
     sprites.sprites[0].renderFlags|=8U;
     //73a6b4..73b1f5: fifteen costume slots. Fresh Reset wrote index-1 for
     //every slot; the native loop takes its per-slot skip and performs no
-    //layer replacement. The 73b151 timer scan then decrements reached timers.
+    //layer replacement. 73b1f6 ->74ffa0 is the reached auxiliary-effect
+    //consumer and is query-only for this clean owner set.
+    if(!RunReachedAuxEffectTail(call,runtime,f,next))return false;
     int v1300,v35c,v360,v1794,v19f8,v17d0,v17d4,v17d8,v17dc,v17e0,v17e4,v17e8,v17ec,v17f0;bool hit;
     if(!Dec(f,0x1300,&v1300)||!Dec(f,0x35c,&v35c))return false;
     if(!Dec(f,0x1794,&v1794)||!Dec(f,0x19f8,&v19f8))return false;
