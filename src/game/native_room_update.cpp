@@ -126,6 +126,19 @@ bool NativeRoomUpdate::TickSimulationTail(PortNormalRuntime& runtime,NativeActio
     if(live.effects->roomEffects.Update(0)!=NEF_OK){*next=0x8798f0;return false;}
     //Enemy actors advance before the projectile contact/damage pass.
     for(int i=0;i<live.enemies.count;++i)if(live.enemies.entries[i])live.enemies.entries[i]->Update(*room,runtime.playerBody);
+    if(runtime.playerInvulnerable>0)--runtime.playerInvulnerable;
+    if(!runtime.playerDead)for(int i=0;i<live.enemies.count;++i){NativeEnemy* enemy=live.enemies.entries[i];
+        if(!enemy||!enemy->ready||enemy->dead)continue;
+        float dx=runtime.playerBody.position.x-enemy->body.position.x,dy=runtime.playerBody.position.y-enemy->body.position.y;
+        float radius=enemy->body.collision.radius+runtime.playerBody.collision.radius;
+        if(dx*dx+dy*dy>radius*radius)continue;
+        int damage=(int)enemy->body.collisionDamage;if(damage<=0)continue;
+        if(runtime.playerInvulnerable<=0){
+            bool dead=runtime.playerState.Damage(damage);++runtime.playerHits;runtime.playerInvulnerable=30;
+            if(dead){runtime.playerDead=true;runtime.playerBody.removed=true;}
+            break;
+        }
+    }
     //Primary weapon/projectile lifecycle follows the room simulation owner.
     if(!runtime.projectiles.Step(runtime,actions,runtime.tickFrame,next)){
         if(*next==0)*next=0x61f6d0;return false;

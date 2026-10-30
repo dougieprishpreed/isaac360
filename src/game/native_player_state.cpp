@@ -56,6 +56,12 @@ bool NativePlayerState::BeginFresh(const NativeRunStart& start,NativePlayerStart
     //calls in native order and cannot cross the intervening missing services.
     return ResetFresh(start,startup,body)&&PrepareStartingResources(start);
 }
+bool NativePlayerState::Damage(int amount){
+    if(amount<=0)return redHearts<=0&&soulHearts<=0;
+    if(soulHearts>0){int take=std::min(soulHearts,amount);soulHearts-=take;amount-=take;}
+    if(amount>0){redHearts-=amount;if(redHearts<0)redHearts=0;}
+    return redHearts<=0&&soulHearts<=0;
+}
 bool NativePlayerState::FullHealth() const {
     unsigned int sum=(unsigned int)redHearts+(unsigned int)soulHearts;int total;memcpy(&total,&sum,4);
     return total>=maxRedHearts||effects.Has(0,112)||playerType==39;

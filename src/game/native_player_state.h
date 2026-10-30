@@ -48,6 +48,9 @@ public:
     //calls and resource/UI effects. Starting grants belong to76c990 later.
     bool InitializeStartingResources(const NativeRunStart&,NativePlayerResourceUi&);
     bool HasCollectible(int id,bool* result) const;
+    //Reached ordinary contact damage: soul hearts absorb before red hearts.
+    //Returns true when the player has no remaining heart health.
+    bool Damage(int amount);
     bool TrinketMultiplier(int id,int* result) const;
     bool HeartLimit(bool ignoreBroken,int* result) const;
     bool BeginFresh(const NativeRunStart&,NativePlayerStartup&,NativeEntityBody&);

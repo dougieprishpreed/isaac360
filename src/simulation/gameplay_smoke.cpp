@@ -54,6 +54,29 @@ unsigned int AdvanceToBoundary(PortGameSession& session,PortNormalRuntime& runti
     return steps;
 }
 }
+int RunDeathProbe(NativeMt& random,PortFrontend& ui){
+    PortNormalRuntime* runtime=new PortNormalRuntime;PortGameSession session(random,ui);
+    PortSessionStart start=session.StartNormalCharacter(1035486403,*runtime);
+    if(start.result!=NPS_WORLD_PENDING)return 40;
+    if(!AdvanceToBoundary(session,*runtime)||runtime->phase!=PNR_READY)return 41;
+    const NativePlacedRoom* target=0;
+    for(int i=0;i<runtime->world.layout.count;++i)if(runtime->world.layout.rooms[i].definition==268500997){target=&runtime->world.layout.rooms[i];break;}
+    if(!target)return 42;
+    NativeSceneFiles files={"runtime/game/file_index.bin","runtime/game/",runtime->run.context.stageType+1,runtime->run.context.nativeMode,0};
+    NativeRoomSetupContext setup={files.backdrop,runtime->run.floor.plan.configStage,false,0};NativeWorldIssue issue;
+    if(runtime->world.Enter(target->gridIndex,target->dimension,files,&issue,&setup)!=NWR_OK)return 43;
+    NativeWorldResident& live=runtime->world.resident[runtime->world.currentList];
+    if(live.enemies.count<=0)return 44;
+    runtime->playerBody.position=live.enemies.entries[0]->body.position;
+    runtime->playerBody.previousPosition=runtime->playerBody.position;
+    unsigned int ticks=0;
+    while(ticks<600&&!runtime->playerDead){if(!RunProjectileTicks(session,*runtime,-1,-1,1))return 45;++ticks;}
+    printf("DEATH seed=1035486403 room=268500997 hits=%u hp=%d/%d soul=%d dead=%d ticks=%u enemies=%d\n",
+        runtime->playerHits,runtime->playerState.redHearts,runtime->playerState.maxRedHearts,
+        runtime->playerState.soulHearts,runtime->playerDead?1:0,ticks,live.enemies.count);
+    bool ok=runtime->playerDead&&runtime->playerHits>0&&runtime->playerState.redHearts==0&&ticks>0&&live.enemies.count>0;
+    delete runtime;return ok?0:46;
+}
 int RunTransitionProbe(NativeMt& random,PortFrontend& ui){
     PortNormalRuntime* runtime=new PortNormalRuntime;PortGameSession session(random,ui);
     PortSessionStart start=session.StartNormalCharacter(1,*runtime);
@@ -296,5 +319,6 @@ int main(int argc,char** argv){
     }
     if(!failed){int encounter=RunEncounterProbe(random,ui);if(encounter){printf("ENCOUNTER_RESULT failed=%d\n",encounter);failed=true;}}
     if(!failed){int transition=RunTransitionProbe(random,ui);if(transition){printf("TRANSITION_RESULT failed=%d\n",transition);failed=true;}}
+    if(!failed){int death=RunDeathProbe(random,ui);if(death){printf("DEATH_RESULT failed=%d\n",death);failed=true;}}
     delete runtime;return failed?5:0;
 }

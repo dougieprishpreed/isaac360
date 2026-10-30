@@ -56,6 +56,8 @@ struct PortNormalRuntime {
     //services remain separate presentation work.
     unsigned int completeWholeGameplayTicks;
     unsigned int enemyKills,doorsOpened,roomTransitions;
+    unsigned int playerHits;int playerInvulnerable;
+    bool playerDead;
     int doorTransitionGrace;
     unsigned int tickFrame;
     //736d70's reached post-755870 presentation/effect state. The trail count
