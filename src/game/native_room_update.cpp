@@ -144,6 +144,24 @@ bool NativeRoomUpdate::TickSimulationTail(PortNormalRuntime& runtime,NativeActio
             break;
         }
     }
+    //Ordinary pickup contact. Hearts heal red health first then soul health;
+    //coins/keys/bombs increment the native resource counters. Other type5
+    //variants remain explicit identity owners until their services exist.
+    if(!runtime.playerDead)for(int i=0;i<live.pickups.count;++i){NativePickup* p=live.pickups.entries[i];
+        if(!p||!p->ready||p->collected)continue;
+        float dx=runtime.playerBody.position.x-p->position.x,dy=runtime.playerBody.position.y-p->position.y;
+        float radius=runtime.playerBody.collision.radius+12.0f;if(dx*dx+dy*dy>radius*radius)continue;
+        bool taken=false;
+        if(p->variant==10){
+            if(runtime.playerState.redHearts<runtime.playerState.maxRedHearts)
+                runtime.playerState.redHearts=std::min(runtime.playerState.maxRedHearts,runtime.playerState.redHearts+2);
+            else runtime.playerState.soulHearts=std::min(99,runtime.playerState.soulHearts+2);
+            taken=true;
+        }else if(p->variant==20){runtime.playerState.coins=std::min(99,runtime.playerState.coins+1);taken=true;}
+        else if(p->variant==30){runtime.playerState.keys=std::min(99,runtime.playerState.keys+1);taken=true;}
+        else if(p->variant==40){runtime.playerState.bombs=std::min(99,runtime.playerState.bombs+1);taken=true;}
+        if(taken){p->collected=true;++runtime.pickupsCollected;}
+    }
     //Primary weapon/projectile lifecycle follows the room simulation owner.
     if(!runtime.projectiles.Step(runtime,actions,runtime.tickFrame,next)){
         if(*next==0)*next=0x61f6d0;return false;

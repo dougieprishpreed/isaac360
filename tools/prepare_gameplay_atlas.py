@@ -31,6 +31,10 @@ IMAGES=[
     ('fattysheet','gfx/monsters/rebirth/monster_207_fatty.png',(520,1420)),
     ('poopsheet','gfx/grid/grid_poop_1.png',(1200,1160)),
     ('fireplacesheet','gfx/grid/grid_fireplace.png',(1200,1200)),
+    ('pickupheart','gfx/items/pick ups/pickup_001_heart.png',(1544,1000)),
+    ('pickupcoin','gfx/items/pick ups/pickup_002_coin.png',(1544,1200)),
+    ('pickupkey','gfx/items/pick ups/pickup_003_key.png',(1820,1000)),
+    ('pickupbomb','gfx/items/pick ups/pickup_016_bomb.png',(1820,1080)),
 ]
 ACTORS=[
     ('gaper','gfx/010.000_Frowning Gaper.anm2','WalkHori','Head',(1544,800)),

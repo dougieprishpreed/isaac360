@@ -324,6 +324,31 @@ static void DrawEnemies(){
             (float)kGameplayAtlasWidth,(float)kGameplayAtlasHeight);
     }
 }
+static void DrawPickups(){
+    if(!gGameplayAtlas||gNormalRuntime.world.currentList<0||gNormalRuntime.world.currentList>=kNativeWorldRoomLimit)return;
+    NativeWorldResident& live=gNormalRuntime.world.resident[gNormalRuntime.world.currentList];
+    if(!live.room||!live.view||!live.view->background.ready)return;
+    const NativeRoomBackground& background=live.view->background;
+    const NativeRoomSpace& space=live.room->space;
+    const float roomW=background.right-background.left,worldW=space.right-space.left;
+    const float roomH=background.bottom-background.top,worldH=space.bottom-space.top;
+    if(worldW<=0||worldH<=0)return;
+    static int loggedPickupList=-1;
+    if(loggedPickupList!=gNormalRuntime.world.currentList){loggedPickupList=gNormalRuntime.world.currentList;
+        for(int i=0;i<live.pickups.count;++i){NativePickup* p=live.pickups.entries[i];if(p)Log("PORT pickup variant=%d subtype=%d pos=(%.1f,%.1f)",p->variant,p->subtype,p->position.x,p->position.y);}}
+    for(int i=0;i<live.pickups.count;++i){NativePickup* p=live.pickups.entries[i];
+        if(!p||!p->ready||p->collected)continue;
+        int sx,sy;if(p->variant==10){sx=kGameplayPickupheartX;sy=kGameplayPickupheartY;}
+        else if(p->variant==20){sx=kGameplayPickupcoinX;sy=kGameplayPickupcoinY;}
+        else if(p->variant==30){sx=kGameplayPickupkeyX;sy=kGameplayPickupkeyY;}
+        else if(p->variant==40){sx=kGameplayPickupbombX;sy=kGameplayPickupbombY;}
+        else continue;
+        const float px=background.left+(p->position.x-space.left)*roomW/worldW;
+        const float py=background.top+(p->position.y-space.top)*roomH/worldH;
+        TexRect(gGameplayAtlas,px-8,py-8,16,16,(float)sx,(float)sy,32,32,
+            (float)kGameplayAtlasWidth,(float)kGameplayAtlasHeight);
+    }
+}
 static void DrawProjectiles(){
     if(!gGameplayAtlas||gNormalRuntime.world.currentList<0||gNormalRuntime.world.currentList>=kNativeWorldRoomLimit)return;
     NativeWorldResident& live=gNormalRuntime.world.resident[gNormalRuntime.world.currentList];
@@ -361,7 +386,7 @@ static void DrawHud(){
         (float)kGameplayAtlasWidth,(float)kGameplayAtlasHeight);
 }
 static void Gameplay(){
-    DrawBackground();DrawDoors();DrawRocks();DrawEnemies();DrawPlayer();DrawProjectiles();DrawHud();
+    DrawBackground();DrawDoors();DrawRocks();DrawPickups();DrawEnemies();DrawPlayer();DrawProjectiles();DrawHud();
     gDevice->SetTexture(0,gAtlas);
 }
 static void Anim(int id,int frame,float x,float y,float scale=kFrontendScale,float angle=0,const int* itemIcon=0,DWORD tint=0xffffffff,bool flipX=false,const float* extraAdd=0) {
@@ -518,10 +543,12 @@ VOID __cdecl main() {
                             gNormalRuntime.entryIssue.construction.variant,gNormalRuntime.entryIssue.construction.subtype);}
                 if(gNormalRuntime.tickFrame%30==0){
                     NativeWorldResident& live=gNormalRuntime.world.resident[gNormalRuntime.world.currentList];
-                    Log("PORT normal tick=%u result=%d pos=(%.2f,%.2f) hp=%d/%d soul=%d enemies=%d pickups=%d clear=%d hits=%u transitions=%u",
+                    Log("PORT normal tick=%u result=%d pos=(%.2f,%.2f) hp=%d/%d soul=%d enemies=%d pickups=%d collected=%u coins=%d keys=%d bombs=%d clear=%d hits=%u transitions=%u",
                         gNormalRuntime.tickFrame,tick,gNormalRuntime.playerBody.position.x,gNormalRuntime.playerBody.position.y,
                         gNormalRuntime.playerState.redHearts,gNormalRuntime.playerState.maxRedHearts,gNormalRuntime.playerState.soulHearts,
-                        live.enemies.count,live.pickups.count,live.room?live.room->clear:0,gNormalRuntime.playerHits,gNormalRuntime.roomTransitions);
+                        live.enemies.count,live.pickups.count,gNormalRuntime.pickupsCollected,gNormalRuntime.playerState.coins,
+                        gNormalRuntime.playerState.keys,gNormalRuntime.playerState.bombs,live.room?live.room->clear:0,
+                        gNormalRuntime.playerHits,gNormalRuntime.roomTransitions);
                 }
                 if(tick==NFR_BAD_REQUEST)Log("PORT normal tick rejected prerequisite=%08x",gNormalRuntime.missingNativePrerequisite);
             }else if(gNormalRuntime.phase==PNR_DYING||gNormalRuntime.phase==PNR_GAME_OVER){

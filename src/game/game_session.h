@@ -56,7 +56,7 @@ struct PortNormalRuntime {
     //services remain separate presentation work.
     unsigned int completeWholeGameplayTicks;
     unsigned int enemyKills,doorsOpened,roomTransitions;
-    unsigned int playerHits,playerDeathTicks,doorsUnlocked,gameOverCount;int playerInvulnerable;
+    unsigned int playerHits,playerDeathTicks,doorsUnlocked,gameOverCount,pickupsCollected;int playerInvulnerable;
     bool playerDead,bossDefeated;
     int doorTransitionGrace;
     unsigned int tickFrame;

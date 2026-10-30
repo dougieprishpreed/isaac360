@@ -103,8 +103,10 @@ NativeSceneResult NativeSceneBuildRoom(const RoomRecord& record,const NativeRoom
                 float px,py;NativePoint position;
                 if(!room.geometry.Position(choice.grid,&px,&py)){delete plan;return NSC_UNSUPPORTED_EXTENT;}
                 position.x=px+20.0f;position.y=py+20.0f;
+                int variant=(int)entry.variant;
+                if(variant==0)variant=NativePickupVariant(record.type,choice.seed);
                 NativePickup* pickup=new NativePickup;
-                if(!pickup->Begin((int)entry.type,(int)entry.variant,(int)entry.subtype,choice.grid,choice.seed,frame,position)){
+                if(!pickup->Begin((int)entry.type,variant,(int)entry.subtype,choice.grid,choice.seed,frame,position)){
                     delete pickup;delete plan;return NSC_BAD_REQUEST;}
                 pickups->entries[pickups->count++]=pickup;
             }

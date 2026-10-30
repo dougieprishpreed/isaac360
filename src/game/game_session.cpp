@@ -1,7 +1,7 @@
 #include "game_session.h"
 #include "native_room_update.h"
 #include <string.h>
-PortNormalRuntime::PortNormalRuntime():initialSaveFileWritten(false),phase(PNR_IDLE),missingNativePrerequisite(0),completePlayerInitializations(0),completePlayerTicks(0),completeWholeGameplayTicks(0),enemyKills(0),doorsOpened(0),roomTransitions(0),playerHits(0),playerDeathTicks(0),doorsUnlocked(0),gameOverCount(0),playerInvulnerable(0),playerDead(false),bossDefeated(false),doorTransitionGrace(0),tickFrame(0),playerTailTrailSegments(0),playerTailRenderCallbacks(0),playerTailTicks(0),roomEntryPrefixPrepared(false) {
+PortNormalRuntime::PortNormalRuntime():initialSaveFileWritten(false),phase(PNR_IDLE),missingNativePrerequisite(0),completePlayerInitializations(0),completePlayerTicks(0),completeWholeGameplayTicks(0),enemyKills(0),doorsOpened(0),roomTransitions(0),playerHits(0),playerDeathTicks(0),doorsUnlocked(0),gameOverCount(0),pickupsCollected(0),playerInvulnerable(0),playerDead(false),bossDefeated(false),doorTransitionGrace(0),tickFrame(0),playerTailTrailSegments(0),playerTailRenderCallbacks(0),playerTailTicks(0),roomEntryPrefixPrepared(false) {
     memset(&run,0,sizeof(run));memset(&entryIssue,0,sizeof(entryIssue));
     gameRandom.Default();
 }
@@ -50,7 +50,7 @@ PortSessionStart PortGameSession::StartNormalCharacter(unsigned int seed,PortNor
         //Virtual Init, the reached resource/callback services and manager
         //registration have returned before006b4b5e generation begins.
         runtime.missingNativePrerequisite=0;runtime.phase=PNR_GENERATING;runtime.tickFrame=0;
-        runtime.completePlayerInitializations=runtime.completePlayerTicks=0;runtime.completeWholeGameplayTicks=0;runtime.enemyKills=runtime.doorsOpened=runtime.roomTransitions=0;runtime.playerHits=runtime.playerDeathTicks=runtime.doorsUnlocked=runtime.gameOverCount=0;runtime.playerInvulnerable=0;runtime.playerDead=false;runtime.bossDefeated=false;runtime.doorTransitionGrace=0;
+        runtime.completePlayerInitializations=runtime.completePlayerTicks=0;runtime.completeWholeGameplayTicks=0;runtime.enemyKills=runtime.doorsOpened=runtime.roomTransitions=0;runtime.playerHits=runtime.playerDeathTicks=runtime.doorsUnlocked=runtime.gameOverCount=runtime.pickupsCollected=0;runtime.playerInvulnerable=0;runtime.playerDead=false;runtime.bossDefeated=false;runtime.doorTransitionGrace=0;
         runtime.playerTailTrailSegments=0;runtime.playerTailRenderCallbacks=0;runtime.playerTailTicks=0;}
     if(start.result==NPS_WORLD_PENDING)runtime.roomEntryPrefixPrepared=false;
     delete next;

@@ -19,4 +19,8 @@ struct NativePickupList {
     NativePickupList():count(0){for(int i=0;i<64;++i)entries[i]=0;}
     void Clear();
 };
+//0069f3c0 weighted type5 variant selection for the ordinary room-type table.
+//The exact native MT mixing remains an equivalence limit; the variant weights
+//and room-type exclusions are transcribed from the saved instructions.
+int NativePickupVariant(int roomType,unsigned int seed);
 #endif
