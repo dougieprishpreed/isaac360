@@ -12,7 +12,7 @@ Resource readers, level generation, room components and the normal player lifecy
 
 The simulation gate is working on Windows, but the playable alpha RC is not close. The `747490`/`74ffa0` item/effect branches, remaining `739451`/`73d612` sprite/matrix consumers, the remaining `7ae620` visual room services, GPU layer composition, the D6 starting grant, combat, room transitions, progression, save/Continue and complete presentation and audio remain unfinished. Passing host checks does not establish Xbox 360 playability.
 
-The shared sources now compile into an Xbox 360 XEX with the installed XDK. Target execution, rendered-content and physical-console testing remain outstanding; no Xenia runtime was available for this pass.
+The shared sources compile into an Xbox 360 XEX with the installed XDK. The current XEX builds from the gameplay sources, but target execution, rendered-content and physical-console testing remain outstanding; no Xenia runtime is available in the workspace.
 
 ## Development requirements
 
