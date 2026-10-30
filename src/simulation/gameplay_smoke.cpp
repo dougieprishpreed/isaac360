@@ -54,6 +54,45 @@ unsigned int AdvanceToBoundary(PortGameSession& session,PortNormalRuntime& runti
     return steps;
 }
 }
+int RunEncounterProbe(NativeMt& random,PortFrontend& ui){
+    PortNormalRuntime* runtime=new PortNormalRuntime;PortGameSession session(random,ui);
+    PortSessionStart start=session.StartNormalCharacter(1035486403,*runtime);
+    if(start.result!=NPS_WORLD_PENDING)return 20;
+    if(!AdvanceToBoundary(session,*runtime))return 21;
+    if(runtime->phase!=PNR_READY)return 22;
+    const NativePlacedRoom* target=0;
+    for(int i=0;i<runtime->world.layout.count;++i)if(runtime->world.layout.rooms[i].definition==268500997){target=&runtime->world.layout.rooms[i];break;}
+    if(!target)return 23;
+    NativeSceneFiles files={"runtime/game/file_index.bin","runtime/game/",runtime->run.context.stageType+1,runtime->run.context.nativeMode,0};
+    NativeRoomSetupContext setup={files.backdrop,runtime->run.floor.plan.configStage,false,0};NativeWorldIssue issue;
+    if(runtime->world.Enter(target->gridIndex,target->dimension,files,&issue,&setup)!=NWR_OK)return 24;
+    if(runtime->world.PrepareDoorActors(random,files.frame)!=NDR_OK)return 30;
+    NativeWorldResident& live=runtime->world.resident[runtime->world.currentList];NativeRoomState* room=runtime->world.Current();
+    const int spawned=live.enemies.count;if(!room||spawned<=0)return 25;
+    const int targetKills=spawned;
+    for(int guard=0;guard<12&&live.enemies.count>0;++guard){
+        NativeEnemy* enemy=live.enemies.entries[0];if(!enemy)return 26;
+        int action=enemy->body.position.x>=runtime->playerBody.position.x?5:4;
+        float distance=enemy->body.position.x-runtime->playerBody.position.x;
+        if(distance<0.0f)distance=-distance;if(distance<80.0f){
+            float x=enemy->body.position.x+(action==5?-100.0f:100.0f);
+            if(x<80.0f||x>560.0f)x=enemy->body.position.x;
+            runtime->playerBody.position.x=x;runtime->playerBody.position.y=enemy->body.position.y;
+            action=enemy->body.position.x>=runtime->playerBody.position.x?5:4;
+        }
+        if(!RunProjectileTicks(session,*runtime,action,-1,80))return 27;
+    }
+    for(int i=0;i<10&&live.enemies.count>0;++i)if(!RunProjectileTicks(session,*runtime,-1,-1,20))return 28;
+    int attached=0,openDoors=0;
+    if(live.doors)for(int slot=0;slot<8;++slot)if(live.doors->attached&(1U<<slot)){++attached;if(live.doors->actors[slot].state==2)++openDoors;}
+    if(live.doors)for(int slot=0;slot<8;++slot)if(live.doors->attached&(1U<<slot))
+        printf("ENCOUNTER_DOOR slot=%d state=%d source=%d target=%d variant=%d\n",slot,live.doors->actors[slot].state,
+            live.doors->actors[slot].sourceType,live.doors->actors[slot].targetType,live.doors->actors[slot].variant);
+    printf("ENCOUNTER seed=1035486403 room=268500997 enemies=%d kills=%u remaining=%d clear=%d doors=%d open=%d doorsOpened=%u projectiles=%u\n",
+        targetKills,runtime->enemyKills,live.enemies.count,room->clear?1:0,attached,openDoors,runtime->doorsOpened,runtime->projectiles.spawned);
+    bool ok=spawned==targetKills&&runtime->enemyKills>=(unsigned int)targetKills&&live.enemies.count==0&&room->clear&&runtime->doorsOpened>0;
+    delete runtime;return ok?0:29;
+}
 int main(int argc,char** argv){
     unsigned int seed=argc>1?(unsigned int)strtoul(argv[1],0,0):1;
     NativeMt random;random.ColdStart();PortFrontend ui;ui.Init(false);
@@ -156,6 +195,8 @@ int main(int argc,char** argv){
             runtime->completePlayerInitializations,runtime->completePlayerTicks,runtime->completeWholeGameplayTicks,
             settled.x,settled.y,fabsf(settled.x-atWall.x)<=0.01f);
         printf("TAIL_RNG unchanged=%d\n",memcmp(&rngBeforeTail,&runtime->gameRandom,sizeof(NativeRng))==0);
+        printf("SIM_STATE clear=%d enemyKills=%u doorsOpened=%u enemies=%d\n",room.clear?1:0,runtime->enemyKills,
+            runtime->doorsOpened,runtime->world.resident[runtime->world.currentList].enemies.count);
         unsigned int headTimerX=0,headTimerY=0,headCalls=0,headDirection=0;
         const NativePlayerCreationCache& headFields=runtime->playerCreation.constructorFields;
         const bool headPresent=headFields.Scalar(0x1280,&headTimerX)&&headFields.Scalar(0x1284,&headTimerY)&&
@@ -196,7 +237,7 @@ int main(int argc,char** argv){
         if(p)for(int slot=0;slot<8;++slot)if(p->doors&(1U<<slot)){
             const NativePlacedRoom* target=runtime->world.layout.DoorTarget(runtime->world.currentList,slot);
             const NativeRoomDef* d=target?NativeRoom(target->definition):0;
-            printf("DOOR slot=%d grid=%d type=%d variant=%u\n",slot,p->doorTargets[slot],d?d->type:-1,d?d->variant:0);
+            printf("DOOR slot=%d grid=%d definition=%d type=%d variant=%u\n",slot,p->doorTargets[slot],target?target->definition:-1,d?d->type:-1,d?d->variant:0);
         }
     }
     bool failed=runtime->phase==PNR_ERROR||runtime->phase==PNR_SOURCE_ERROR;
@@ -224,5 +265,6 @@ int main(int argc,char** argv){
         printf("RESTART invalidRetained=1 selected=%d residents=%d next=%08x players=%u ticks=%u MTindex=%d\n",selected->definition,
             runtime->world.residentCount,runtime->missingNativePrerequisite,runtime->completePlayerInitializations,runtime->completePlayerTicks,random.index);
     }
+    if(!failed){int encounter=RunEncounterProbe(random,ui);if(encounter){printf("ENCOUNTER_RESULT failed=%d\n",encounter);failed=true;}}
     delete runtime;return failed?5:0;
 }

@@ -16,7 +16,7 @@ struct NativeProjectile {
 class NativeProjectileSystem {
 public:
     std::vector<NativeProjectile> active;
-    unsigned int spawned,wallHits,expired;
+    unsigned int spawned,wallHits,expired,enemyKills;
     float cooldown;
     NativeProjectileSystem();
     void Reset();

@@ -11,6 +11,18 @@ float Add(float a,float b){volatile float v=a+b;return v;}
 float Div(float a,float b){volatile float v=a/b;return v;}
 void Fold(unsigned int& h,unsigned int n){for(int i=0;i<4;++i)h=(h^((n>>(i*8))&255))*16777619U;}
 void Scalar(unsigned int& h,float n){unsigned int b;memcpy(&b,&n,4);Fold(h,b);}
+//Inherited entities2.xml type10 physical records. AI, death FX and rendering
+//remain separate; these are the actual geometry/HP/damage fields.
+const NativeEntityBodyProperties kEnemyBodies[]={
+    {10,0,0,12,0.16f,1.0f,13.0f,1.0f,1.0f,1.0f,5.0f,10.0f,0.0f,"gfx/characters/010.000_Frowning Gaper.anm2"},
+    {10,1,0,12,0.14f,1.0f,13.0f,1.0f,1.0f,1.0f,5.0f,10.0f,0.0f,"gfx/characters/010.001_Gaper.anm2"}
+};
+}
+const NativeEntityBodyProperties* NativePreparedEnemyBody(int type,int variant){
+    if(type!=10)return 0;
+    for(unsigned int i=0;i<sizeof(kEnemyBodies)/sizeof(kEnemyBodies[0]);++i)
+        if(kEnemyBodies[i].variant==variant)return &kEnemyBodies[i];
+    return 0;
 }
 const NativeEntityBodyProperties* NativePreparedPlayerBody(int variant){
     for(unsigned int i=0;i<sizeof(kNativePlayerBodies)/sizeof(kNativePlayerBodies[0]);++i)
@@ -46,7 +58,7 @@ NativeEntityBody::NativeEntityBody():ready(false),native168(false),native169(fal
 }
 NativeEntityBodyResult NativeEntityBody::BeginFresh(int t,int v,int sub,unsigned int seed,unsigned int frame,int stage,const NativePoint* pos,const NativePoint* vel){
     if(t<0||v<0||sub<0||!seed||stage<0)return NEB_BAD_REQUEST;
-    const NativeEntityBodyProperties* p=t==1&&sub==0?NativePreparedPlayerBody(v):t==1000?NativePreparedEffectBody(v,sub):0;
+    const NativeEntityBodyProperties* p=t==1&&sub==0?NativePreparedPlayerBody(v):t==10?NativePreparedEnemyBody(t,v):t==1000?NativePreparedEffectBody(v,sub):0;
     if(!p)return NEB_UNSUPPORTED_PROPERTIES;
     NativeEntityBody next;next.type=t;next.variant=v;next.subtype=sub;next.initialSeed=seed;next.random.Set(seed,30);
     next.frameCount=0; //66f544: native+24 reset.

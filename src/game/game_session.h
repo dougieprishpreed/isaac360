@@ -55,6 +55,7 @@ struct PortNormalRuntime {
     //owner update after the player/collision pass. Rendering-only room tail
     //services remain separate presentation work.
     unsigned int completeWholeGameplayTicks;
+    unsigned int enemyKills,doorsOpened;
     unsigned int tickFrame;
     //736d70's reached post-755870 presentation/effect state. The trail count
     //is a host-visible record of the original7697a0 first-block segments; the

@@ -4,10 +4,12 @@
 #include <stdio.h>
 #include <string.h>
 namespace {
-enum Factory { FACTORY_MISSING,FACTORY_MARKER,FACTORY_DECORATION,FACTORY_WALL };
+enum Factory { FACTORY_MISSING,FACTORY_MARKER,FACTORY_DECORATION,FACTORY_WALL,FACTORY_ENEMY };
 Factory SelectedFactory(const RoomRecord& record,const NativeSpawnChoice& choice,int backdrop,int mode) {
     const RoomRecordOption& e=choice.entry;
     if(e.type==970)return FACTORY_MARKER;
+    //Inherited type10 Gaper records are the first maintained actor factory.
+    if(e.type==10&&(e.variant==0||e.variant==1)&&e.subtype==0)return FACTORY_ENEMY;
     //0079c1b3 maps1999 to grid15. Ordinary wall Init has no asset/MT calls;
     //room16's graphics path remains an explicit dependency.
     if(e.type==1999&&record.type!=16)return FACTORY_WALL;
@@ -48,7 +50,7 @@ NativeSceneResult NativeSceneReadRecord(const NativeSceneFiles& files,int defini
     *bytes=raw;*length=d->bytes;*recordHash=hash?hash:1;return NSC_OK;
 }
 NativeSceneResult NativeSceneBuildRoom(const RoomRecord& record,const NativeRoomSeeds& seeds,int backdrop,int nativeMode,int configStage,
-    NativeRoomState* output,NativeConstructionIssue* issue,NativeRoomMarkers* markers,unsigned int frame) {
+    NativeRoomState* output,NativeConstructionIssue* issue,NativeRoomMarkers* markers,unsigned int frame,NativeEnemyList* enemies) {
     NativeConstructionIssue detail={NCS_HEADER,-1,0,0,0,NRS_BAD_DATA};if(issue)*issue=detail;
     if(!output||backdrop<0||nativeMode<0||nativeMode>1||configStage<0||!seeds.spawn||!seeds.award)return NSC_BAD_REQUEST;
     if(record.format!=RRF_STB1){detail.stage=NCS_FORMAT;if(issue)*issue=detail;return NSC_UNSUPPORTED_CONTENT;}
@@ -72,6 +74,17 @@ NativeSceneResult NativeSceneBuildRoom(const RoomRecord& record,const NativeRoom
         Factory factory=SelectedFactory(record,choice,backdrop,nativeMode);
         if(factory==FACTORY_MARKER)continue;
         detail.stage=NCS_ENTRY;detail.choice=i;detail.type=entry.type;detail.variant=entry.variant;detail.subtype=entry.subtype;if(issue)*issue=detail;
+        if(factory==FACTORY_ENEMY){
+            if(!enemies||enemies->count>=64){delete plan;return NSC_UNSUPPORTED_CONTENT;}
+            float px,py;NativePoint position;
+            if(!room.geometry.Position(choice.grid,&px,&py)){delete plan;return NSC_UNSUPPORTED_EXTENT;}
+            position.x=px+20.0f;position.y=py+20.0f;
+            NativeEnemy* enemy=new NativeEnemy;
+            if(!enemy->Begin((int)entry.variant,choice.seed,position,frame,configStage)){
+                delete enemy;delete plan;return NSC_BAD_REQUEST;
+            }
+            enemies->entries[enemies->count++]=enemy;room.encounter=true;continue;
+        }
         if(factory==FACTORY_WALL){
             //0079b508 refuses a grid already occupied by an earlier stack.
             //Decoration props also occupy native+24 even though noncolliding.
@@ -92,5 +105,5 @@ NativeSceneResult NativeSceneBuildRoom(const RoomRecord& record,const NativeRoom
         //approximate movement, HP, rewards or item effects are not substitutes.
         delete plan;return NSC_UNSUPPORTED_CONTENT;
     }
-    if(markers)*markers=plan->markers;delete plan;detail.stage=NCS_READY;if(issue)*issue=detail;*output=room;return NSC_OK;
+    if(markers)*markers=plan->markers;room.clear=!room.encounter;delete plan;detail.stage=NCS_READY;if(issue)*issue=detail;*output=room;return NSC_OK;
 }

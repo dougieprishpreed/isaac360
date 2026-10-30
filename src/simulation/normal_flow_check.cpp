@@ -123,17 +123,18 @@ void ReadDefinition(int id,unsigned int placementSeed,int mode,int backdrop,int 
         fprintf(events,"DEPENDENCY\t%d\t%u\t%u\t%u\t%d\n",contextId,it->first[0],it->first[1],it->first[2],it->second);
     missingDependencies+=dependencies->count;
     NativeRoomState* room=new NativeRoomState;memset(room,0x36,sizeof(*room));NativeRoomState* previous=new NativeRoomState(*room);
-    NativeConstructionIssue issue;result=NativeSceneBuildRoom(record,seeds,backdrop,mode,configStage,room,&issue);
+    NativeEnemyList* enemies=new NativeEnemyList;
+    NativeConstructionIssue issue;result=NativeSceneBuildRoom(record,seeds,backdrop,mode,configStage,room,&issue,0,0,enemies);
     if(result==NSC_OK){++constructed;Check(dependencies->count==0,"no-success-with-unimplemented-selected-dependency",id);}
     else {
         bool gap=result==NSC_UNSUPPORTED_CONTENT||result==NSC_UNSUPPORTED_SHAPE||result==NSC_UNSUPPORTED_EXTENT;
         Check(gap,"unexpected-construction-error-is-not-a-coverage-gap",id);if(gap)++constructionGaps;
-        Check(result!=NSC_UNSUPPORTED_CONTENT||dependencies->count>0,"unsupported-construction-has-selected-dependency",id);
+        Check(result==NSC_OK||dependencies->count>0,"unsupported-construction-has-selected-dependency",id);
         Check(memcmp(room,previous,sizeof(*room))==0,"construction-atomic",id);
         fprintf(events,"GAP\tconstruct\t%d\t%d\t%d\t%u\t%u\t%u\n",id,result,issue.stage,issue.type,issue.variant,issue.subtype);
     }
     fprintf(events,"CONSTRUCT\t%d\t%d\t%d\t%d\t%d\t%d\t%u\t%u\t%u\t%u\t%u\t%u\t%d\t%d\n",contextId,id,result,mode,backdrop,configStage,seeds.spawn,seeds.award,seeds.decoration,seeds.auxiliary,flags,visits,dependencies->supported,dependencies->count);
-    delete dependencies;delete plan;delete previous;delete room;
+    enemies->Clear();delete enemies;delete dependencies;delete plan;delete previous;delete room;
 }
 void Catalog(const char* root) {
     FILE* f=Input(root,"catalog.tsv");if(!f)return;
@@ -1210,11 +1211,14 @@ void OwnedSession() {
         const bool headTimers=runtime->playerCreation.constructorFields.Scalar(0x1280,&headTimerX)&&
             runtime->playerCreation.constructorFields.Scalar(0x1284,&headTimerY)&&
             runtime->playerCreation.constructorFields.Scalar(0x1e88,&headCalls);
+        const NativeRoomState* firstRoom=runtime->world.Current();
+        const NativeWorldResident& firstResident=runtime->world.resident[runtime->world.currentList];
         if(runtime->phase==PNR_READY)Check(advanced==NFR_PENDING&&runtime->world.residentCount==1&&
             runtime->completePlayerInitializations==1&&runtime->completePlayerTicks>=1&&
             runtime->completeWholeGameplayTicks==runtime->completePlayerTicks&&runtime->missingNativePrerequisite==0&&
             runtime->playerBody.position.x==320&&runtime->playerBody.position.y==380&&headTimers&&
-            headTimerX==0xffffffffU&&headTimerY==0xffffffffU&&headCalls==runtime->completePlayerTicks,
+            headTimerX==0xffffffffU&&headTimerY==0xffffffffU&&headCalls==runtime->completePlayerTicks&&
+            firstRoom&&firstRoom->clear&&firstResident.enemies.count==0&&runtime->doorsOpened>0,
             "owned-session-complete-player-and-first-whole-tick");
         else if(d6&&runtime->missingNativePrerequisite==0x713120){++d6Stops;
             Check(advanced==NFR_PENDING&&runtime->phase==PNR_NEED_NATIVE_INIT&&runtime->world.residentCount==1&&

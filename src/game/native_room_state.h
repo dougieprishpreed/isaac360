@@ -18,6 +18,8 @@ struct NativeRoomState {
     int staticGridCount;
     int native6f60,native11ec; //7a0b19/7a10e7, consumed by79d610.
     int native1210; //7a2cc3 music-intensity state.
+    bool clear; //Room-clear owner; opens ordinary doors when no live enemies remain.
+    bool encounter; //A resolved actor set owns clear state.
     bool particlesEnabled; //7971dc, Room1798+8;8d8470's initial early return.
     unsigned int native7628[8]; //797840.. constructors; optional door effect references.
 };

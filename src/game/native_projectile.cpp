@@ -7,10 +7,11 @@ namespace {
 float Length(NativePoint p){return (float)sqrt((double)(p.x*p.x+p.y*p.y));}
 }
 NativeProjectileSystem::NativeProjectileSystem(){Reset();}
-void NativeProjectileSystem::Reset(){active.clear();spawned=wallHits=expired=0;cooldown=0;}
+void NativeProjectileSystem::Reset(){active.clear();spawned=wallHits=expired=enemyKills=0;cooldown=0;}
 void NativeProjectileSystem::Swap(NativeProjectileSystem& b){
     active.swap(b.active);unsigned int n=spawned;spawned=b.spawned;b.spawned=n;
     n=wallHits;wallHits=b.wallHits;b.wallHits=n;n=expired;expired=b.expired;b.expired=n;
+    n=enemyKills;enemyKills=b.enemyKills;b.enemyKills=n;
     float c=cooldown;cooldown=b.cooldown;b.cooldown=c;
 }
 bool NativeProjectileSystem::Step(PortNormalRuntime& runtime,NativeActionSource* actions,unsigned int frame,unsigned int* next){
@@ -30,18 +31,38 @@ bool NativeProjectileSystem::Step(PortNormalRuntime& runtime,NativeActionSource*
         if(r==NPI_BAD_REQUEST||r==NPI_BAD_VALUE)return false;
         if(r==NPI_OK)fire=state.canShoot&&state.stats.weapons[1]&&(shot.x!=0.0f||shot.y!=0.0f);
     }
-    //Advance existing tears and pop them on the real room collision owner or
-    //when the evaluated range is exhausted.
+    NativeWorldResident& live=runtime.world.resident[runtime.world.currentList];
+    //Advance existing tears and pop them on the real room collision owner,
+    //enemy body contact or the evaluated range.
     for(unsigned int i=0;i<active.size();){
         NativeProjectile& p=active[i];
         p.position.x+=p.velocity.x;p.position.y+=p.velocity.y;
         p.travelled+=Length(p.velocity);
+        bool hitEnemy=false;
+        for(int e=0;e<live.enemies.count;++e){NativeEnemy* enemy=live.enemies.entries[e];
+            if(!enemy||!enemy->ready||enemy->dead)continue;
+            float dx=p.position.x-enemy->body.position.x,dy=p.position.y-enemy->body.position.y;
+            float radius=enemy->body.collision.radius+4.0f;
+            if(dx*dx+dy*dy<=radius*radius){
+                enemy->Damage(p.damage);hitEnemy=true;
+                if(enemy->dead){++enemyKills;++runtime.enemyKills;}
+                break;
+            }
+        }
+        if(hitEnemy){active.erase(active.begin()+i);continue;}
         int collision=0;
         if(!room->collision.AtPosition(room->geometry,p.position,room->space.zeroCollision,&collision)){*next=0x61f6d0;return false;}
         if(collision!=0&&collision!=5){++wallHits;active.erase(active.begin()+i);continue;}
         if(p.travelled>=p.range){++expired;active.erase(active.begin()+i);continue;}
         ++i;
     }
+    //Remove dead actors from the resident list, then expose the clear owner.
+    for(int e=0;e<live.enemies.count;){
+        NativeEnemy* enemy=live.enemies.entries[e];
+        if(enemy&&enemy->dead){delete enemy;for(int j=e+1;j<live.enemies.count;++j)live.enemies.entries[j-1]=live.enemies.entries[j];--live.enemies.count;live.enemies.entries[live.enemies.count]=0;continue;}
+        ++e;
+    }
+    if(live.enemies.count==0)room->clear=true;
     if(fire&&cooldown<=0.0f){
         float length=Length(shot);if(length<=0.0f)return false;
         NativeProjectile p;p.position=body.position;

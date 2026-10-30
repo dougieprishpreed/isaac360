@@ -13,6 +13,7 @@ struct NativeEntityBodyProperties {
 };
 const NativeEntityBodyProperties* NativePreparedPlayerBody(int variant);
 const NativeEntityBodyProperties* NativePreparedEffectBody(int variant,int subtype);
+const NativeEntityBodyProperties* NativePreparedEnemyBody(int type,int variant);
 class NativeSprite;
 struct NativeEntityCollisionShape {
     float radius,xMultiplier,yMultiplier;

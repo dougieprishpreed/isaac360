@@ -123,9 +123,17 @@ bool NativeRoomUpdate::TickSimulationTail(PortNormalRuntime& runtime,NativeActio
     //owner reached by this room. Visual/room-tail services between these two
     //addresses are presentation work and do not gate simulation completion.
     if(live.effects->roomEffects.Update(0)!=NEF_OK){*next=0x8798f0;return false;}
+    //Enemy actors advance before the projectile contact/damage pass.
+    for(int i=0;i<live.enemies.count;++i)if(live.enemies.entries[i])live.enemies.entries[i]->Update(*room,runtime.playerBody);
     //Primary weapon/projectile lifecycle follows the room simulation owner.
     if(!runtime.projectiles.Step(runtime,actions,runtime.tickFrame,next)){
         if(*next==0)*next=0x61f6d0;return false;
+    }
+    //Room clear opens ordinary doors, not treasure/locked targets. The door
+    //actor retains its own state and later interaction services.
+    if(room->clear&&live.doors)for(int slot=0;slot<8;++slot)if(live.doors->attached&(1U<<slot)){
+        NativeDoorActor& door=live.doors->actors[slot];
+        if(door.state==1&&door.targetType==1){door.previousState=door.state;door.state=2;++runtime.doorsOpened;}
     }
     return true;
 }

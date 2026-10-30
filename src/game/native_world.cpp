@@ -15,7 +15,7 @@ NativeWorldResult Result(NativeWorldIssue* issue,NativeWorldResult result,const 
 NativeWorld::NativeWorld(){memset(resident,0,sizeof(resident));Reset();}
 NativeWorld::~NativeWorld(){Reset();}
 void NativeWorld::Reset() {
-    for(int i=0;i<kNativeWorldRoomLimit;++i){delete resident[i].room;delete resident[i].doors;delete resident[i].effects;delete resident[i].view;delete[] resident[i].doorVisuals;delete resident[i].persistent;delete resident[i].update;memset(&resident[i],0,sizeof(resident[i]));}
+    for(int i=0;i<kNativeWorldRoomLimit;++i){resident[i].enemies.Clear();delete resident[i].room;delete resident[i].doors;delete resident[i].effects;delete resident[i].view;delete[] resident[i].doorVisuals;delete resident[i].persistent;delete resident[i].update;memset(&resident[i],0,sizeof(resident[i]));}
     layout.Reset();currentList=previousList=currentGrid=previousGrid=-1;residentCount=0;entrySerial=0;
 }
 bool NativeWorld::Bind(const NativeLevelLayout& selected) {
@@ -64,10 +64,11 @@ NativeWorldResult NativeWorld::Enter(int cell,int dimension,const NativeSceneFil
         bool opened=record.Open(raw,length,RRF_STB1)==RRR_OK;
         NativeRoomMarkers markers;NativeRoomSetupState setupState={0};
         int stage=setup?setup->configStage:NativeRoom(p->definition)->stage;
-        source=opened?NativeSceneBuildRoom(record,p->seeds,files.backdrop,files.nativeMode,stage,room,&detail,&markers,files.frame):NSC_SOURCE_ERROR;
+        resident[id].enemies.Clear();
+        source=opened?NativeSceneBuildRoom(record,p->seeds,files.backdrop,files.nativeMode,stage,room,&detail,&markers,files.frame,&resident[id].enemies):NSC_SOURCE_ERROR;
         if(source==NSC_OK&&setup&&!NativeSetupRoom(record.type,p->flags,p->visitedCount,p->seeds,markers,*setup,&setupState))source=NSC_BAD_REQUEST;
         delete[] raw;if(issue){issue->source=source;if(opened)issue->construction=detail;}
-        if(source!=NSC_OK){delete room;return Result(issue,source==NSC_SOURCE_ERROR?NWR_SOURCE_ERROR:
+        if(source!=NSC_OK){resident[id].enemies.Clear();delete room;return Result(issue,source==NSC_SOURCE_ERROR?NWR_SOURCE_ERROR:
             (source==NSC_UNSUPPORTED_CONTENT||source==NSC_UNSUPPORTED_SHAPE||source==NSC_UNSUPPORTED_EXTENT)?NWR_CONSTRUCTION_GAP:NWR_BAD_REQUEST,p);}
         //Room header's potential doors become this descriptor's enabled doors.
         //The door actor still owns open/locked/secret/payment semantics.
