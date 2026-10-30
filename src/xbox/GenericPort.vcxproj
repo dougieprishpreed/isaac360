@@ -30,6 +30,7 @@
     <Exec Command="python tools\prepare_native_data.py" WorkingDirectory="$(ProjectDir)..\.." />
     <Exec Command="python tools\prepare_boss_data.py" WorkingDirectory="$(ProjectDir)..\.." />
     <Exec Command="python tools\prepare_frontend.py" WorkingDirectory="$(ProjectDir)..\.." />
+    <Exec Command="python tools\prepare_gameplay_atlas.py" WorkingDirectory="$(ProjectDir)..\.." />
     <Exec Command="&quot;$(XEDK)\bin\win32\fxc.exe&quot; /nologo /T vs_3_0 /E VSMain /VnSpriteVS /Fhbuild\generated\sprite_vs.h src\xbox\sprite.hlsl" WorkingDirectory="$(ProjectDir)..\.." />
     <Exec Command="&quot;$(XEDK)\bin\win32\fxc.exe&quot; /nologo /T ps_3_0 /E PSMain /VnSpritePS /Fhbuild\generated\sprite_ps.h src\xbox\sprite.hlsl" WorkingDirectory="$(ProjectDir)..\.." />
   </Target>

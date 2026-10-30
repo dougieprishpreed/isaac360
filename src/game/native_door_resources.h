@@ -7,8 +7,8 @@ struct NativeRoomState;
 class NativeEntityBody;
 struct NativeDoorVisual {
     NativeSprite main,overlay;
-    bool ready;unsigned int nextAddress;
-    NativeDoorVisual():ready(false),nextAddress(0){}
+    bool ready,unsupportedTarget;unsigned int nextAddress;
+    NativeDoorVisual():ready(false),unsupportedTarget(false),nextAddress(0){}
     //Reached first-chapter assets and native closed state1. Gameplay opening
     //and per-frame door update are separate lifecycle operations.
     bool BindFresh(NativeDoorActor&,int backdrop,unsigned int sourceFlags,unsigned int targetFlags,const NativePlayerState&);

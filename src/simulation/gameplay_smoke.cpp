@@ -54,6 +54,37 @@ unsigned int AdvanceToBoundary(PortGameSession& session,PortNormalRuntime& runti
     return steps;
 }
 }
+int RunLockProbe(NativeMt& random,PortFrontend& ui){
+    PortNormalRuntime* runtime=new PortNormalRuntime;PortGameSession session(random,ui);
+    PortSessionStart start=session.StartNormalCharacter(1,*runtime);
+    if(start.result!=NPS_WORLD_PENDING)return 50;
+    if(!AdvanceToBoundary(session,*runtime)||runtime->phase!=PNR_READY)return 51;
+    NativeWorldResident& live=runtime->world.resident[runtime->world.currentList];NativeRoomState* room=runtime->world.Current();
+    int treasure=-1;float tx=0,ty=0;
+    if(live.doors)for(int i=0;i<8;++i)if((live.doors->attached&(1U<<i))&&live.doors->actors[i].targetType==10){
+        float px,py;if(room->geometry.Position(live.doors->actors[i].grid,&px,&py)){treasure=i;tx=px+20.0f;ty=py+20.0f;break;}
+    }
+    if(treasure<0)return 52;
+    runtime->playerBody.position.x=tx;runtime->playerBody.position.y=ty;runtime->playerState.keys=0;
+    if(!RunProjectileTicks(session,*runtime,-1,-1,1))return 53;
+    bool closedNoKey=live.doors->actors[treasure].state==1&&runtime->doorsUnlocked==0;
+    runtime->playerState.keys=1;runtime->playerBody.position.x=tx;runtime->playerBody.position.y=ty;
+    if(!RunProjectileTicks(session,*runtime,-1,-1,1))return 54;
+    bool openedWithKey=live.doors->actors[treasure].state==2&&runtime->doorsUnlocked==1&&runtime->playerState.keys==0;
+    int boss=-1;for(int i=0;i<8;++i)if((live.doors->attached&(1U<<i))&&i!=treasure){boss=i;break;}
+    if(boss<0)return 55;
+    live.doors->actors[boss].state=1;live.doors->actors[boss].previousState=1;live.doors->actors[boss].targetType=5;
+    runtime->bossDefeated=false;runtime->playerBody.position.x=100.0f;runtime->playerBody.position.y=200.0f;
+    if(!RunProjectileTicks(session,*runtime,-1,-1,1))return 56;
+    bool bossClosed=live.doors->actors[boss].state==1;
+    runtime->bossDefeated=true;
+    if(!RunProjectileTicks(session,*runtime,-1,-1,1))return 57;
+    bool bossOpen=live.doors->actors[boss].state==2;
+    printf("LOCK treasureSlot=%d noKeyClosed=%d keyOpened=%d keysLeft=%d doorsUnlocked=%u bossClosed=%d bossOpened=%d\n",
+        treasure,closedNoKey?1:0,openedWithKey?1:0,runtime->playerState.keys,runtime->doorsUnlocked,bossClosed?1:0,bossOpen?1:0);
+    bool ok=closedNoKey&&openedWithKey&&bossClosed&&bossOpen;
+    delete runtime;return ok?0:58;
+}
 int RunDeathProbe(NativeMt& random,PortFrontend& ui){
     PortNormalRuntime* runtime=new PortNormalRuntime;PortGameSession session(random,ui);
     PortSessionStart start=session.StartNormalCharacter(1035486403,*runtime);
@@ -74,7 +105,20 @@ int RunDeathProbe(NativeMt& random,PortFrontend& ui){
     printf("DEATH seed=1035486403 room=268500997 hits=%u hp=%d/%d soul=%d dead=%d ticks=%u enemies=%d\n",
         runtime->playerHits,runtime->playerState.redHearts,runtime->playerState.maxRedHearts,
         runtime->playerState.soulHearts,runtime->playerDead?1:0,ticks,live.enemies.count);
-    bool ok=runtime->playerDead&&runtime->playerHits>0&&runtime->playerState.redHearts==0&&ticks>0&&live.enemies.count>0;
+    NativeActionFrame frame;frame.Clear(runtime->playerCreation.native153c,runtime->playerBody.entityToken,files.frame);
+    frame.SupplyConnection(true);frame.SupplyDrop(false);
+    for(int action=0;action<12;++action){frame.SupplyHeld(action,false);frame.SupplyPressed(action,false);}
+    for(int action=0;action<8;++action)frame.SupplyValue(action,0);
+    NativeFrameActions noInput(frame);
+    unsigned int dying=0;
+    while(runtime->phase==PNR_DYING&&dying<120){session.TickNormal(*runtime,files,&noInput);++dying;}
+    const bool gameOver=runtime->phase==PNR_GAME_OVER;const unsigned int hits=runtime->playerHits;
+    PortSessionStart restart=session.RestartNormal(1035486403,*runtime,files,&noInput);
+    bool restarted=restart.result==NPS_WORLD_PENDING&&runtime->phase==PNR_READY&&!runtime->playerDead&&
+        runtime->playerState.redHearts==runtime->playerState.maxRedHearts&&runtime->completePlayerInitializations==1;
+    printf("DEATH_FLOW dyingTicks=%u gameOver=%d restartResult=%d restartPhase=%d restartHP=%d/%d\n",
+        dying,gameOver?1:0,restart.result,runtime->phase,runtime->playerState.redHearts,runtime->playerState.maxRedHearts);
+    bool ok=hits>0&&ticks>0&&gameOver&&restarted;
     delete runtime;return ok?0:46;
 }
 int RunTransitionProbe(NativeMt& random,PortFrontend& ui){
@@ -319,6 +363,7 @@ int main(int argc,char** argv){
     }
     if(!failed){int encounter=RunEncounterProbe(random,ui);if(encounter){printf("ENCOUNTER_RESULT failed=%d\n",encounter);failed=true;}}
     if(!failed){int transition=RunTransitionProbe(random,ui);if(transition){printf("TRANSITION_RESULT failed=%d\n",transition);failed=true;}}
+    if(!failed){int locks=RunLockProbe(random,ui);if(locks){printf("LOCK_RESULT failed=%d\n",locks);failed=true;}}
     if(!failed){int death=RunDeathProbe(random,ui);if(death){printf("DEATH_RESULT failed=%d\n",death);failed=true;}}
     delete runtime;return failed?5:0;
 }

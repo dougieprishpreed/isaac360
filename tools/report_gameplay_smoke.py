@@ -18,6 +18,8 @@ def main():
     encounter=re.search(r'^ENCOUNTER seed=(\d+) room=(\d+) enemies=(\d+) kills=(\d+) remaining=(\d+) clear=(\d+) doors=(\d+) open=(\d+) doorsOpened=(\d+) projectiles=(\d+)',log,re.M)
     transition=re.search(r'^TRANSITION seed=(\d+) from=(-?\d+) slot=(\d+) to=(-?\d+) definition=(-?\d+) room=(\d+) enemies=(\d+) transitions=(\d+)',log,re.M)
     death=re.search(r'^DEATH seed=(\d+) room=(\d+) hits=(\d+) hp=(-?\d+)/(-?\d+) soul=(-?\d+) dead=(\d+) ticks=(\d+) enemies=(\d+)',log,re.M)
+    deathflow=re.search(r'^DEATH_FLOW dyingTicks=(\d+) gameOver=(\d+) restartResult=(\d+) restartPhase=(\d+) restartHP=(-?\d+)/(-?\d+)',log,re.M)
+    lock=re.search(r'^LOCK treasureSlot=(\d+) noKeyClosed=(\d+) keyOpened=(\d+) keysLeft=(-?\d+) doorsUnlocked=(\d+) bossClosed=(\d+) bossOpened=(\d+)',log,re.M)
     paths=set()
     for folder in ('src/game','src/content','build/generated'):
         paths.update(f for f in (ROOT/folder).rglob('*') if f.suffix in ('.cpp','.h','.inc'))
@@ -54,6 +56,14 @@ def main():
             'player_dead':bool(int(death.group(7))) if death else False,
             'death_ticks':int(death.group(8)) if death else 0,
             'death_enemies_remaining':int(death.group(9)) if death else -1,
+            'lock_no_key_closed':bool(int(lock.group(2))) if lock else False,
+            'lock_key_opened':bool(int(lock.group(3))) if lock else False,
+            'lock_keys_left':int(lock.group(4)) if lock else -1,
+            'boss_door_closed_before':bool(int(lock.group(6))) if lock else False,
+            'boss_door_opened_after':bool(int(lock.group(7))) if lock else False,
+            'dying_ticks':int(deathflow.group(1)) if deathflow else 0,
+            'game_over':bool(int(deathflow.group(2))) if deathflow else False,
+            'restart_ready':bool(deathflow and int(deathflow.group(4))==5) if deathflow else False,
             'collision_stop':('%.9g'%float(gameplay.group(4)),'%.9g'%float(gameplay.group(5))) if gameplay else None,
             'collision_stable':bool(int(gameplay.group(6))) if gameplay else False,
             'checkpoint_returned':'CHECKPOINT buffer=' in log,'resident_restart_checked':'RESTART invalidRetained=1' in log,
@@ -61,7 +71,7 @@ def main():
             'tail_trail_segments':int(tail.group(2)) if tail else 0,
             'tail_render_callbacks':int(tail.group(3)) if tail else 0,
             'tail_reached_fields_present':[bool(int(tail.group(i))) for i in (4,5,6,7)] if tail else []},
-        'scope':'Focused owned session execution: normal New Run reaches an initialized player and repeated whole simulation ticks in its generated starting room. Each tick completes 414dc0 actor/player update, 6712a0 collision, the disabled 8d8470 particle gate, the 8798f0 room-effect cache Update and the primary projectile lifecycle using the evaluated shot vector and fireDelay/shotSpeed/damage/range stats; host evidence observes spawn, wall collision and range expiry. A stage-owned generated Gaper room constructs its actual spawn plan, advances the enemy, kills it with projectiles, sets room clear and opens a normal door. A cleared normal door accepts the player, constructs the exact linked resident (rocks and enemies), places the player at the reciprocal door and continues whole ticks. A generated Gaper encounter damages and kills the player through six contact hits; player HP reaches zero and death state latches. Native 72c430 executes the reached no-item timer/counter/direction state; 736d70 executes a bounded post-755870 tail through the 73891f state checks, effect-cache update, reached 747490/74ffa0 clean owner checks, no-item sprite anchors, first 7697a0 trail block and 7f0e50 no-callback return. Deferred presentation/room visuals: 747490/74ffa0 item/effect branches, full 739451/73d612 consumers, remaining 7ae620 visual services, GPU rendering/audio. Deferred gameplay: remaining enemy variants/AI/death FX, transitions, 72c430 item/controlled branches, 713120 D6 grant, profile content stops, native file save/Continue, target execution.',
+        'scope':'Focused owned session execution: normal New Run reaches an initialized player and repeated whole simulation ticks in its generated starting room. Each tick completes 414dc0 actor/player update, 6712a0 collision, the disabled 8d8470 particle gate, the 8798f0 room-effect cache Update and the primary projectile lifecycle using the evaluated shot vector and fireDelay/shotSpeed/damage/range stats; host evidence observes spawn, wall collision and range expiry. A stage-owned generated Gaper room constructs its actual spawn plan, advances the enemy, kills it with projectiles, sets room clear and opens a normal door. A cleared normal door accepts the player, constructs the exact linked resident (rocks and enemies), places the player at the reciprocal door and continues whole ticks. A generated Gaper encounter damages and kills the player through six contact hits; player HP reaches zero, a 60-tick dying state reaches game over, and restart rebuilds a ready player at full health. Treasure doors stay closed without a key, consume one key on contact, and boss doors open only after the boss-defeated flag. Native 72c430 executes the reached no-item timer/counter/direction state; 736d70 executes a bounded post-755870 tail through the 73891f state checks, effect-cache update, reached 747490/74ffa0 clean owner checks, no-item sprite anchors, first 7697a0 trail block and 7f0e50 no-callback return. Deferred presentation/room visuals: 747490/74ffa0 item/effect branches, full 739451/73d612 consumers, remaining 7ae620 visual services, GPU rendering/audio. Deferred gameplay: remaining enemy variants/AI/death FX, transitions, 72c430 item/controlled branches, 713120 D6 grant, profile content stops, native file save/Continue, target execution.',
         'sha256':{f.relative_to(ROOT).as_posix():hashlib.sha256(f.read_bytes()).hexdigest() for f in sorted(paths)}}
     (ROOT/'build/gameplay/result.json').write_text(json.dumps(packet,indent=2)+'\n')
 if __name__=='__main__':main()

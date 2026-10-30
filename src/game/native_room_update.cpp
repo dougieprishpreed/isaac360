@@ -35,6 +35,10 @@ bool NativeRoomUpdate::PrepareInitialActors(PortNormalRuntime& runtime,NativeAct
         while(gridCursor<(unsigned int)room->geometry.cells){
             const int cell=(int)gridCursor;bool found=false;
             for(int slot=0;slot<8;++slot)if((live.doors->attached&(1U<<slot))&&live.doors->actors[slot].grid==cell){
+                //A door whose target sprite binding is an explicit presentation
+                //gap still owns its collision and state. Its visual update is
+                //not synthesized.
+                if(!live.doorVisuals[slot].ready&&live.doorVisuals[slot].unsupportedTarget){room->collision.classes[cell]=4;found=true;break;}
                 const NativePlacedRoom* target=world.layout.DoorTarget(world.currentList,slot);
                 if(!target||!live.doorVisuals[slot].UpdateInitialClosed(live.doors->actors[slot],*room,target->flags,runtime.run.context.effectiveCurses,runtime.playerBody,runtime.playerState,next))return false;
                 room->collision.classes[cell]=4;found=true;break;
@@ -117,6 +121,7 @@ bool NativeRoomUpdate::TickSimulationTail(PortNormalRuntime& runtime,NativeActio
     NativeRoomState* room=runtime.world.Current();
     if(!room||!live.effects)return false;
     if(runtime.doorTransitionGrace>0)--runtime.doorTransitionGrace;
+    bool openedThisTick[8]={false,false,false,false,false,false,false,false};
     //7af3ab ->8d8470: the reached particle emitter is disabled by Room1798+8
     //for this selected room. If it becomes enabled, stop at that caller.
     if(room->particlesEnabled){*next=0x8d8470;return false;}
@@ -135,7 +140,7 @@ bool NativeRoomUpdate::TickSimulationTail(PortNormalRuntime& runtime,NativeActio
         int damage=(int)enemy->body.collisionDamage;if(damage<=0)continue;
         if(runtime.playerInvulnerable<=0){
             bool dead=runtime.playerState.Damage(damage);++runtime.playerHits;runtime.playerInvulnerable=30;
-            if(dead){runtime.playerDead=true;runtime.playerBody.removed=true;}
+            if(dead){runtime.playerDead=true;runtime.playerBody.removed=true;runtime.phase=PNR_DYING;runtime.playerDeathTicks=0;}
             break;
         }
     }
@@ -143,11 +148,20 @@ bool NativeRoomUpdate::TickSimulationTail(PortNormalRuntime& runtime,NativeActio
     if(!runtime.projectiles.Step(runtime,actions,runtime.tickFrame,next)){
         if(*next==0)*next=0x61f6d0;return false;
     }
-    //Room clear opens ordinary doors, not treasure/locked targets. The door
-    //actor retains its own state and later interaction services.
+    //Native door interaction rules reached by the ordinary runtime:
+    //target1 opens on clear, target10 consumes one key on contact, target5
+    //opens only after the floor boss is defeated. Other locked/secret targets
+    //remain closed for their later services.
     if(room->clear&&live.doors)for(int slot=0;slot<8;++slot)if(live.doors->attached&(1U<<slot)){
         NativeDoorActor& door=live.doors->actors[slot];
-        if(door.state==1&&door.targetType==1){door.previousState=door.state;door.state=2;++runtime.doorsOpened;}
+        if(door.state!=1)continue;
+        if(door.targetType==1){door.previousState=door.state;door.state=2;++runtime.doorsOpened;openedThisTick[slot]=true;continue;}
+        float px,py;if(!room->geometry.Position(door.grid,&px,&py))continue;px+=20.0f;py+=20.0f;
+        float dx=runtime.playerBody.position.x-px,dy=runtime.playerBody.position.y-py;
+        bool near=dx*dx+dy*dy<=60.0f*60.0f;
+        if(door.targetType==10&&near&&runtime.playerState.keys>0){
+            --runtime.playerState.keys;door.previousState=door.state;door.state=2;++runtime.doorsUnlocked;openedThisTick[slot]=true;
+        }else if(door.targetType==5&&runtime.bossDefeated){door.previousState=door.state;door.state=2;++runtime.doorsUnlocked;openedThisTick[slot]=true;}
     }
     //Interactive passage on a cleared normal door. The target resident is
     //constructed from the exact linked descriptor and the player is placed at
@@ -155,10 +169,10 @@ bool NativeRoomUpdate::TickSimulationTail(PortNormalRuntime& runtime,NativeActio
     if(files&&global&&room->clear&&live.doors&&runtime.doorTransitionGrace==0){
         for(int slot=0;slot<8;++slot)if(live.doors->attached&(1U<<slot)){
             NativeDoorActor& door=live.doors->actors[slot];
-            if(door.state!=2||door.targetType!=1)continue;
+            if(door.state!=2||openedThisTick[slot]||(door.targetType!=1&&door.targetType!=5&&door.targetType!=10))continue;
             float px,py;if(!room->geometry.Position(door.grid,&px,&py))continue;px+=20.0f;py+=20.0f;
             float ax=runtime.playerBody.position.x-px,ay=runtime.playerBody.position.y-py;
-            if(ax*ax+ay*ay>30.0f*30.0f)continue;
+            if(ax*ax+ay*ay>60.0f*60.0f)continue;
             int reverse=-1;const NativePlacedRoom* target=runtime.world.layout.DoorTarget(runtime.world.currentList,slot,&reverse);
             if(!target)return false;
             NativeWorldIssue issue;

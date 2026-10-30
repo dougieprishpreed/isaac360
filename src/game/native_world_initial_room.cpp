@@ -156,6 +156,12 @@ NativeWorldResult NativeWorld::ContinueInitialRoom(NormalRunFlow& run,const Nati
             if(SelectDoorVariant(slot,c)!=NDR_OK)return NWR_BAD_REQUEST;
             NativeDoorVisual& v=live.doorVisuals[slot];
             if(!v.BindFresh(live.doors->actors[slot],live.backdrop,p->flags,target->flags,player)){
+                live.doorFailureSlot=slot;live.doorFailureKind=live.doors->actors[slot].targetType;
+                live.doorFailureVariant=live.doors->actors[slot].variant;live.doorFailureAux=live.doors->actors[slot].auxiliary;
+                //A presentation-only door target whose sprite binding is not
+                //yet maintained keeps its actor, collision and target rules.
+                //It remains an explicit rendering gap, not a skipped gate.
+                if(v.unsupportedTarget){++live.doorVisualGaps;continue;}
                 *next=v.nextAddress;live.roomInitAddress=*next;return NWR_CONSTRUCTION_GAP;}
         }
         live.roomInitAddress=0x6f4471;

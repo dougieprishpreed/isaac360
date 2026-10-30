@@ -20,7 +20,7 @@
 #include "native_player_update.h"
 #include "native_projectile.h"
 struct PortSessionStart {NativePlayerStartResult result;int choice,player;};
-enum PortNormalPhase { PNR_IDLE,PNR_GENERATING,PNR_NEED_CURSES,PNR_ROOM_COMPONENTS,PNR_NEED_NATIVE_INIT,PNR_READY,PNR_FACTORY_GAP,PNR_SOURCE_ERROR,PNR_ERROR };
+enum PortNormalPhase { PNR_IDLE,PNR_GENERATING,PNR_NEED_CURSES,PNR_ROOM_COMPONENTS,PNR_NEED_NATIVE_INIT,PNR_READY,PNR_DYING,PNR_GAME_OVER,PNR_FACTORY_GAP,PNR_SOURCE_ERROR,PNR_ERROR };
 //One owned creation/generation/world lifetime for both adapters. Normal start
 //holds inside selected-room entry at the native checkpoint service. Neither
 //component readiness nor a separately extracted floor enables a partial tick.
@@ -56,8 +56,8 @@ struct PortNormalRuntime {
     //services remain separate presentation work.
     unsigned int completeWholeGameplayTicks;
     unsigned int enemyKills,doorsOpened,roomTransitions;
-    unsigned int playerHits;int playerInvulnerable;
-    bool playerDead;
+    unsigned int playerHits,playerDeathTicks,doorsUnlocked,gameOverCount;int playerInvulnerable;
+    bool playerDead,bossDefeated;
     int doorTransitionGrace;
     unsigned int tickFrame;
     //736d70's reached post-755870 presentation/effect state. The trail count
@@ -79,6 +79,9 @@ struct PortGameSession {
     PortSessionStart StartNormalCharacter(unsigned int seed,NormalRunFlow&);
     NormalRunResult AdvanceNormalSetup(NormalRunFlow&);
     PortSessionStart StartNormalCharacter(unsigned int seed,PortNormalRuntime&);
+    //Game-over restart: rebuild the owned normal session and advance the new
+    //run to its ready boundary. It does not replay the dead player's rng.
+    PortSessionStart RestartNormal(unsigned int seed,PortNormalRuntime&,const NativeSceneFiles&,NativeActionSource* actions);
     NormalRunResult AdvanceNormalSetup(PortNormalRuntime&,const NativeSceneFiles&,NativeActionSource* actions=0);
     NormalRunResult TickNormal(PortNormalRuntime&,const NativeSceneFiles&,NativeActionSource* actions);
     NativeWorldResult PrepareNormalWorld(const NormalRunFlow&,NativeWorld&,const NativeSceneFiles&,NativeWorldIssue* issue=0);

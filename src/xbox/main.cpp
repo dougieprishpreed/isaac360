@@ -2,10 +2,14 @@
 #include <d3dx9.h>
 #include <stdio.h>
 #include <stdarg.h>
+#include <string.h>
 #include <math.h>
 #include "../content/game_content.h"
 #include "../game/game_session.h"
+#include "../game/native_room_view.h"
+#include "../game/native_room_background.h"
 #include "frontend_assets.h"
+#include "gameplay_atlas_data.h"
 #include "sprite_vs.h"
 #include "sprite_ps.h"
 static FILE* gTrace=0;
@@ -119,6 +123,121 @@ static DWORD Modulate(DWORD a,DWORD b) {
     DWORD color=0; for(int shift=0;shift<32;shift+=8) color|=((((a>>shift)&255)*((b>>shift)&255)/255)<<shift); return color;
 }
 static const float kFrontendScale=1280.0f/480.0f;
+//The native room view is authored in a 480x270 logical viewport. Gameplay
+//uses that same inherited presentation scale.
+static const float kGameScale=kFrontendScale;
+static float Bits(unsigned int u){float f;memcpy(&f,&u,4);return f;}
+static IDirect3DTexture9* gGameplayAtlas=0;
+static bool LoadGameplayAtlas(){
+    unsigned int size=0;unsigned char* data=LoadFile("game:\\port\\gameplay\\atlas.bin",&size,kGameplayAtlasWidth*kGameplayAtlasHeight*4+16);
+    if(!data)return false;
+    if(size!=16+kGameplayAtlasWidth*kGameplayAtlasHeight*4||memcmp(data,"GPLAY1\0\0",8)!=0||
+        LE32(data+8)!=kGameplayAtlasWidth||LE32(data+12)!=kGameplayAtlasHeight){delete[] data;return false;}
+    HRESULT hr=gDevice->CreateTexture(kGameplayAtlasWidth,kGameplayAtlasHeight,1,0,D3DFMT_LIN_A8R8G8B8,D3DPOOL_DEFAULT,&gGameplayAtlas,0);
+    if(FAILED(hr)){Log("PORT gameplay texture create failed %08x",hr);delete[] data;return false;}
+    D3DLOCKED_RECT locked;hr=gGameplayAtlas->LockRect(0,&locked,0,0);
+    if(FAILED(hr)){delete[] data;return false;}
+    for(unsigned int y=0;y<kGameplayAtlasHeight;++y){
+        DWORD* row=(DWORD*)((unsigned char*)locked.pBits+y*locked.Pitch);
+        const unsigned char* p=data+16+y*kGameplayAtlasWidth*4;
+        for(unsigned int x=0;x<kGameplayAtlasWidth;++x,p+=4)row[x]=((DWORD)p[3]<<24)|((DWORD)p[0]<<16)|((DWORD)p[1]<<8)|p[2];
+    }
+    gGameplayAtlas->UnlockRect(0);delete[] data;
+    Log("PORT gameplay atlas loaded %dx%d",kGameplayAtlasWidth,kGameplayAtlasHeight);return true;
+}
+static void TexQuad(IDirect3DTexture9* texture,const float* xy,const float* uv,DWORD color,float uSpan,float vSpan){
+    const int order[6]={0,1,3,0,3,2};Vertex vertices[6];
+    for(int i=0;i<6;++i){int j=order[i];vertices[i].x=xy[j*2]*kGameScale;vertices[i].y=xy[j*2+1]*kGameScale;
+        vertices[i].u=uv[j*2]/uSpan;vertices[i].v=uv[j*2+1]/vSpan;vertices[i].color=color;
+        vertices[i].add[0]=vertices[i].add[1]=vertices[i].add[2]=0;}
+    gDevice->SetTexture(0,texture);gDevice->DrawPrimitiveUP(D3DPT_TRIANGLELIST,2,vertices,sizeof(Vertex));
+}
+static void TexRect(IDirect3DTexture9* texture,float x,float y,float w,float h,
+    float sx,float sy,float sw,float sh,float texW,float texH,DWORD color=0xffffffff){
+    const float xy[8]={x,y,x+w,y,x,y+h,x+w,y+h};
+    const float uv[8]={sx,sy,sx+sw,sy,sx,sy+sh,sx+sw,sy+sh};
+    TexQuad(texture,xy,uv,color,texW,texH);
+}
+static bool GameplayVisible(){return gNormalRuntime.phase==PNR_READY||gNormalRuntime.phase==PNR_DYING||gNormalRuntime.phase==PNR_GAME_OVER;}
+static bool BackdropAtlasRect(int id,int* ox,int* oy){
+    if(id==1){*ox=kGameplayBackdrop1X;*oy=kGameplayBackdrop1Y;return true;}
+    if(id==2){*ox=kGameplayBackdrop2X;*oy=kGameplayBackdrop2Y;return true;}
+    return false;
+}
+static void DrawBackground(){
+    if(!gGameplayAtlas)return;
+    if(gNormalRuntime.world.currentList<0||gNormalRuntime.world.currentList>=kNativeWorldRoomLimit)return;
+    NativeWorldResident& live=gNormalRuntime.world.resident[gNormalRuntime.world.currentList];
+    if(!live.view||!live.view->background.ready||!live.view->background.definition)return;
+    const NativeRoomBackground& background=live.view->background;
+    int ox,oy;if(!BackdropAtlasRect(background.definition->id,&ox,&oy))return;
+    //Floor and wall commands both address the original backdrop sheet. The
+    //floor-variant region is part of that same 520x468 sheet.
+    for(unsigned int pass=0;pass<2;++pass){
+        const std::vector<NativeBackgroundQuad>& list=pass?background.wall:background.floor;
+        for(unsigned int i=0;i<list.size();++i){
+            const NativeBackgroundQuad& q=list[i];float xy[8],uv[8];
+            for(int k=0;k<4;++k){xy[k*2]=q.destination[k].x;xy[k*2+1]=q.destination[k].y;
+                uv[k*2]=q.source[k].x+ox;uv[k*2+1]=q.source[k].y+oy;}
+            TexQuad(gGameplayAtlas,xy,uv,0xffffffff,(float)kGameplayAtlasWidth,(float)kGameplayAtlasHeight);
+        }
+    }
+}
+static void DrawPlayer(){
+    if(!gGameplayAtlas||gNormalRuntime.playerBody.removed||!gNormalRuntime.playerSprites.bodyReady)return;
+    NativeWorldResident& live=gNormalRuntime.world.resident[gNormalRuntime.world.currentList];
+    if(!live.room||!live.view||!live.view->background.ready)return;
+    NativeSprite& sprite=gNormalRuntime.playerSprites.sprites[0];
+    if(sprite.layerSheets.size()<=1)return;
+    //The prepared atlas currently contains the fresh-profile Isaac costume.
+    //Other sheets remain explicit rendering stops rather than wrong art.
+    if(strstr(sprite.layerSheets[1].path.c_str(),"character_001_isaac")==0)return;
+    const NativeRoomBackground& background=live.view->background;
+    const NativeRoomSpace& space=live.room->space;
+    const float roomW=background.right-background.left,worldW=space.right-space.left;
+    const float roomH=background.bottom-background.top,worldH=space.bottom-space.top;
+    if(worldW<=0||worldH<=0)return;
+    const float px=background.left+(gNormalRuntime.playerBody.position.x-space.left)*roomW/worldW;
+    const float py=background.top+(gNormalRuntime.playerBody.position.y-space.top)*roomH/worldH;
+    const NativeSpriteFrame* frames[2]={sprite.LayerFrame(1),sprite.LayerFrame(4,true)};
+    for(int i=0;i<2;++i){
+        const NativeSpriteFrame* f=frames[i];if(!f||!f->visible)continue;
+        const float cropX=Bits(f->geometry[0]),cropY=Bits(f->geometry[1]);
+        const float w=Bits(f->geometry[2]),h=Bits(f->geometry[3]);
+        const float offX=Bits(f->geometry[4]),offY=Bits(f->geometry[5]);
+        float scaleX=Bits(f->geometry[6]),scaleY=Bits(f->geometry[7]);
+        const float pivotX=Bits(f->geometry[8]),pivotY=Bits(f->geometry[9]);
+        if(w<=0||h<=0)continue;
+        if(scaleX==0||scaleY==0){scaleX=scaleY=1;}
+        const float x=px+(offX-pivotX)*fabsf(scaleX),y=py+(offY-pivotY)*fabsf(scaleY);
+        const float dw=w*fabsf(scaleX),dh=h*fabsf(scaleY);
+        TexRect(gGameplayAtlas,x,y,dw,dh,cropX+(float)kGameplayPlayerX,cropY+(float)kGameplayPlayerY,
+            w,h,(float)kGameplayAtlasWidth,(float)kGameplayAtlasHeight);
+    }
+}
+static void DrawHud(){
+    if(!gGameplayAtlas||!gNormalRuntime.playerState.ready)return;
+    float x=10,y=10;
+    const int red=gNormalRuntime.playerState.redHearts,containers=gNormalRuntime.playerState.maxRedHearts/2;
+    for(int i=0;i<containers;++i){
+        float sx=32,sy=0;
+        if(red>=2*(i+1))sx=0;else if(red==2*i+1)sx=16;
+        TexRect(gGameplayAtlas,x,y,16,16,sx+kGameplayHeartsX,sy+kGameplayHeartsY,16,16,
+            (float)kGameplayAtlasWidth,(float)kGameplayAtlasHeight);
+        x+=16;
+    }
+    const int soul=gNormalRuntime.playerState.soulHearts;
+    for(int i=0;i<soul/2;++i){
+        TexRect(gGameplayAtlas,x,y,16,16,kGameplayHeartsX,kGameplayHeartsY+16,16,16,
+            (float)kGameplayAtlasWidth,(float)kGameplayAtlasHeight);x+=16;
+    }
+    if(soul&1)TexRect(gGameplayAtlas,x,y,16,16,kGameplayHeartsX+16,kGameplayHeartsY+16,16,16,
+        (float)kGameplayAtlasWidth,(float)kGameplayAtlasHeight);
+}
+static void Gameplay(){
+    DrawBackground();DrawPlayer();DrawHud();
+    gDevice->SetTexture(0,gAtlas);
+}
 static void Anim(int id,int frame,float x,float y,float scale=kFrontendScale,float angle=0,const int* itemIcon=0,DWORD tint=0xffffffff,bool flipX=false,const float* extraAdd=0) {
     const FrontendAnimation& a=kAnimations[id]; if(frame<0) frame=0;
     if(a.loop) frame%=a.count; else if(frame>=a.count) frame=a.count-1;
@@ -193,18 +312,18 @@ static void Menu() {
     }
 }
 static void Render(bool ready) {
-    gDevice->Clear(0,0,D3DCLEAR_TARGET,0xffcccccc,1,0);
+    gDevice->Clear(0,0,D3DCLEAR_TARGET,GameplayVisible()?0xff000000:0xffcccccc,1,0);
     gDevice->SetVertexShader(gVS);gDevice->SetPixelShader(gPS);gDevice->SetVertexDeclaration(gDecl);gDevice->SetTexture(0,gAtlas);
     gDevice->SetRenderState(D3DRS_ZENABLE,FALSE);gDevice->SetRenderState(D3DRS_CULLMODE,D3DCULL_NONE);
     gDevice->SetRenderState(D3DRS_ALPHABLENDENABLE,TRUE);gDevice->SetRenderState(D3DRS_SRCBLEND,D3DBLEND_SRCALPHA);gDevice->SetRenderState(D3DRS_DESTBLEND,D3DBLEND_INVSRCALPHA);
     gDevice->SetSamplerState(0,D3DSAMP_MINFILTER,D3DTEXF_POINT);gDevice->SetSamplerState(0,D3DSAMP_MAGFILTER,D3DTEXF_POINT);
     gDevice->SetSamplerState(0,D3DSAMP_ADDRESSU,D3DTADDRESS_CLAMP);gDevice->SetSamplerState(0,D3DSAMP_ADDRESSV,D3DTADDRESS_CLAMP);
-    if(ready)Menu();gDevice->Present(0,0,0,0);
+    if(ready){if(GameplayVisible())Gameplay();else Menu();}gDevice->Present(0,0,0,0);
 }
 VOID __cdecl main() {
     gTrace=fopen("game:\\port\\trace.log","wt");
     if(!InitGraphics())for(;;)Sleep(1000);
-    bool ready=LoadAtlas()&&CheckOriginalBindings();gUi.Init(false);
+    bool ready=LoadAtlas()&&CheckOriginalBindings();LoadGameplayAtlas();gUi.Init(false);
     //Console-writable local save root. e:\ is the normal writable console
     //storage; a devkit/emulator without e:\ falls back to its game:// scratch.
     bool saveBound=false;
@@ -224,7 +343,8 @@ VOID __cdecl main() {
                 (p.wButtons&XINPUT_GAMEPAD_A)!=0,(p.wButtons&(XINPUT_GAMEPAD_B|XINPUT_GAMEPAD_BACK))!=0,(p.wButtons&XINPUT_GAMEPAD_START)!=0,
                 (p.wButtons&XINPUT_GAMEPAD_DPAD_LEFT)!=0||p.sThumbLX< -16000,(p.wButtons&XINPUT_GAMEPAD_DPAD_RIGHT)!=0||p.sThumbLX>16000,
                 (p.wButtons&XINPUT_GAMEPAD_X)!=0,(p.wButtons&XINPUT_GAMEPAD_Y)!=0};
-            PortAction action=gUi.Step(input);
+            PortAction action=UI_NONE;
+            if(!GameplayVisible())action=gUi.Step(input);
             //The native player update requests its own connected action owner.
             //Supply the real pad frame to the same shared runtime the host uses.
             static unsigned int actionFrameNumber=0;
@@ -237,10 +357,13 @@ VOID __cdecl main() {
             if(gUi.characterPending){const NormalRunFlow& run=gNormalRuntime.run;
                 NativeSceneFiles files={"game:\\game\\file_index.bin","game:\\game\\",run.context.stageType+1,run.context.nativeMode,0};
                 NormalRunResult result=PortGameSession(gMenuRandom,gUi).AdvanceNormalSetup(gNormalRuntime,files,&frameActions);
-                if(!gUi.characterPending)Log("PORT normal setup boundary phase=%d generation=%d result=%d resident=%d source=%d prerequisite=%08x",gNormalRuntime.phase,run.phase,result,gNormalRuntime.world.residentCount,gNormalRuntime.entryIssue.source,gNormalRuntime.missingNativePrerequisite);}
+                if(!gUi.characterPending){Log("PORT normal setup boundary phase=%d generation=%d result=%d resident=%d source=%d prerequisite=%08x",gNormalRuntime.phase,run.phase,result,gNormalRuntime.world.residentCount,gNormalRuntime.entryIssue.source,gNormalRuntime.missingNativePrerequisite);
+                    if(gNormalRuntime.missingNativePrerequisite==0x6c8140&&gNormalRuntime.world.currentList>=0){NativeWorldResident& live=gNormalRuntime.world.resident[gNormalRuntime.world.currentList];
+                        Log("PORT door visual stop slot=%d kind=%d variant=%d aux=%d backdrop=%d",live.doorFailureSlot,live.doorFailureKind,live.doorFailureVariant,live.doorFailureAux,live.backdrop);}}}
             if(gNormalRuntime.phase==PNR_READY){
                 static bool readyLogged=false;
-                if(!readyLogged){Log("PORT normal ready ticks=0 playerToken=%08x",gNormalRuntime.playerBody.entityToken);readyLogged=true;}
+                if(!readyLogged){NativeWorldResident& first=gNormalRuntime.world.resident[gNormalRuntime.world.currentList];
+                    Log("PORT normal ready ticks=0 playerToken=%08x doorVisualGaps=%d",gNormalRuntime.playerBody.entityToken,first.doorVisualGaps);readyLogged=true;}
                 const NormalRunFlow& run=gNormalRuntime.run;
                 NativeSceneFiles files={"game:\\game\\file_index.bin","game:\\game\\",run.context.stageType+1,run.context.nativeMode,0};
                 NormalRunResult tick=PortGameSession(gMenuRandom,gUi).TickNormal(gNormalRuntime,files,&frameActions);

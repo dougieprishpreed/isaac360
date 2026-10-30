@@ -35,6 +35,9 @@ struct NativeWorldResident {
     bool perimeterReady;
     unsigned int roomInitAddress;
     int tintedRockRoom,tintedRockGrid;
+    //Diagnostic only: which door visual binding stopped construction.
+    int doorFailureSlot,doorFailureKind,doorFailureVariant,doorFailureAux;
+    int doorVisualGaps;
     NativeRng roomInitRandom;
     bool gridPostConstructed;
     int ambientCounts[3],ambientGroup,ambientIndex;

@@ -1,7 +1,7 @@
 #include "game_session.h"
 #include "native_room_update.h"
 #include <string.h>
-PortNormalRuntime::PortNormalRuntime():initialSaveFileWritten(false),phase(PNR_IDLE),missingNativePrerequisite(0),completePlayerInitializations(0),completePlayerTicks(0),completeWholeGameplayTicks(0),enemyKills(0),doorsOpened(0),roomTransitions(0),playerHits(0),playerInvulnerable(0),playerDead(false),doorTransitionGrace(0),tickFrame(0),playerTailTrailSegments(0),playerTailRenderCallbacks(0),playerTailTicks(0),roomEntryPrefixPrepared(false) {
+PortNormalRuntime::PortNormalRuntime():initialSaveFileWritten(false),phase(PNR_IDLE),missingNativePrerequisite(0),completePlayerInitializations(0),completePlayerTicks(0),completeWholeGameplayTicks(0),enemyKills(0),doorsOpened(0),roomTransitions(0),playerHits(0),playerDeathTicks(0),doorsUnlocked(0),gameOverCount(0),playerInvulnerable(0),playerDead(false),bossDefeated(false),doorTransitionGrace(0),tickFrame(0),playerTailTrailSegments(0),playerTailRenderCallbacks(0),playerTailTicks(0),roomEntryPrefixPrepared(false) {
     memset(&run,0,sizeof(run));memset(&entryIssue,0,sizeof(entryIssue));
     gameRandom.Default();
 }
@@ -50,12 +50,21 @@ PortSessionStart PortGameSession::StartNormalCharacter(unsigned int seed,PortNor
         //Virtual Init, the reached resource/callback services and manager
         //registration have returned before006b4b5e generation begins.
         runtime.missingNativePrerequisite=0;runtime.phase=PNR_GENERATING;runtime.tickFrame=0;
-        runtime.completePlayerInitializations=runtime.completePlayerTicks=0;runtime.completeWholeGameplayTicks=0;runtime.enemyKills=runtime.doorsOpened=runtime.roomTransitions=0;runtime.playerHits=0;runtime.playerInvulnerable=0;runtime.playerDead=false;runtime.doorTransitionGrace=0;
+        runtime.completePlayerInitializations=runtime.completePlayerTicks=0;runtime.completeWholeGameplayTicks=0;runtime.enemyKills=runtime.doorsOpened=runtime.roomTransitions=0;runtime.playerHits=runtime.playerDeathTicks=runtime.doorsUnlocked=runtime.gameOverCount=0;runtime.playerInvulnerable=0;runtime.playerDead=false;runtime.bossDefeated=false;runtime.doorTransitionGrace=0;
         runtime.playerTailTrailSegments=0;runtime.playerTailRenderCallbacks=0;runtime.playerTailTicks=0;}
     if(start.result==NPS_WORLD_PENDING)runtime.roomEntryPrefixPrepared=false;
     delete next;
     frontend.CharacterStarted();
     if(start.result==NPS_WORLD_PENDING&&runtime.phase==PNR_GENERATING)frontend.characterPending=true;
+    return start;
+}
+PortSessionStart PortGameSession::RestartNormal(unsigned int seed,PortNormalRuntime& runtime,const NativeSceneFiles& files,NativeActionSource* actions){
+    PortSessionStart start=StartNormalCharacter(seed,runtime);
+    if(start.result!=NPS_WORLD_PENDING)return start;
+    for(int step=0;step<1000&&(runtime.phase==PNR_GENERATING||runtime.phase==PNR_ROOM_COMPONENTS);++step){
+        NormalRunResult r=AdvanceNormalSetup(runtime,files,actions);
+        if(r==NFR_BAD_REQUEST)break;
+    }
     return start;
 }
 NormalRunResult PortGameSession::AdvanceNormalSetup(PortNormalRuntime& runtime,const NativeSceneFiles& files,NativeActionSource* actions) {
@@ -135,7 +144,13 @@ NormalRunResult PortGameSession::AdvanceNormalSetup(PortNormalRuntime& runtime,c
     frontend.CharacterStarted();return r==NWR_OK||r==NWR_CONSTRUCTION_GAP?NFR_PENDING:r==NWR_SOURCE_ERROR?NFR_MISSING_DATA:NFR_BAD_REQUEST;
 }
 NormalRunResult PortGameSession::TickNormal(PortNormalRuntime& runtime,const NativeSceneFiles& files,NativeActionSource* actions){
-    if(runtime.playerDead)return NFR_OK;
+    if(runtime.phase==PNR_GAME_OVER)return NFR_PENDING;
+    if(runtime.phase==PNR_DYING){
+        ++runtime.playerDeathTicks;
+        if(runtime.playerDeathTicks>=60){runtime.phase=PNR_GAME_OVER;++runtime.gameOverCount;}
+        return NFR_PENDING;
+    }
+    if(runtime.playerDead){runtime.phase=PNR_DYING;runtime.playerDeathTicks=0;return NFR_PENDING;}
     if(runtime.phase!=PNR_READY||runtime.world.currentList<0||runtime.world.currentList>=kNativeWorldRoomLimit)return NFR_BAD_REQUEST;
     NativeWorldResident& live=runtime.world.resident[runtime.world.currentList];
     if(!live.update||!runtime.playerBody.ready)return NFR_BAD_REQUEST;

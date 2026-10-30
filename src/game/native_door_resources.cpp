@@ -10,7 +10,7 @@ float Mul(float a,float b){volatile float f=a*b;return f;}
 const NativeSpriteAsset* NativePreparedDoorSprite(unsigned int i){return i<sizeof(kDoorSprites)/sizeof(kDoorSprites[0])?kDoorSprites[i]:0;}
 const NativeSpriteSheet* NativePreparedDoorSheet(unsigned int i){return i<sizeof(kDoorSheets)/sizeof(kDoorSheets[0])?kDoorSheets+i:0;}
 bool NativeDoorVisual::BindFresh(NativeDoorActor& door,int backdrop,unsigned int fromFlags,unsigned int toFlags,const NativePlayerState& player){
-    nextAddress=0x6c8140;
+    nextAddress=0x6c8140;unsupportedTarget=false;
     if(ready||!door.initialized||door.sourceType!=1||door.targetGrid<0||door.state!=1||door.variant!=8||backdrop<1||backdrop>2)return false;
     int kind=door.targetType;const NativeSpriteAsset* asset=0;const char* replace=0;int trinket;
     //6c842c..8468: no secret endpoint;6c80b0=0 for these real definitions.
@@ -28,7 +28,7 @@ bool NativeDoorVisual::BindFresh(NativeDoorActor& door,int backdrop,unsigned int
         //backdrop's normal texture, or6c9232's original shop texture.
         if((fromFlags|toFlags)&0x400U)return false;
         asset=kDoorSprites[0];replace=kind==2?kDoorSheets[2].path:kDoorSheets[backdrop-1].path;door.flags=0;
-    }else return false;
+    }else {unsupportedTarget=true;return false;}
     nextAddress=0x406d50;
     if(main.Load(asset->path)!=NSPR_OK)return false;
     if(replace){for(unsigned int i=0;i<asset->layerCount;++i)if(main.ReplaceLayerSheet((int)i,replace)!=NSPR_OK)return false;
