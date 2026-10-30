@@ -3,6 +3,7 @@
 #include "native_scene.h"
 #include "native_doors.h"
 #include "native_enemy.h"
+#include "native_pickup.h"
 static const int kNativeWorldRoomLimit=kNativePlacedRoomLimit+18;
 struct NormalRunFlow;
 class NativePlayerState;
@@ -29,6 +30,7 @@ struct NativeWorldResident {
     NativeRoomPersistent* persistent; //Descriptor68/74 mutable persistence owners.
     NativeRoomUpdate* update;
     NativeEnemyList enemies;
+    NativePickupList pickups;
     unsigned int doorSelectionMask,doorPendingOpenMask;
     int backdrop,nativeMode,configStage;
     bool setupKnown;

@@ -29,12 +29,15 @@ IMAGES=[
     ('rocksbasement','gfx/grid/rocks_basement.png',(920,1160)),
     ('doornormal','gfx/grid/door_01_normaldoor.png',(1060,1160)),
     ('fattysheet','gfx/monsters/rebirth/monster_207_fatty.png',(520,1420)),
+    ('poopsheet','gfx/grid/grid_poop_1.png',(1200,1160)),
 ]
 ACTORS=[
     ('gaper','gfx/010.000_Frowning Gaper.anm2','WalkHori','Head',(1544,800)),
     ('fly','gfx/013.000_Fly.anm2','Fly',None,(1616,800)),
     ('pooter','gfx/014.000_Pooter.anm2','Fly','Attack',(1688,800)),
     ('fatty','gfx/207.000_Fatty.anm2','WalkHori','AttackVert',(1760,800)),
+    ('skinny','gfx/226.000_Skinny.anm2','WalkHori','Head',(1544,864)),
+    ('rotty','gfx/226.001_Rotty.anm2','WalkHori','Head',(1616,864)),
 ]
 _sheet_cache={}
 def load_image(resources,request):

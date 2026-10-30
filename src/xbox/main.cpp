@@ -278,14 +278,16 @@ static void DrawRocks(){
     const float cellW=40.0f*roomW/worldW,cellH=40.0f*roomH/worldH;
     for(int i=0;i<live.room->staticGridCount;++i){
         const NativeStaticGrid& g=live.room->staticGrids[i];
-        if(g.type!=1000&&g.type!=1002)continue;
+        if(g.type!=1000&&g.type!=1002&&g.type!=1500)continue;
         float wx,wy;if(!live.room->geometry.Position(g.grid,&wx,&wy))continue;
         const float px=background.left+(wx-space.left)*roomW/worldW;
         const float py=background.top+(wy-space.top)*roomH/worldH;
-        const int sx=g.type==1002?0:(g.variant&3)*32;
-        const int sy=g.type==1002?32:0;
-        TexRect(gGameplayAtlas,px,py,cellW,cellH,(float)(kGameplayRocksbasementX+sx),
-            (float)(kGameplayRocksbasementY+sy),32,32,(float)kGameplayAtlasWidth,(float)kGameplayAtlasHeight);
+        int sheetX=kGameplayRocksbasementX,sheetY=kGameplayRocksbasementY,sx=0,sy=0;
+        if(g.type==1002){sy=32;}
+        else if(g.type==1500){sheetX=kGameplayPoopsheetX;sheetY=kGameplayPoopsheetY;}
+        else{sx=(g.variant&3)*32;}
+        TexRect(gGameplayAtlas,px,py,cellW,cellH,(float)(sheetX+sx),
+            (float)(sheetY+sy),32,32,(float)kGameplayAtlasWidth,(float)kGameplayAtlasHeight);
     }
 }
 static void DrawEnemies(){
@@ -297,6 +299,12 @@ static void DrawEnemies(){
     const float roomW=background.right-background.left,worldW=space.right-space.left;
     const float roomH=background.bottom-background.top,worldH=space.bottom-space.top;
     if(worldW<=0||worldH<=0)return;
+    static int loggedEnemyList=-1;
+    if(loggedEnemyList!=gNormalRuntime.world.currentList){
+        loggedEnemyList=gNormalRuntime.world.currentList;
+        for(int i=0;i<live.enemies.count;++i){NativeEnemy* e=live.enemies.entries[i];
+            if(e)Log("PORT enemy type=%d variant=%d pos=(%.1f,%.1f) ready=%d dead=%d",e->type,e->body.variant,e->body.position.x,e->body.position.y,e->ready?1:0,e->dead?1:0);}
+    }
     for(int i=0;i<live.enemies.count;++i){
         NativeEnemy* enemy=live.enemies.entries[i];
         if(!enemy||!enemy->ready||enemy->dead)continue;
@@ -305,6 +313,8 @@ static void DrawEnemies(){
         else if(enemy->type==13){sx=kGameplayFlyX;sy=kGameplayFlyY;}
         else if(enemy->type==14){sx=kGameplayPooterX;sy=kGameplayPooterY;}
         else if(enemy->type==208){sx=kGameplayFattyX;sy=kGameplayFattyY;}
+        else if(enemy->type==226&&enemy->body.variant==0){sx=kGameplaySkinnyX;sy=kGameplaySkinnyY;}
+        else if(enemy->type==226&&enemy->body.variant==1){sx=kGameplayRottyX;sy=kGameplayRottyY;}
         else continue;
         const float px=background.left+(enemy->body.position.x-space.left)*roomW/worldW;
         const float py=background.top+(enemy->body.position.y-space.top)*roomH/worldH;
@@ -483,6 +493,10 @@ VOID __cdecl main() {
                 static bool readyLogged=false;
                 if(!readyLogged){NativeWorldResident& first=gNormalRuntime.world.resident[gNormalRuntime.world.currentList];
                     Log("PORT normal ready ticks=0 playerToken=%08x doorVisualGaps=%d",gNormalRuntime.playerBody.entityToken,first.doorVisualGaps);
+                    if(first.room)for(int grid=0;grid<first.room->staticGridCount;++grid){
+                        const NativeStaticGrid& g=first.room->staticGrids[grid];if(g.type!=1000&&g.type!=1002)continue;
+                        float wx=0,wy=0;first.room->geometry.Position(g.grid,&wx,&wy);
+                        Log("PORT rock grid=%d pos=(%.1f,%.1f) type=%d variant=%d",g.grid,wx,wy,g.type,g.variant);}
                     if(first.doors)for(int slot=0;slot<8;++slot)if(first.doors->attached&(1U<<slot)){
                         const NativeDoorActor& door=first.doors->actors[slot];const NativePlacedRoom* target=gNormalRuntime.world.layout.DoorTarget(gNormalRuntime.world.currentList,slot);
                         float wx=0,wy=0;if(first.room)first.room->geometry.Position(door.grid,&wx,&wy);
@@ -502,10 +516,10 @@ VOID __cdecl main() {
                             gNormalRuntime.entryIssue.construction.variant,gNormalRuntime.entryIssue.construction.subtype);}
                 if(gNormalRuntime.tickFrame%30==0){
                     NativeWorldResident& live=gNormalRuntime.world.resident[gNormalRuntime.world.currentList];
-                    Log("PORT normal tick=%u result=%d pos=(%.2f,%.2f) hp=%d/%d soul=%d enemies=%d clear=%d hits=%u transitions=%u",
+                    Log("PORT normal tick=%u result=%d pos=(%.2f,%.2f) hp=%d/%d soul=%d enemies=%d pickups=%d clear=%d hits=%u transitions=%u",
                         gNormalRuntime.tickFrame,tick,gNormalRuntime.playerBody.position.x,gNormalRuntime.playerBody.position.y,
                         gNormalRuntime.playerState.redHearts,gNormalRuntime.playerState.maxRedHearts,gNormalRuntime.playerState.soulHearts,
-                        live.enemies.count,live.room?live.room->clear:0,gNormalRuntime.playerHits,gNormalRuntime.roomTransitions);
+                        live.enemies.count,live.pickups.count,live.room?live.room->clear:0,gNormalRuntime.playerHits,gNormalRuntime.roomTransitions);
                 }
                 if(tick==NFR_BAD_REQUEST)Log("PORT normal tick rejected prerequisite=%08x",gNormalRuntime.missingNativePrerequisite);
             }else if(gNormalRuntime.phase==PNR_DYING||gNormalRuntime.phase==PNR_GAME_OVER){

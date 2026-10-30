@@ -18,7 +18,9 @@ const NativeEntityBodyProperties kEnemyBodies[]={
     {10,1,0,12,0.14f,1.0f,13.0f,1.0f,1.0f,1.0f,5.0f,10.0f,0.0f,"gfx/characters/010.001_Gaper.anm2"},
     {13,0,0,4,0.11f,1.0f,17.0f,1.0f,1.0f,0.0f,3.0f,3.0f,0.0f,"gfx/characters/013.000_Fly.anm2"},
     {14,0,0,4,0.11f,1.0f,17.0f,1.0f,1.0f,0.0f,4.0f,8.0f,0.0f,"gfx/characters/014.000_Pooter.anm2"},
-    {208,0,0,12,0.16f,1.0f,13.0f,1.0f,1.0f,1.0f,10.0f,20.0f,0.0f,"gfx/characters/207.000_Fatty.anm2"}
+    {208,0,0,12,0.16f,1.0f,13.0f,1.0f,1.0f,1.0f,10.0f,20.0f,0.0f,"gfx/characters/207.000_Fatty.anm2"},
+    {226,0,0,12,0.14f,1.0f,13.0f,1.0f,1.0f,1.0f,14.0f,10.0f,4.0f,"gfx/226.000_Skinny.anm2"},
+    {226,1,0,12,0.14f,1.0f,13.0f,1.0f,1.0f,1.0f,14.0f,16.0f,5.0f,"gfx/226.001_Rotty.anm2"}
 };
 }
 const NativeEntityBodyProperties* NativePreparedEnemyBody(int type,int variant){
@@ -61,7 +63,7 @@ NativeEntityBody::NativeEntityBody():ready(false),native168(false),native169(fal
 NativeEntityBodyResult NativeEntityBody::BeginFresh(int t,int v,int sub,unsigned int seed,unsigned int frame,int stage,const NativePoint* pos,const NativePoint* vel){
     if(t<0||v<0||sub<0||!seed||stage<0)return NEB_BAD_REQUEST;
     const NativeEntityBodyProperties* p=t==1&&sub==0?NativePreparedPlayerBody(v):
-        (t==10||t==13||t==14||t==208)?NativePreparedEnemyBody(t,v):t==1000?NativePreparedEffectBody(v,sub):0;
+        (t==10||t==13||t==14||t==208||t==226)?NativePreparedEnemyBody(t,v):t==1000?NativePreparedEffectBody(v,sub):0;
     if(!p)return NEB_UNSUPPORTED_PROPERTIES;
     NativeEntityBody next;next.type=t;next.variant=v;next.subtype=sub;next.initialSeed=seed;next.random.Set(seed,30);
     next.frameCount=0; //66f544: native+24 reset.
