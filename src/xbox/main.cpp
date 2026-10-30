@@ -291,6 +291,16 @@ static void DrawRocks(){
             (float)(sheetY+sy),32,32,(float)kGameplayAtlasWidth,(float)kGameplayAtlasHeight);
     }
 }
+static bool EnemyWalkRect(int type,int variant,int* sx,int* sy,int* frames){
+    if(type==10){*sx=kGameplayGaperwalkX;*sy=kGameplayGaperwalkY;*frames=kGameplayGaperwalkFrames;return true;}
+    if(type==13){*sx=kGameplayFlywalkX;*sy=kGameplayFlywalkY;*frames=kGameplayFlywalkFrames;return true;}
+    if(type==14){*sx=kGameplayPooterwalkX;*sy=kGameplayPooterwalkY;*frames=kGameplayPooterwalkFrames;return true;}
+    if(type==208){*sx=kGameplayFattywalkX;*sy=kGameplayFattywalkY;*frames=kGameplayFattywalkFrames;return true;}
+    if(type==226&&variant==0){*sx=kGameplaySkinnywalkX;*sy=kGameplaySkinnywalkY;*frames=kGameplaySkinnywalkFrames;return true;}
+    if(type==226&&variant==1){*sx=kGameplayRottywalkX;*sy=kGameplayRottywalkY;*frames=kGameplayRottywalkFrames;return true;}
+    if(type==284){*sx=kGameplayCyclopiawalkX;*sy=kGameplayCyclopiawalkY;*frames=kGameplayCyclopiawalkFrames;return true;}
+    return false;
+}
 static void DrawEnemies(){
     if(!gGameplayAtlas||gNormalRuntime.world.currentList<0||gNormalRuntime.world.currentList>=kNativeWorldRoomLimit)return;
     NativeWorldResident& live=gNormalRuntime.world.resident[gNormalRuntime.world.currentList];
@@ -309,18 +319,12 @@ static void DrawEnemies(){
     for(int i=0;i<live.enemies.count;++i){
         NativeEnemy* enemy=live.enemies.entries[i];
         if(!enemy||!enemy->ready||enemy->dead)continue;
-        int sx=0,sy=0;
-        if(enemy->type==10){sx=kGameplayGaperX;sy=kGameplayGaperY;}
-        else if(enemy->type==13){sx=kGameplayFlyX;sy=kGameplayFlyY;}
-        else if(enemy->type==14){sx=kGameplayPooterX;sy=kGameplayPooterY;}
-        else if(enemy->type==208){sx=kGameplayFattyX;sy=kGameplayFattyY;}
-        else if(enemy->type==226&&enemy->body.variant==0){sx=kGameplaySkinnyX;sy=kGameplaySkinnyY;}
-        else if(enemy->type==226&&enemy->body.variant==1){sx=kGameplayRottyX;sy=kGameplayRottyY;}
-        else if(enemy->type==284&&enemy->body.variant==0){sx=kGameplayCyclopiaX;sy=kGameplayCyclopiaY;}
-        else continue;
+        int sx=0,sy=0,frames=0;
+        if(!EnemyWalkRect(enemy->type,enemy->body.variant,&sx,&sy,&frames)||frames<=0)continue;
+        const int frame=((int)(enemy->body.time/6))%frames;
         const float px=background.left+(enemy->body.position.x-space.left)*roomW/worldW;
         const float py=background.top+(enemy->body.position.y-space.top)*roomH/worldH;
-        TexRect(gGameplayAtlas,px-32,py-48,64,64,(float)sx,(float)sy,64,64,
+        TexRect(gGameplayAtlas,px-32,py-48,64,64,(float)(sx+frame*64),(float)sy,64,64,
             (float)kGameplayAtlasWidth,(float)kGameplayAtlasHeight);
     }
 }

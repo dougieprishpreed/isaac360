@@ -45,6 +45,18 @@ ACTORS=[
     ('rotty','gfx/226.001_Rotty.anm2','WalkHori','Head',(1616,864)),
     ('cyclopia','gfx/284.000_Cyclopia.anm2','WalkHori','Head',(1688,864)),
 ]
+#Walk cycles packed as horizontal64x64 strips in the free band below the
+#existing entries. Frame counts come from the original ANM2 layer tracks.
+ANIMATED=[
+    ('gaperwalk','gfx/010.000_Frowning Gaper.anm2','WalkHori','Head',(0,1760)),
+    ('flywalk','gfx/013.000_Fly.anm2','Fly',None,(512,1760)),
+    ('pooterwalk','gfx/014.000_Pooter.anm2','Fly','Attack',(1024,1760)),
+    ('fattywalk','gfx/207.000_Fatty.anm2','WalkHori','AttackVert',(1536,1760)),
+    ('skinnywalk','gfx/226.000_Skinny.anm2','WalkHori','Head',(0,1824)),
+    ('rottywalk','gfx/226.001_Rotty.anm2','WalkHori','Head',(512,1824)),
+    ('cyclopiawalk','gfx/284.000_Cyclopia.anm2','WalkHori','Head',(1024,1824)),
+]
+ANIMATION_FRAME_LIMIT=8
 _sheet_cache={}
 def load_image(resources,request):
     raw,entry=resources.read(request)
@@ -55,7 +67,7 @@ def tint(image,values):
     r=r.point(lambda v,rr=rr:v*rr//255);g=g.point(lambda v,gg=gg:v*gg//255)
     b=b.point(lambda v,bb=bb:v*bb//255);a=a.point(lambda v,aa=aa:v*aa//255)
     return Image.merge('RGBA',(r,g,b,a))
-def compose_actor(resources,request,primary,overlay):
+def compose_actor(resources,request,primary,overlay,frame_index=0):
     raw,entry=resources.read(request);root=ET.fromstring(raw)
     sheets={s.get('Id'):s.get('Path') for s in root.find('Content/Spritesheets')}
     animations={a.get('Name'):a for a in root.find('Animations')}
@@ -66,8 +78,10 @@ def compose_actor(resources,request,primary,overlay):
         for name in (primary,overlay):
             if not name or name not in animations:continue
             for track in animations[name].find('LayerAnimations'):
-                if track.get('LayerId')==layer.get('Id') and list(track):
-                    frame=list(track)[0];used.append('%s/%s'%(name,layer.get('Name')));break
+                if track.get('LayerId')==layer.get('Id'):
+                    frames=list(track)
+                    if frames:
+                        frame=frames[min(frame_index,len(frames)-1)];used.append('%s/%s'%(name,layer.get('Name')));break
             if frame is not None:break
         if frame is None:continue
         sheet=sheets.get(layer.get('SpritesheetId'))
@@ -88,6 +102,16 @@ def compose_actor(resources,request,primary,overlay):
               ENEMY_ANCHOR[1]+int(frame.get('YPosition','0'))-int(frame.get('YPivot','0')))
         canvas.alpha_composite(piece,dest)
     return canvas,raw,entry,used
+def animation_length(root,names):
+    animations={a.get('Name'):a for a in root.find('Animations')}
+    count=1
+    for layer in root.find('Content/Layers'):
+        for name in names:
+            if not name or name not in animations:continue
+            for track in animations[name].find('LayerAnimations'):
+                if track.get('LayerId')==layer.get('Id'):
+                    count=max(count,len(list(track)));break
+    return count
 
 def prepare():
     resources=OriginalResources(ROOT/'runtime/game')
@@ -104,6 +128,18 @@ def prepare():
         manifest['entries'].append(dict(name=name,request=request,package=entry['package'],
             sha256=hashlib.sha256(raw).hexdigest(),x=at[0],y=at[1],width=image.width,height=image.height,
             composed='%s%s'%(primary,'/'+overlay if overlay else ''),tracks=used))
+    for name,request,primary,overlay,at in ANIMATED:
+        raw,entry=resources.read(request);root=ET.fromstring(raw)
+        frames=min(ANIMATION_FRAME_LIMIT,max(1,animation_length(root,(primary,overlay))))
+        strip=Image.new('RGBA',(ENEMY_SIZE*frames,ENEMY_SIZE),(0,0,0,0));used=[]
+        for index in range(frames):
+            image,_,_,used=compose_actor(resources,request,primary,overlay,index)
+            strip.alpha_composite(image,(index*ENEMY_SIZE,0))
+        atlas.alpha_composite(strip,at)
+        manifest['entries'].append(dict(name=name,request=request,package=entry['package'],
+            sha256=hashlib.sha256(raw).hexdigest(),x=at[0],y=at[1],width=strip.width,height=strip.height,
+            composed='%s%s'%(primary,'/'+overlay if overlay else ''),frames=frames,frameWidth=ENEMY_SIZE,
+            frameHeight=ENEMY_SIZE,tracks=used))
     output=ROOT/'runtime/port/gameplay'
     output.mkdir(parents=True,exist_ok=True)
     with (output/'atlas.bin').open('wb') as f:
@@ -117,6 +153,8 @@ def prepare():
         name=entry['name'].title()
         lines.append('static const int kGameplay%sX=%d,kGameplay%sY=%d,kGameplay%sW=%d,kGameplay%sH=%d;'%(
             name,entry['x'],name,entry['y'],name,entry['width'],name,entry['height']))
+        if entry.get('frames'):
+            lines.append('static const int kGameplay%sFrames=%d;'%(name,entry['frames']))
     (ROOT/'build/generated/gameplay_atlas_data.h').write_text('\n'.join(lines)+'\n')
     print('Prepared gameplay atlas: %d entries, %dx%d'%(len(manifest['entries']),WIDTH,HEIGHT))
 

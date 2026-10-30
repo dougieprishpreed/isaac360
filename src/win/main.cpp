@@ -159,18 +159,26 @@ static void DrawPickups(){
         float px=bg.left+(p->position.x-space.left)*rw/ww,py=bg.top+(p->position.y-space.top)*rh/wh;
         TexRect(px-8,py-8,16,16,(float)sx,(float)sy,32,32);}
 }
+static bool EnemyWalkRect(int type,int variant,int* sx,int* sy,int* frames){
+    if(type==10){*sx=kGameplayGaperwalkX;*sy=kGameplayGaperwalkY;*frames=kGameplayGaperwalkFrames;return true;}
+    if(type==13){*sx=kGameplayFlywalkX;*sy=kGameplayFlywalkY;*frames=kGameplayFlywalkFrames;return true;}
+    if(type==14){*sx=kGameplayPooterwalkX;*sy=kGameplayPooterwalkY;*frames=kGameplayPooterwalkFrames;return true;}
+    if(type==208){*sx=kGameplayFattywalkX;*sy=kGameplayFattywalkY;*frames=kGameplayFattywalkFrames;return true;}
+    if(type==226&&variant==0){*sx=kGameplaySkinnywalkX;*sy=kGameplaySkinnywalkY;*frames=kGameplaySkinnywalkFrames;return true;}
+    if(type==226&&variant==1){*sx=kGameplayRottywalkX;*sy=kGameplayRottywalkY;*frames=kGameplayRottywalkFrames;return true;}
+    if(type==284){*sx=kGameplayCyclopiawalkX;*sy=kGameplayCyclopiawalkY;*frames=kGameplayCyclopiawalkFrames;return true;}
+    return false;
+}
 static void DrawEnemies(){
     NativeWorldResident& live=gRuntime->world.resident[gRuntime->world.currentList];
     if(!live.room||!live.view||!live.view->background.ready)return;
     const NativeRoomBackground& bg=live.view->background;const NativeRoomSpace& space=live.room->space;
     float rw=bg.right-bg.left,rh=bg.bottom-bg.top,ww=space.right-space.left,wh=space.bottom-space.top;if(ww<=0||wh<=0)return;
     for(int i=0;i<live.enemies.count;++i){NativeEnemy* e=live.enemies.entries[i];if(!e||!e->ready||e->dead)continue;
-        int sx=0,sy=0;if(e->type==10){sx=kGameplayGaperX;sy=kGameplayGaperY;}
-        else if(e->type==13){sx=kGameplayFlyX;sy=kGameplayFlyY;}else if(e->type==14){sx=kGameplayPooterX;sy=kGameplayPooterY;}
-        else if(e->type==208){sx=kGameplayFattyX;sy=kGameplayFattyY;}else if(e->type==226&&e->body.variant==0){sx=kGameplaySkinnyX;sy=kGameplaySkinnyY;}
-        else if(e->type==226&&e->body.variant==1){sx=kGameplayRottyX;sy=kGameplayRottyY;}else if(e->type==284){sx=kGameplayCyclopiaX;sy=kGameplayCyclopiaY;}else continue;
+        int sx=0,sy=0,frames=0;if(!EnemyWalkRect(e->type,e->body.variant,&sx,&sy,&frames)||frames<=0)continue;
+        int frame=((int)(e->body.time/6))%frames;
         float px=bg.left+(e->body.position.x-space.left)*rw/ww,py=bg.top+(e->body.position.y-space.top)*rh/wh;
-        TexRect(px-32,py-48,64,64,(float)sx,(float)sy,64,64);}
+        TexRect(px-32,py-48,64,64,(float)(sx+frame*64),(float)sy,64,64);}
 }
 static void DrawPlayer(){
     if(gRuntime->playerBody.removed||!gRuntime->playerSprites.bodyReady)return;
