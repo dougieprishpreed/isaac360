@@ -184,7 +184,8 @@ static void DrawBackground(){
     }
 }
 static void DrawPlayer(){
-    if(!gGameplayAtlas||gNormalRuntime.playerBody.removed||!gNormalRuntime.playerSprites.bodyReady)return;
+    if(!gGameplayAtlas||gNormalRuntime.world.currentList<0||gNormalRuntime.world.currentList>=kNativeWorldRoomLimit||
+        gNormalRuntime.playerBody.removed||!gNormalRuntime.playerSprites.bodyReady)return;
     NativeWorldResident& live=gNormalRuntime.world.resident[gNormalRuntime.world.currentList];
     if(!live.room||!live.view||!live.view->background.ready)return;
     NativeSprite& sprite=gNormalRuntime.playerSprites.sprites[0];
@@ -215,6 +216,23 @@ static void DrawPlayer(){
             w,h,(float)kGameplayAtlasWidth,(float)kGameplayAtlasHeight);
     }
 }
+static void DrawProjectiles(){
+    if(!gGameplayAtlas||gNormalRuntime.world.currentList<0||gNormalRuntime.world.currentList>=kNativeWorldRoomLimit)return;
+    NativeWorldResident& live=gNormalRuntime.world.resident[gNormalRuntime.world.currentList];
+    if(!live.room||!live.view||!live.view->background.ready)return;
+    const NativeRoomBackground& background=live.view->background;
+    const NativeRoomSpace& space=live.room->space;
+    const float roomW=background.right-background.left,worldW=space.right-space.left;
+    const float roomH=background.bottom-background.top,worldH=space.bottom-space.top;
+    if(worldW<=0||worldH<=0)return;
+    for(unsigned int i=0;i<gNormalRuntime.projectiles.active.size();++i){
+        const NativeProjectile& p=gNormalRuntime.projectiles.active[i];
+        const float px=background.left+(p.position.x-space.left)*roomW/worldW;
+        const float py=background.top+(p.position.y-space.top)*roomH/worldH;
+        TexRect(gGameplayAtlas,px-16,py-16,32,32,(float)kGameplayTearsX,(float)kGameplayTearsY,32,32,
+            (float)kGameplayAtlasWidth,(float)kGameplayAtlasHeight);
+    }
+}
 static void DrawHud(){
     if(!gGameplayAtlas||!gNormalRuntime.playerState.ready)return;
     float x=10,y=10;
@@ -228,14 +246,14 @@ static void DrawHud(){
     }
     const int soul=gNormalRuntime.playerState.soulHearts;
     for(int i=0;i<soul/2;++i){
-        TexRect(gGameplayAtlas,x,y,16,16,kGameplayHeartsX,kGameplayHeartsY+16,16,16,
+        TexRect(gGameplayAtlas,x,y,16,16,(float)kGameplayHeartsX,(float)(kGameplayHeartsY+16),16,16,
             (float)kGameplayAtlasWidth,(float)kGameplayAtlasHeight);x+=16;
     }
-    if(soul&1)TexRect(gGameplayAtlas,x,y,16,16,kGameplayHeartsX+16,kGameplayHeartsY+16,16,16,
+    if(soul&1)TexRect(gGameplayAtlas,x,y,16,16,(float)(kGameplayHeartsX+16),(float)(kGameplayHeartsY+16),16,16,
         (float)kGameplayAtlasWidth,(float)kGameplayAtlasHeight);
 }
 static void Gameplay(){
-    DrawBackground();DrawPlayer();DrawHud();
+    DrawBackground();DrawProjectiles();DrawPlayer();DrawHud();
     gDevice->SetTexture(0,gAtlas);
 }
 static void Anim(int id,int frame,float x,float y,float scale=kFrontendScale,float angle=0,const int* itemIcon=0,DWORD tint=0xffffffff,bool flipX=false,const float* extraAdd=0) {

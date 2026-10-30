@@ -17,6 +17,7 @@ IMAGES=[
     ('backdrop2','gfx/backdrop/02_cellar.png',(0,468)),
     ('player','gfx/characters/costumes/character_001_isaac.png',(0,1024)),
     ('hearts','gfx/ui/ui_hearts.png',(1544,512)),
+    ('tears','gfx/tears.png',(1544,600)),
 ]
 
 def prepare():
