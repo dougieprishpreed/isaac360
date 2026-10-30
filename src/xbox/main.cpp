@@ -278,13 +278,14 @@ static void DrawRocks(){
     const float cellW=40.0f*roomW/worldW,cellH=40.0f*roomH/worldH;
     for(int i=0;i<live.room->staticGridCount;++i){
         const NativeStaticGrid& g=live.room->staticGrids[i];
-        if(g.type!=1000&&g.type!=1002&&g.type!=1500)continue;
+        if(g.type!=1000&&g.type!=1002&&g.type!=1500&&g.type!=1400)continue;
         float wx,wy;if(!live.room->geometry.Position(g.grid,&wx,&wy))continue;
         const float px=background.left+(wx-space.left)*roomW/worldW;
         const float py=background.top+(wy-space.top)*roomH/worldH;
         int sheetX=kGameplayRocksbasementX,sheetY=kGameplayRocksbasementY,sx=0,sy=0;
         if(g.type==1002){sy=32;}
         else if(g.type==1500){sheetX=kGameplayPoopsheetX;sheetY=kGameplayPoopsheetY;}
+        else if(g.type==1400){sheetX=kGameplayFireplacesheetX;sheetY=kGameplayFireplacesheetY;}
         else{sx=(g.variant&3)*32;}
         TexRect(gGameplayAtlas,px,py,cellW,cellH,(float)(sheetX+sx),
             (float)(sheetY+sy),32,32,(float)kGameplayAtlasWidth,(float)kGameplayAtlasHeight);
@@ -315,6 +316,7 @@ static void DrawEnemies(){
         else if(enemy->type==208){sx=kGameplayFattyX;sy=kGameplayFattyY;}
         else if(enemy->type==226&&enemy->body.variant==0){sx=kGameplaySkinnyX;sy=kGameplaySkinnyY;}
         else if(enemy->type==226&&enemy->body.variant==1){sx=kGameplayRottyX;sy=kGameplayRottyY;}
+        else if(enemy->type==284&&enemy->body.variant==0){sx=kGameplayCyclopiaX;sy=kGameplayCyclopiaY;}
         else continue;
         const float px=background.left+(enemy->body.position.x-space.left)*roomW/worldW;
         const float py=background.top+(enemy->body.position.y-space.top)*roomH/worldH;

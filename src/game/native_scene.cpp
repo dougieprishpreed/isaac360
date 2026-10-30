@@ -11,11 +11,12 @@ Factory SelectedFactory(const RoomRecord& record,const NativeSpawnChoice& choice
     //Inherited ordinary actor records with maintained physical factories.
     if(e.subtype==0&&((e.type==10&&(e.variant==0||e.variant==1))||(e.type==13&&e.variant==0)||
         (e.type==14&&e.variant==0)||(e.type==208&&e.variant==0)||
-        (e.type==226&&(e.variant==0||e.variant==1))))return FACTORY_ENEMY;
+        (e.type==226&&(e.variant==0||e.variant==1))||
+        (e.type==284&&e.variant==0)))return FACTORY_ENEMY;
     //Ordinary rock/block grids: solid static obstacles without destruction yet.
     if((e.type==1000||e.type==1002)&&e.variant==0&&e.subtype==0)return FACTORY_ROCK;
-    //1500 is a static poop grid, not an entity actor.
-    if(e.type==1500)return FACTORY_ROCK;
+    //1500 poop and1400 fireplace are static grids, not entity actors.
+    if(e.type==1500||e.type==1400)return FACTORY_ROCK;
     //0079c1b3 maps1999 to grid15. Ordinary wall Init has no asset/MT calls;
     //room16's graphics path remains an explicit dependency.
     if(e.type==1999&&record.type!=16)return FACTORY_WALL;

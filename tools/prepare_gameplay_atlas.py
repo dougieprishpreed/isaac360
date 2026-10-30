@@ -30,6 +30,7 @@ IMAGES=[
     ('doornormal','gfx/grid/door_01_normaldoor.png',(1060,1160)),
     ('fattysheet','gfx/monsters/rebirth/monster_207_fatty.png',(520,1420)),
     ('poopsheet','gfx/grid/grid_poop_1.png',(1200,1160)),
+    ('fireplacesheet','gfx/grid/grid_fireplace.png',(1200,1200)),
 ]
 ACTORS=[
     ('gaper','gfx/010.000_Frowning Gaper.anm2','WalkHori','Head',(1544,800)),
@@ -38,6 +39,7 @@ ACTORS=[
     ('fatty','gfx/207.000_Fatty.anm2','WalkHori','AttackVert',(1760,800)),
     ('skinny','gfx/226.000_Skinny.anm2','WalkHori','Head',(1544,864)),
     ('rotty','gfx/226.001_Rotty.anm2','WalkHori','Head',(1616,864)),
+    ('cyclopia','gfx/284.000_Cyclopia.anm2','WalkHori','Head',(1688,864)),
 ]
 _sheet_cache={}
 def load_image(resources,request):
