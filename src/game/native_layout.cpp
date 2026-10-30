@@ -3,9 +3,10 @@
 void NativeLevelLayout::Reset() {
     memset(this,0,sizeof(*this));
     //006aee68: ctor sentinel, distinct from type29's later write of99.
-    for(int i=0;i<kNativePlacedRoomLimit;++i)rooms[i].nativeB4=0xffffffffU;
+    for(int i=0;i<kNativePlacedRoomLimit;++i){NativePlacedRoom& r=rooms[i];
+        r.nativeB4=0xffffffffU;r.gridIndex=r.safeGridIndex=r.definition=-1;r.listIndex=i;}
     for(int d=0;d<3;++d) for(int i=0;i<kNativeTopologyCells;++i) owners[d][i]=-1;
-    for(int i=0;i<18;++i){offGrid[i].nativeB4=0xffffffffU;offGrid[i].gridIndex=offGrid[i].safeGridIndex=-i-1;offGrid[i].listIndex=offGrid[i].definition=-1;
+    for(int i=0;i<18;++i){offGrid[i].nativeB4=0xffffffffU;offGrid[i].gridIndex=offGrid[i].safeGridIndex=-i-1;offGrid[i].listIndex=507+i;offGrid[i].definition=-1;
         for(int slot=0;slot<8;++slot)offGrid[i].doorTargets[slot]=offGrid[i].doorTargetSlots[slot]=-1;}
 }
 NativePlacementResult NativeLevelLayout::Place(const NativeTopologyRoom& node,int definition,unsigned int seed,

@@ -25,6 +25,9 @@ enum NativeDoorResult { NDR_OK,NDR_BAD_REQUEST,NDR_ALREADY_ATTACHED,NDR_MISSING_
 //saved grid door object is reused. Attached slots return before any draw.
 NativeDoorResult NativeCreateDoor(int slot,int grid,unsigned int frame,NativeMt&,NativeDoorSet*,const NativeDoorActor* savedGridDoor=0);
 bool NativeInitDoorSet(int shape,const NativeRoomGrid&,unsigned int allowed,unsigned int frame,NativeMt&,NativeDoorSet*);
+//006cbe50 reset only; the room's post-construction virtual+4 dispatch is
+//407240 for doors and must not repeat this Init or its factory's MT draw.
+void NativeResetDoor(NativeDoorActor&);
 //Evaluated caller inputs for006cb870, before asset setup006c8140 and the
 //animation/interaction services. No default entitlement/inventory predicates.
 struct NativeDoorBinding {

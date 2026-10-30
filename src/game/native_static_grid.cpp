@@ -13,3 +13,8 @@ bool NativeSelectedWall(int roomType,int grid,unsigned int variant,unsigned int 
     wall.initializations=1;wall.initialized=true;wall.initializedFrame=frame;
     *output=wall;return true;
 }
+bool NativePerimeterWall(int roomType,int grid,unsigned int seed,unsigned int frame,NativeStaticGrid* output){
+    //79c72a..79c78c shares the same ordinary type15 constructor/Init. Its
+    //seed comes from the global MT, not the selected main-pass award clone.
+    return NativeSelectedWall(roomType,grid,0,0,seed,frame,output);
+}

@@ -16,6 +16,7 @@ struct NativePlacedRoom {
     unsigned int visitedCount; //Descriptor+40. Increment is later in Room::Init.
     NativeRoomSeeds seeds;
     int doorTargets[8],doorTargetSlots[8]; //006f3530 potential grid cells / reverse slots.
+    bool linksPrepared; //The negative-grid early return leaves94..ab native storage unwritten.
 };
 enum NativePlacementResult { NP_OK,NP_BAD_REQUEST,NP_CAPACITY,NP_BAD_FOOTPRINT };
 // Common bounded placement/lookup state from006eeea0/006f6100. This is descriptor

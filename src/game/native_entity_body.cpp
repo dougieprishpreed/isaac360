@@ -1,5 +1,6 @@
 #include "native_entity_body.h"
 #include "native_entity_body_data.h"
+#include "native_sprite.h"
 #include <math.h>
 #include <string.h>
 namespace {
@@ -36,25 +37,35 @@ void NativeEntityCollisionShape::Swap(NativeEntityCollisionShape& other){
     float r=radius,x=xMultiplier,y=yMultiplier;radius=other.radius;xMultiplier=other.xMultiplier;yMultiplier=other.yMultiplier;
     other.radius=r;other.xMultiplier=x;other.yMultiplier=y;points.swap(other.points);
 }
-NativeEntityBody::NativeEntityBody():ready(false),type(0),variant(0),subtype(0),frameCount(0),initialFrame(0),state(0),gridCollisionClass(0),entityCollisionClass(0),initialSeed(0),
-    shadowScale(0),friction(0),mass(0),collisionDamage(0),hitPoints(0),maxHitPoints(0),native2a0(0),native2ec(0),native2fc(0){
+NativeEntityBody::NativeEntityBody():ready(false),native168(false),native169(false),native16a(false),removed(false),native16e(false),flagsLow(0),flagsHigh(0),type(0),variant(0),subtype(0),frameCount(0),initialFrame(0),state(0),gridCollisionClass(0),entityCollisionClass(0),renderDepth(0),initialSeed(0),entityToken(0),native34(0),native38(0),parentToken(0),childToken(0),
+    shadowScale(0),friction(0),mass(0),collisionDamage(0),hitPoints(0),maxHitPoints(0),native2a0(0),native2ec(0),native2fc(0),appliedFriction(0),previousTime(0),time(0),native304(0),native308(0),native26c(0),native27c(0),native340(0),boundStatus(false),damagePending(false){
     position.x=position.y=velocity.x=velocity.y=previousPosition.x=previousPosition.y=previousVelocity.x=previousVelocity.y=0;random.Default();
+    native264.x=native264.y=0;memset(statusTimers,0,sizeof(statusTimers));
+    native18=native1c=0;native34c=native350=0;
+    gridContactKnown=gridContact=false;contactVelocity.x=contactVelocity.y=contactNormal.x=contactNormal.y=0;
 }
-NativeEntityBodyResult NativeEntityBody::BeginFresh(int t,int v,int sub,unsigned int seed,unsigned int frame,int stage){
+NativeEntityBodyResult NativeEntityBody::BeginFresh(int t,int v,int sub,unsigned int seed,unsigned int frame,int stage,const NativePoint* pos,const NativePoint* vel){
     if(t<0||v<0||sub<0||!seed||stage<0)return NEB_BAD_REQUEST;
-    const NativeEntityBodyProperties* p=t==1&&sub==0?NativePreparedPlayerBody(v):0;
+    const NativeEntityBodyProperties* p=t==1&&sub==0?NativePreparedPlayerBody(v):t==1000?NativePreparedEffectBody(v,sub):0;
     if(!p)return NEB_UNSUPPORTED_PROPERTIES;
     NativeEntityBody next;next.type=t;next.variant=v;next.subtype=sub;next.initialSeed=seed;next.random.Set(seed,30);
+    next.frameCount=0; //66f544: native+24 reset.
+    next.native27c=-1; //66f566: separate damage aggregate, not the frame count.
     next.initialFrame=(int)frame;next.shadowScale=p->shadowScale;next.friction=p->friction;
     next.mass=p->mass;next.collisionDamage=p->collisionDamage;next.hitPoints=p->baseHP;
     if(p->stageHP>F(kNativeBodyStageThreshold)){float s=(float)stage;if(s>F(kNativeBodyStageCap))s=F(kNativeBodyStageCap);
         next.hitPoints=Add(Mul(Mul(stage<5?F(kNativeBodyEarlyHP):F(kNativeBodyLateHP),s),p->stageHP),p->baseHP);}
     next.maxHitPoints=next.hitPoints;
+    if(pos)next.position=*pos;if(vel)next.velocity=*vel;
+    next.previousPosition=next.position;next.previousVelocity=next.velocity;
     if(!next.collision.Resize(p->radius,p->xMultiplier,p->yMultiplier,p->gridPoints,*p))return NEB_BAD_REQUEST;
     //Both bound player records omit a gridcollision override. Configured
     //boundary samples select5; an empty point vector selects3 at0066fb2c.
     next.gridCollisionClass=next.collision.points.empty()?3:5;
-    next.native2ec=1;next.native2fc=F(0x3f666666U);
+    //66f5ec is a FOUR-byte write at169: both169 and16a become true.
+    next.native169=next.native16a=true;next.state=2;next.entityCollisionClass=4;
+    next.native2ec=1;next.native2fc=F(0x3f666666U);next.appliedFriction=next.friction;
+    next.previousTime=F(0xb727c5acU);next.time=0;next.native304=next.native308=1;
     next.ready=true;Swap(next);return NEB_OK;
 }
 void NativeEntityBody::Swap(NativeEntityBody& other){
@@ -62,18 +73,34 @@ void NativeEntityBody::Swap(NativeEntityBody& other){
     //serialization. Swap named members; the shape owns its vector separately.
 #define EXCHANGE(member,type) {type n=member;member=other.member;other.member=n;}
     EXCHANGE(ready,bool);EXCHANGE(type,int);EXCHANGE(variant,int);EXCHANGE(subtype,int);EXCHANGE(frameCount,int);EXCHANGE(initialFrame,int);EXCHANGE(state,int);
-    EXCHANGE(gridCollisionClass,int);EXCHANGE(entityCollisionClass,int);EXCHANGE(initialSeed,unsigned int);EXCHANGE(random,NativeRng);
+    EXCHANGE(native168,bool);EXCHANGE(native169,bool);EXCHANGE(native16a,bool);EXCHANGE(removed,bool);EXCHANGE(native16e,bool);EXCHANGE(flagsLow,unsigned int);EXCHANGE(flagsHigh,unsigned int);
+    EXCHANGE(native18,unsigned int);EXCHANGE(native1c,unsigned int);EXCHANGE(native34c,int);EXCHANGE(native350,int);
+    EXCHANGE(gridContactKnown,bool);EXCHANGE(gridContact,bool);EXCHANGE(contactVelocity,NativePoint);EXCHANGE(contactNormal,NativePoint);
+    EXCHANGE(gridCollisionClass,int);EXCHANGE(entityCollisionClass,int);EXCHANGE(renderDepth,int);EXCHANGE(initialSeed,unsigned int);EXCHANGE(random,NativeRng);
     EXCHANGE(position,NativePoint);EXCHANGE(velocity,NativePoint);EXCHANGE(previousPosition,NativePoint);EXCHANGE(previousVelocity,NativePoint);
     EXCHANGE(shadowScale,float);EXCHANGE(friction,float);EXCHANGE(mass,float);EXCHANGE(collisionDamage,float);EXCHANGE(hitPoints,float);EXCHANGE(maxHitPoints,float);
     EXCHANGE(native2a0,float);EXCHANGE(native2ec,float);EXCHANGE(native2fc,float);
+    EXCHANGE(entityToken,unsigned int);EXCHANGE(appliedFriction,float);EXCHANGE(previousTime,float);EXCHANGE(time,float);EXCHANGE(native304,float);EXCHANGE(native308,float);
+    EXCHANGE(native34,unsigned int);EXCHANGE(native38,unsigned int);EXCHANGE(parentToken,unsigned int);EXCHANGE(childToken,unsigned int);
+    EXCHANGE(native26c,int);EXCHANGE(native27c,int);EXCHANGE(native340,int);EXCHANGE(native264,NativePoint);EXCHANGE(boundStatus,bool);EXCHANGE(damagePending,bool);
+    for(int i=0;i<20;++i){EXCHANGE(statusTimers[i],int);}
 #undef EXCHANGE
+    tintRecords.swap(other.tintRecords);damageQueue.swap(other.damageQueue);
     collision.Swap(other.collision);
 }
 unsigned int NativeEntityBody::StateHash() const{
     unsigned int h=2166136261U;Fold(h,ready?1:0);Fold(h,type);Fold(h,variant);Fold(h,subtype);Fold(h,frameCount);Fold(h,initialFrame);Fold(h,state);
+    Fold(h,native168);Fold(h,native169);Fold(h,native16a);Fold(h,removed);Fold(h,native16e);Fold(h,flagsLow);Fold(h,flagsHigh);
+    Fold(h,native18);Fold(h,native1c);Fold(h,native34c);Fold(h,native350);
+    Fold(h,gridContactKnown);if(gridContactKnown){Fold(h,gridContact);Scalar(h,contactNormal.x);Scalar(h,contactNormal.y);
+        if(gridContact){Scalar(h,contactVelocity.x);Scalar(h,contactVelocity.y);}}
     Fold(h,gridCollisionClass);Fold(h,entityCollisionClass);Fold(h,initialSeed);Fold(h,random.state);Fold(h,random.index);
     Scalar(h,position.x);Scalar(h,position.y);Scalar(h,velocity.x);Scalar(h,velocity.y);Scalar(h,previousPosition.x);Scalar(h,previousPosition.y);Scalar(h,previousVelocity.x);Scalar(h,previousVelocity.y);
     Scalar(h,shadowScale);Scalar(h,friction);Scalar(h,mass);Scalar(h,collisionDamage);Scalar(h,hitPoints);Scalar(h,maxHitPoints);Scalar(h,native2a0);Scalar(h,native2ec);Scalar(h,native2fc);
     Scalar(h,collision.radius);Scalar(h,collision.xMultiplier);Scalar(h,collision.yMultiplier);Fold(h,(unsigned int)collision.points.size());
+    Fold(h,renderDepth);Fold(h,entityToken);Scalar(h,appliedFriction);Scalar(h,previousTime);Scalar(h,time);Scalar(h,native304);Scalar(h,native308);
+    Fold(h,native34);Fold(h,native38);Fold(h,parentToken);Fold(h,childToken);
+    Fold(h,native26c);Fold(h,native27c);Fold(h,native340);Scalar(h,native264.x);Scalar(h,native264.y);Fold(h,boundStatus);Fold(h,damagePending);
+    for(int i=0;i<20;++i)Fold(h,statusTimers[i]);Fold(h,(unsigned int)tintRecords.size());Fold(h,(unsigned int)damageQueue.size());
     for(unsigned int i=0;i<collision.points.size();++i){Scalar(h,collision.points[i].x);Scalar(h,collision.points[i].y);}return h;
 }

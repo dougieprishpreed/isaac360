@@ -5,6 +5,9 @@ static const int kNativeAwardCount=638;
 static const int kNativeCharacterCount=18;
 struct NativeProfile {
     bool awards[kNativeAwardCount];
+    //PersistentGameData+2b8 (Main+2c4).86f5c0..c5 clears exactly496
+    //dwords;6c217a..218d captures these profile event counters, not input.
+    unsigned int eventCounters[496];
     unsigned int edenTokens;
     int difficulty;
     bool Award(int id) const;

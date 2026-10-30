@@ -26,6 +26,7 @@ struct NativeRoomSpace {
 //complete actor collision, pathfinding, native grid restoration or movement.
 struct NativeRoomCollision {
     int native76c[kNativeRoomGridLimit],classes[kNativeRoomGridLimit],types[kNativeRoomGridLimit];
+    unsigned short nativeE6c[kNativeRoomGridLimit];
     bool occupied[kNativeRoomGridLimit];
     void Clear();
     bool Set(int cell,bool occupant,int collisionClass,int nativeValue,int nativeType=0);

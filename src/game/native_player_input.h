@@ -9,13 +9,20 @@ public:
     virtual ~NativeActionSource(){}
     virtual NativePlayerInputResult Value(int action,int controller,unsigned int playerToken,float*)=0;
     virtual NativePlayerInputResult Pressed(int action,int controller,unsigned int playerToken,bool*)=0;
+    virtual NativePlayerInputResult Held(int,int,unsigned int,bool*){return NPI_SOURCE_MISSING;}
+    virtual NativePlayerInputResult Connected(int,bool*){return NPI_SOURCE_MISSING;}
 };
 struct NativeActionFrame {
     int controller;unsigned int playerToken,frame,knownValues;
     float values[8];bool dropKnown,dropPressed;
+    unsigned int knownHeld,held,knownPressed,pressed;
+    bool connectionKnown,connected;
     void Clear(int controller,unsigned int playerToken,unsigned int frame);
     bool SupplyValue(int action,float value);
-    void SupplyDrop(bool pressed){dropKnown=true;dropPressed=pressed;}
+    void SupplyDrop(bool value){dropKnown=true;dropPressed=value;SupplyPressed(11,value);}
+    bool SupplyHeld(int action,bool value);
+    bool SupplyPressed(int action,bool value);
+    void SupplyConnection(bool value){connectionKnown=true;connected=value;}
 };
 class NativeFrameActions:public NativeActionSource {
     const NativeActionFrame& frame;
@@ -24,6 +31,8 @@ public:
     explicit NativeFrameActions(const NativeActionFrame& f):frame(f){}
     NativePlayerInputResult Value(int,int,unsigned int,float*);
     NativePlayerInputResult Pressed(int,int,unsigned int,bool*);
+    NativePlayerInputResult Held(int,int,unsigned int,bool*);
+    NativePlayerInputResult Connected(int,bool*);
 };
 //Evaluated fields at00729520/007297a0. Pointer relations are supplied by the
 //real entity owner; native1540 keeps its offset until its full role is known.

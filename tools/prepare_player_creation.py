@@ -1,13 +1,35 @@
 """Bind fresh nested player owners to existing saved instructions, read only."""
 from pathlib import Path
-import hashlib,json,re
+import hashlib,json,re,struct,xml.etree.ElementTree as ET
 from reference_memory import Memory
+from original_resources import OriginalResources
 ROOT=Path(__file__).resolve().parents[1]
 
 def sha(path):return hashlib.sha256(path.read_bytes()).hexdigest()
 
 def prepare(out):
     m=Memory(ROOT/'recovered/main')
+    resources=OriginalResources(ROOT/'runtime/game');bindings=[]
+    def resource(request):
+        raw,binding=resources.read(request);bindings.append(dict(request=request,**binding));return raw,binding
+    xml,_=resource('players.xml');players=ET.fromstring(xml)
+    player=next(e for e in players if e.tag=='player' and e.get('id')=='0')
+    #Only the reached ordinary Isaac appearance is compiled here. Unsupported
+    #appearance branches remain explicit failures, never metadata defaults.
+    assert player.get('skinColor')=='-1' and 'costume' not in player.attrib and 'costumeSuffix' not in player.attrib
+    skin=players.get('root')+player.get('skin');png,skin_binding=resource(skin)
+    assert png[:8]==b'\x89PNG\r\n\x1a\n' and png[12:16]==b'IHDR'
+    width,height=struct.unpack('>II',png[16:24])
+    strings,_=resource('stringtable.sta');strings=ET.fromstring(strings)
+    assert next(e for e in strings.find('languages') if e.get('id')=='0').get('index')=='1'
+    category=next(e for e in strings.findall('category') if e.get('name')==m.cstring(0xb29504))
+    key=player.get('name');assert key.startswith('#')
+    name=next(e for e in category if e.get('name')==key[1:]).findall('string')[0].text
+    appearance=ROOT/'build/generated/native_player_appearance_data.h';appearance.parent.mkdir(parents=True,exist_ok=True)
+    appearance.write_text('//Original normal-001 player0 appearance and English Players stringtable binding.\n'
+        'static const NativeSpriteSheet kNativeAppearanceSheets[]={\n{0,%s,%d,%d}\n};\n'%
+            (json.dumps(skin_binding['virtual_path']),width,height)+
+        'static const char kNativeFreshPlayerName[]=%s;\n'%json.dumps(name),encoding='ascii')
     spans=[(0x707b40,0x70877c),(0x7087b0,0x708eba),(0x7e0610,0x7e0762),
            (0x711d20,0x711d96),(0x904960,0x904b1d),
            (0x6b4a19,0x6b4bc0),(0x76ea93,0x76eafc),(0x76ed69,0x76ee38),
@@ -17,7 +39,14 @@ def prepare(out):
            (0x76ea50,0x76eafc),(0x76ec09,0x76ec9d),(0x76ee38,0x76ef7e),
            (0x70f9f0,0x70faa3),(0x70fbbb,0x70fdd9),(0x7101f2,0x710231),
            (0x710ae2,0x710b2c),(0x710c95,0x710cc5),(0x710e92,0x710f6e),
-           (0x70ef90,0x70f1ad),(0x70f50e,0x70f558),(0x70f9a0,0x70f9eb)]
+           (0x70ef90,0x70f1ad),(0x70f50e,0x70f558),(0x70f9a0,0x70f9eb),
+           (0x76eafc,0x76ec09),(0x76ec9d,0x76ed69),(0x65beb0,0x65bf60),
+           (0x405f40,0x405fcf),(0x447ae0,0x447b22),(0x406f30,0x40723b),
+           (0x4017d0,0x4017f4),(0x800c50,0x800c75),(0x7f0c30,0x7f0c89),
+           (0x658b21,0x658b48),(0x658d6a,0x658d83),(0x76c96b,0x76c986),
+           (0x70aab1,0x70aabb),(0x78cdf0,0x78ce80)]
+    assert m.read(0x70aab1,10)==bytes.fromhex('837f2c010f8516040000')
+    assert m.cstring(0xb293a8)=='addplayer'
     lines=[];writes=[];object_writes=[];edi=0;esi=None
     for line in (ROOT/'recovered/main/disassembly.txt').open():
         match=re.match(r'^([0-9a-f]{8})  ([0-9a-f]+)  (.*)',line)
@@ -86,6 +115,20 @@ def prepare(out):
             if keep:rows.append(line)
         continuation.write_text('Bounded preserved Init instructions; no original execution.\n'+'\n'.join(rows)+'\n',encoding='ascii')
     decoded=[ROOT/'evidence/reference_instructions/player-init-after-log.txt',continuation]
+    tail=ROOT/'evidence/reference_instructions/player-init-tail.txt'
+    if not tail.exists():
+        rows=['Bounded reached variant0 Init tail from preserved VS2010 listings; no original execution.']
+        for filename,begin,end in [('0070a8d6_0070aab1.txt',0x70a9cd,0x70aab1),
+                ('0070aed1_0070b090.txt',0x70aed1,0x70b089),
+                ('0070b089_0070b3c0.txt',0x70b089,0x70b3bc),
+                ('0070b3bc_0070b4f0.txt',0x70b3bc,0x70b47b)]:
+            keep=False
+            for line in (ROOT/'build/reference_ranges'/filename).read_text().splitlines():
+                x=re.match(r'  ([0-9A-F]{8}):',line)
+                if x:keep=begin<=int(x[1],16)<end
+                if keep and line.strip() and not line.startswith('  Summary'):rows.append(line)
+        tail.write_text('\n'.join(rows)+'\n',encoding='ascii')
+    decoded.append(tail)
     init=[]
     for path in decoded:
         for line in path.read_text().splitlines():
@@ -93,20 +136,21 @@ def prepare(out):
             if code:
                 prefix=bytes.fromhex(code[2]);assert m.read(int(code[1],16),len(prefix))==prefix
         init += [(int(x[1],16),x[2]) for l in path.read_text().splitlines()
-            if (x:=re.match(r'  ([0-9A-F]{8}):.*?\s{2}(\S.*)',l)) and 0x7099a2<=int(x[1],16)<0x70a344]
+            if (x:=re.match(r'  ([0-9A-F]{8}):.*?\s{2}(\S.*)',l)) and
+                (0x7099a2<=int(x[1],16)<0x70a344 or 0x70a9cd<=int(x[1],16)<0x70b47b)]
     init=sorted(dict(init).items());fixed=[];xmm_zero=False
     for pc,op in init:
         raw=m.read(pc,16)
         #Decode only these original stores, not arbitrary x86 execution.
         prefix=raw[:2];offset=None;value=None;width=None
-        if prefix in (b'\xc7\x87',b'\xc6\x87'):
+        if prefix in (b'\xc7\x87',b'\xc6\x87',b'\xc7\x86',b'\xc6\x86'):
             offset=int.from_bytes(raw[2:6],'little');width=4 if prefix[0]==0xc7 else 1;value=int.from_bytes(raw[6:6+width],'little')
         elif raw[:3]==b'\x66\xc7\x87':
             offset=int.from_bytes(raw[3:7],'little');width=2;value=int.from_bytes(raw[7:9],'little')
         elif prefix in (b'\x89\x87',b'\x88\x87') or raw[:3]==b'\x66\x89\x87':
             #EAX is explicitly zero in these spans. The dynamic trinket97
             #remainder at709e62 and vector pointer writes are delegated.
-            if 0x7099b8<=pc<0x709afc or 0x709b16<=pc<0x709e04 or 0x709e69<=pc<0x709eb9:
+            if 0x7099b8<=pc<0x709afc or 0x709b16<=pc<0x709e04 or 0x709e69<=pc<0x709eb9 or 0x70af70<=pc<0x70af89 or 0x70b1e5<=pc<0x70b2d0:
                 word=raw[0]==0x66;offset=int.from_bytes(raw[3:7] if word else raw[2:6],'little');width=2 if word else 1 if raw[0]==0x88 else 4;value=0
         if offset is not None and pc!=0x709ede:fixed.append((pc,offset,width,value)) #Variant1 only; the genuine initial player is variant0.
         #MOVSS from the verified original zero vector, followed by its store.
@@ -123,6 +167,11 @@ def prepare(out):
     for pc,offset,words in [(0x709f4e,0x1720,2),(0x70a130,0x13c0,4),
             (0x70a195,0x14c4,2),(0x70a1ba,0x14e0,2),
             (0x70a1df,0x14fc,2),(0x70a204,0x1518,2)]:
+        fixed += [(pc,offset+i*4,4,0) for i in range(words)]
+    #70a9cd..aa7d clear two11-word value records, then variant0 skips the
+    #variant1 effect factory block. These are explicit zero stack/vector stores.
+    for pc,offset,words in [(0x70aa18,0x1764,11),(0x70aa66,0x1738,11),
+            (0x70aff8,0x1cd0,2),(0x70b234,0x1e3c,2)]:
         fixed += [(pc,offset+i*4,4,0) for i in range(words)]
     #The nested sprite resolves packed entity key100000 to type1/variant0.
     assert m.read(0x7e069a,7)==bytes.fromhex('c745ec00001000')
@@ -143,15 +192,27 @@ def prepare(out):
         spans=[dict(start=f'{a:08x}',end_exclusive=f'{b:08x}',sha256=hashlib.sha256(m.read(a,b-a)).hexdigest()) for a,b in spans],
         cache_scalar_writes=len(writes),player_constructor_scalar_writes=len(object_writes),
         init_fixed_writes=len(fixed),continuation=dict(path=continuation.relative_to(ROOT).as_posix(),sha256=sha(continuation)),
+        appearance=dict(player=0,skin=skin_binding['virtual_path'],skin_color=-1,costume=-1,name_key=key,english_name=name,
+            ghost='Original animation-layer sheet; empty costumeSuffix leaves path unchanged',bindings=bindings,
+            limits='Reached empty fresh player0 branch only. GPU upload/drawing and other appearance branches remain open.'),
+        reset_tail=dict(path=tail.relative_to(ROOT).as_posix(),sha256=sha(tail),
+            reached='variant0 skips70aabb..70aeca; empty removal containers;78cdf0 replaces null reference; bitsets and indexed byte counts reset before70b483'),
+        starting_dispatch=dict(resource_call='0070b483 ->0076c1d0 returns at0076c985',
+            callback_call='0070b489 ->007f0c30 tests list+4 count at00bcb25c before any Lua call',
+            callback_constructor='004017d0 constructs72 lists of8 bytes at00bcb210 with00800c50; index9 at00bcb258 starts empty',
+            separate_command=dict(command=m.cstring(0xb293a8),comparison='00658b2e',call='00658d7e ->0076c990'),
+            post_generation='006b4b88 ->0076c990',
+            conclusion='No direct pre-generation76c990 in the reached Init return. The callback registry starts empty; mod registration is excluded by the current phase. Do not insert an unconditional pre-generation call. The resource and callback services still need shared-runtime execution.'),
         lifecycle=['006b4a30 ->00904960 ->00707b40 (nested7e0610 twice,7087b0)',
             '009049e0/e6 first-player identity,00904a27 ->00709330',
             '00709330 banks ->0066f440 (+50=0066f8f0,+4c=0070b4f0)',
             '7099a2 reset/draw ->70a344 auxiliary/body ->70a91f/711d20',
             '70a994 ->76ea50 appearance BEFORE resources/grants/stats and generation',
             '006b4b5e ->006f9d20 generation;006b4b88 ->0076c990 again'],
-        limits='Owned nested constructor states, defined scalar writes, default weapon Init, native can-shoot result and empty costume reset. Appearance76ea50 and the remaining Init/tail/callbacks/grants/stats/registration/entry/update are not accepted. The pre/post-generation76c990 dispatch must be reconciled through the actual reached caller chain, not added unconditionally. No original/target execution.')
+        limits='Owned nested constructor/reset states, default weapon Init, reached player0 appearance and empty costume refresh. Starting-resource service76c1d0, callbacks, grants/stats, registration/entry/update remain incomplete. Pre-generation76c990 is not inserted unconditionally; explicit post-generation6b4b88 is retained. No original/target execution.')
     path=ROOT/'runtime/port/normal_player_creation_reference.json'
     path.write_text(json.dumps(report,indent=2)+'\n')
-    return ['tools/prepare_player_creation.py',target.relative_to(ROOT).as_posix(),continuation.relative_to(ROOT).as_posix(),path.relative_to(ROOT).as_posix()]
+    return ['tools/prepare_player_creation.py',target.relative_to(ROOT).as_posix(),continuation.relative_to(ROOT).as_posix(),
+        tail.relative_to(ROOT).as_posix(),path.relative_to(ROOT).as_posix()]+['runtime/game/'+b['file'] for b in bindings]
 
 if __name__=='__main__':prepare(ROOT/'build/normal_flow/data')

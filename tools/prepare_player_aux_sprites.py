@@ -31,15 +31,18 @@ def xml_asset(raw,path,m):
     sheets=[dict(id=int(e.attrib['Id']),path=text(e.attrib['Path'])) for e in content.find('Spritesheets')]
     layers=[dict(id=int(e.attrib['Id']),spritesheet=int(e.attrib['SpritesheetId']),name=text(e.attrib['Name'])) for e in content.find('Layers')]
     assert [e['id'] for e in layers]==list(range(len(layers)))
-    assert not list(content.find('Nulls')) and not list(content.find('Events')),'Auxiliary scope requires no null/event declarations.'
+    nulls=[dict(id=int(e.attrib['Id']),name=text(e.attrib['Name'])) for e in content.find('Nulls')]
+    assert not list(content.find('Events')),'Event declarations still require the native XML event reader.'
     clips=[]
     for a in animations:
         tracks=[dict(id=int(t.attrib['LayerId']),visible_byte=boolean(t.attrib['Visible']),frames=[frame(f,True) for f in t]) for t in a.find('LayerAnimations')]
         assert sorted(t['id'] for t in tracks)==[l['id'] for l in layers]
-        assert not list(a.find('NullAnimations')) and not list(a.find('Triggers'))
+        null_tracks=[dict(id=int(t.attrib['NullId']),visible_byte=boolean(t.attrib['Visible']),frames=[frame(f,False) for f in t]) for t in a.find('NullAnimations')]
+        assert sorted(t['id'] for t in null_tracks)==sorted(n['id'] for n in nulls)
+        assert not list(a.find('Triggers'))
         clips.append(dict(name=text(a.attrib['Name']),frame_count=int(a.attrib['FrameNum']),loop_byte=boolean(a.attrib['Loop']),
-            root_frames=[frame(f,False) for f in a.find('RootAnimation')],layer_tracks=tracks,null_tracks=[],triggers=[]))
-    return dict(canonical_path=path,default_animation=text(animations.attrib['DefaultAnimation']),spritesheets=sheets,layers=layers,nulls=[],events=[],animations=clips)
+            root_frames=[frame(f,False) for f in a.find('RootAnimation')],layer_tracks=tracks,null_tracks=null_tracks,triggers=[]))
+    return dict(canonical_path=path,default_animation=text(animations.attrib['DefaultAnimation']),spritesheets=sheets,layers=layers,nulls=nulls,events=[],animations=clips)
 
 def catalogue():
     m=Memory(ROOT/'recovered/main');resource=OriginalResources(ROOT/'runtime/game');bindings=[]

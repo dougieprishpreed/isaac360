@@ -14,4 +14,6 @@ struct NativeStaticGrid {
 //spawn pass's current award clone, as passed at0079c380.
 bool NativeSelectedWall(int roomType,int grid,unsigned int variant,unsigned int subtype,
     unsigned int selectedSeed,unsigned int frame,NativeStaticGrid*);
+//79c4d0 ordinary branch. The caller checks grid ownership BEFORE drawing.
+bool NativePerimeterWall(int roomType,int grid,unsigned int seed,unsigned int frame,NativeStaticGrid*);
 #endif

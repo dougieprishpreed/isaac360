@@ -113,5 +113,24 @@ NativePlayerVelocityResult NativePlayerVelocityCore(const NativePlayerVelocityCo
             NativePoint correction=Scale(Scale(c.native194,dot),F(kMotion080));n.velocity=Minus(c.native18c,Plus(correction,correction));}
     }
     if(!Finite(n.velocity)||!Finite(n.movement)||!Finite(n.lastMovement)||!Finite(n.angle))return Fail(NPI_BAD_VALUE,0x72b71c,-1,issue);
-    return Done(output,n,0x72b71c,issue);
+    //72b71c..72c3be. Each native predicate remains a distinct, ordered query.
+    //Nonempty effects enter animation/spawn services; they cannot be silently
+    //dropped. Ordinary empty owners execute the complete reached tail.
+    if(!(c.flagsLow&0x4000)){
+        static const int ids[]={93,77,298,299,58,313};
+        static const unsigned int pcs[]={0x72b734,0x72b800,0x72b8a0,0x72b951,0x72b9f9,0x72bab4};
+        for(int i=0;i<6;++i){bool present=false;r=effects.Has(ids[i],c.input.playerToken,&present);
+            if(r!=NPI_OK)return Fail(r,pcs[i],ids[i],issue);
+            if(present){if(issue){issue->nextAddress=pcs[i];issue->missingEffect=ids[i];issue->sourceResult=NPI_OK;}*output=n;return NPV_NEED_UPDATE_TAIL;}}
+        bool present=false;r=effects.Collectible(594,c.input.playerToken,&present);
+        if(r!=NPI_OK)return Fail(r,0x72bb4d,594,issue);
+        if(present){if(issue){issue->nextAddress=0x72bb5a;issue->missingEffect=594;issue->sourceResult=NPI_OK;}*output=n;return NPV_NEED_UPDATE_TAIL;}
+        n.native1ddc=0;
+    }
+    bool present=false;r=effects.Collectible(593,c.input.playerToken,&present);
+    if(r!=NPI_OK)return Fail(r,0x72c0ff,593,issue);
+    if(!present){r=effects.Collectible(705,c.input.playerToken,&present);if(r!=NPI_OK)return Fail(r,0x72c111,705,issue);}
+    if(present){if(issue){issue->nextAddress=0x72c11e;issue->missingEffect=593;issue->sourceResult=NPI_OK;}*output=n;return NPV_NEED_UPDATE_TAIL;}
+    n.native1d94=n.native1d94<10000?n.native1d94+1:10000;
+    return Done(output,n,0x72c3c4,issue);
 }

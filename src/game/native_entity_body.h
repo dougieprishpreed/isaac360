@@ -12,6 +12,8 @@ struct NativeEntityBodyProperties {
     const char* animationPath; //Inherited entity property+74; consumed by Sprite.
 };
 const NativeEntityBodyProperties* NativePreparedPlayerBody(int variant);
+const NativeEntityBodyProperties* NativePreparedEffectBody(int variant,int subtype);
+class NativeSprite;
 struct NativeEntityCollisionShape {
     float radius,xMultiplier,yMultiplier;
     std::vector<NativePoint> points; //00671de0: even indices, then odd indices.
@@ -27,15 +29,28 @@ enum NativeEntityBodyResult { NEB_OK,NEB_BAD_REQUEST,NEB_UNSUPPORTED_PROPERTIES 
 class NativeEntityBody {
 public:
     bool ready;
-    int type,variant,subtype,frameCount,initialFrame,state,gridCollisionClass,entityCollisionClass;
-    unsigned int initialSeed;
+    bool native168,native169,native16a,removed,native16e;
+    unsigned int flagsLow,flagsHigh;
+    unsigned int native18,native1c; //66f7a3/aa: separate deferred-status flags.
+    int native34c,native350; //66f875/7f: pit/fall lifecycle.
+    bool gridContactKnown,gridContact; //188 is first defined by collision processing.
+    NativePoint contactVelocity,contactNormal; //18c/190,194/198; read only after contact.
+    int type,variant,subtype,frameCount,initialFrame,state,gridCollisionClass,entityCollisionClass,renderDepth;
+    unsigned int initialSeed,entityToken,native34,native38,parentToken,childToken; //30c/324 nullable stable identities.
     NativeRng random; //0066f449..80: index30 (4/3/17), no initial advance.
     NativePoint position,velocity,previousPosition,previousVelocity;
     float shadowScale,friction,mass,collisionDamage,hitPoints,maxHitPoints;
-    float native2a0,native2ec,native2fc;
+    float native2a0,native2ec,native2fc,appliedFriction,previousTime,time,native304,native308;
+    int statusTimers[20],native26c,native27c,native340;
+    NativePoint native264;
+    bool boundStatus,damagePending;
+    std::vector<unsigned int> tintRecords,damageQueue;
     NativeEntityCollisionShape collision;
     NativeEntityBody();
-    NativeEntityBodyResult BeginFresh(int type,int variant,int subtype,unsigned int seed,unsigned int gameFrame,int stage);
+    NativeEntityBodyResult BeginFresh(int type,int variant,int subtype,unsigned int seed,unsigned int gameFrame,int stage,const NativePoint* position=0,const NativePoint* velocity=0);
+    void PreUpdate(); //674060.
+    bool UpdateUnmodified(NativeSprite&,float waterAmount,unsigned int* nextAddress); //6740a0, actual empty status owners.
+    void AddVelocity(NativePoint acceleration,bool ignoreTime=false); //424130.
     void Swap(NativeEntityBody&);
     unsigned int StateHash() const; //Fieldwise diagnostic, not serialization.
 private:

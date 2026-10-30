@@ -34,6 +34,9 @@ bool NormalRunFlow::Begin(unsigned int seed,const NativeRunStart& start,const Na
     NativeBossIdentityManager nextBosses;if(!NativeInitializeRunBosses(next,*data,&nextBosses))return false;
     const NativePlayerDef* playerData=NativePlayer(start.player);if(!playerData)return false;
     seeds=next;player=start;profile=p;pool.Reset(NC_NORMAL);layout.Reset();bosses=nextBosses;
+    //6b30a9 ->924f30: the second 30-word statistics array at+c0 is cleared
+    //at New Run.7a3c53 updates it on the first visit to each descriptor.
+    memset(roomTypeVisits,0,sizeof(roomTypeVisits));
     memset(&context,0,sizeof(context));memset(&floor,0,sizeof(floor));memset(&topology,0,sizeof(topology));
     memset(&bossSequence,0,sizeof(bossSequence));memset(&bossEligibility,0,sizeof(bossEligibility));memset(&placement,0,sizeof(placement));memset(&midReport,0,sizeof(midReport));
     firstPlayerKeys=playerData->keys;firstPlayerCoins=playerData->coins;fullHealthPredicate=false;minibossPlaced=false;runFlagsLow=runFlagsHigh=retainedRoomSeed=0;

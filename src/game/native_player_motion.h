@@ -2,13 +2,14 @@
 #define GENERIC_NATIVE_PLAYER_MOTION_H
 #include "native_player_input.h"
 
-//0072ae20..0072b71b: velocity stage only. The ordinary path must still run
-//the remaining native update at0072b71c before position/collision integration.
+//0072ae20 movement service. This is called within736d70's player update;
+//returning here alone is not a whole entity/world tick.
 enum NativePlayerVelocityResult { NPV_RETURNED,NPV_NEED_UPDATE_TAIL,NPV_BAD_REQUEST,NPV_SOURCE_MISSING,NPV_BAD_VALUE };
 class NativeMovementEffects {
 public:
     virtual ~NativeMovementEffects(){}
     virtual NativePlayerInputResult Has(int cacheId,unsigned int playerToken,bool*)=0;
+    virtual NativePlayerInputResult Collectible(int,unsigned int,bool*){return NPI_SOURCE_MISSING;}
 };
 struct NativePlayerVelocityState {
     NativePoint velocity;             //+2b0
@@ -17,6 +18,7 @@ struct NativePlayerVelocityState {
     NativePoint lastMovement;         //+1578
     int direction;float angle;        //+1548,+19f4
     int native16d8,native1dc4;
+    int native1ddc,native1d94;
 };
 //Evaluated entity fields, not guessed constructor defaults or item activation.
 //Offset names retain uncertainty about fields whose full lifecycle is pending.

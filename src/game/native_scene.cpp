@@ -56,6 +56,10 @@ NativeSceneResult NativeSceneBuildRoom(const RoomRecord& record,const NativeRoom
     if(!room.geometry.Init(record.shape,record.width,record.height))return NSC_UNSUPPORTED_SHAPE;
     if(!room.space.Init(record.shape,room.geometry,configStage,record.type))return NSC_BAD_REQUEST;
     room.collision.Clear(); //007a10cf..10dd clears all448 native+76c entries.
+    room.native6f60=-1;room.native11ec=0;
+    room.native1210=0; //Host storage; gameplay caller writes7a2cc3 before reading.
+    room.particlesEnabled=false;
+    for(int i=0;i<8;++i)room.native7628[i]=0;
     bool seen[8]={false};
     for(unsigned int i=0;i<record.doorCount;++i){RoomRecordDoor door;if(!record.Door(i,&door))return NSC_SOURCE_ERROR;int slot=-1;
         for(int j=0;j<8;++j){NativeCell at;if(NativeShapeStbDoor(record.shape,j,&at)&&at.x==door.x&&at.y==door.y)slot=j;}
@@ -80,7 +84,8 @@ NativeSceneResult NativeSceneBuildRoom(const RoomRecord& record,const NativeRoom
             if(room.collision.occupied[choice.grid])continue;
             NativeDecoration& prop=room.decorations[room.decorationCount];int x,y;
             if(room.geometry.Tile(choice.grid,&x,&y)&&NativeBasementDecoration(seeds.spawn,room.geometry,choice.grid,&prop.seed,&prop.animation)){
-                prop.cell=choice.grid;++room.decorationCount;room.collision.Set(choice.grid,true,0,0,1);continue;}
+                prop.cell=choice.grid;prop.variant=entry.variant;prop.initialSeed=choice.seed;
+                ++room.decorationCount;room.collision.Set(choice.grid,true,0,0,1);continue;}
             bool extent=choice.grid>=room.geometry.cells;delete plan;return extent?NSC_UNSUPPORTED_EXTENT:NSC_BAD_REQUEST;
         }
         //Keep the selected identity. A native actor/grid factory is required;

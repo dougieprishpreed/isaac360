@@ -14,6 +14,7 @@ struct NativeRng {
 struct NativeMt {
     unsigned int words[624];int index;
     void Seed(unsigned int seed);
+    void ColdStart(); //Original static index625, lazy default seed5489.
     unsigned int Next();
     bool Valid() const;
 };
@@ -23,6 +24,8 @@ bool NativeSeedEncode(unsigned int seed,char* text,unsigned int capacity);
 bool NativeSeedDecode(const char* text,unsigned int* seed);
 struct NativeSeeds {
     unsigned int start,sequence,stage[14],playerInit;
+    bool seeded,effects[79]; //925cae's flag and constructor-empty effect tree.
+    NativeSeeds();
     bool SetStart(unsigned int seed);
     bool ForgetStage(int stageIndex);
     bool NextSequence(unsigned int* value);

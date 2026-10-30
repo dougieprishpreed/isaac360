@@ -1,4 +1,9 @@
 #include "native_world.h"
+#include "native_room_effects.h"
+#include "native_room_view.h"
+#include "native_door_resources.h"
+#include "native_persistence.h"
+#include "native_room_update.h"
 #include <string.h>
 namespace {
 NativeWorldResult Result(NativeWorldIssue* issue,NativeWorldResult result,const NativePlacedRoom* p=0) {
@@ -10,7 +15,7 @@ NativeWorldResult Result(NativeWorldIssue* issue,NativeWorldResult result,const 
 NativeWorld::NativeWorld(){memset(resident,0,sizeof(resident));Reset();}
 NativeWorld::~NativeWorld(){Reset();}
 void NativeWorld::Reset() {
-    for(int i=0;i<kNativeWorldRoomLimit;++i){delete resident[i].room;delete resident[i].doors;memset(&resident[i],0,sizeof(resident[i]));}
+    for(int i=0;i<kNativeWorldRoomLimit;++i){delete resident[i].room;delete resident[i].doors;delete resident[i].effects;delete resident[i].view;delete[] resident[i].doorVisuals;delete resident[i].persistent;delete resident[i].update;memset(&resident[i],0,sizeof(resident[i]));}
     layout.Reset();currentList=previousList=currentGrid=previousGrid=-1;residentCount=0;entrySerial=0;
 }
 bool NativeWorld::Bind(const NativeLevelLayout& selected) {
@@ -38,7 +43,8 @@ void NativeWorld::Swap(NativeWorld& other) {
 }
 NativeWorldResult NativeWorld::Start(const NativeLevelLayout& selected,int grid,int dimension,const NativeSceneFiles& files,NativeWorldIssue* issue,const NativeRoomSetupContext* setup) {
     NativeWorld* next=new NativeWorld;if(!next->Bind(selected)){delete next;return Result(issue,NWR_BAD_REQUEST);}
-    NativeWorldResult result=next->Enter(grid,dimension,files,issue,setup);if(result==NWR_OK)Swap(*next);delete next;return result;
+    NativeWorldResult result=next->Enter(grid,dimension,files,issue,setup);
+    if(result==NWR_OK){next->previousGrid=next->currentGrid;next->previousList=next->currentList;Swap(*next);}delete next;return result;
 }
 NativeWorldResult NativeWorld::Enter(int cell,int dimension,const NativeSceneFiles& files,NativeWorldIssue* issue,const NativeRoomSetupContext* setup) {
     if(issue){memset(issue,0,sizeof(*issue));issue->listIndex=issue->gridIndex=issue->dimension=issue->definition=-1;}
@@ -67,6 +73,10 @@ NativeWorldResult NativeWorld::Enter(int cell,int dimension,const NativeSceneFil
         //The door actor still owns open/locked/secret/payment semantics.
         for(int side=0;side<8;++side)room->doors[side]=(p->doors&(1U<<side))!=0;
         resident[id].room=room;resident[id].hash=hash;resident[id].backdrop=files.backdrop;resident[id].nativeMode=files.nativeMode;resident[id].configStage=stage;++residentCount;
+        //The room owns its effect cache even when its ambient spawn count is
+        //zero. It is constructed with no player owner, independently of RNG.
+        resident[id].effects=new NativeRoomEffects;
+        resident[id].update=new NativeRoomUpdate(files.frame);
         if(setup){resident[id].setup=setupState;resident[id].setupKnown=true;
             NativePlacedRoom& descriptor=id<507?layout.rooms[id]:layout.offGrid[id-507];descriptor.flags=setupState.flags;}
     }
@@ -80,6 +90,7 @@ NativeWorldResult NativeWorld::EnterLinked(int slot,const NativeSceneFiles& file
     return Enter(layout.rooms[currentList].doorTargets[slot],p->dimension,files,issue);
 }
 NativeRoomState* NativeWorld::Current(){return currentList>=0&&currentList<kNativeWorldRoomLimit?resident[currentList].room:0;}
+const NativeRoomState* NativeWorld::Current() const{return currentList>=0&&currentList<kNativeWorldRoomLimit?resident[currentList].room:0;}
 NativeDoorResult NativeWorld::PrepareDoorActors(NativeMt& owner,unsigned int frame) {
     NativeRoomState* room=Current();const NativePlacedRoom* descriptor=CurrentDescriptor();
     if(!room||!descriptor)return NDR_BAD_REQUEST;
@@ -91,7 +102,16 @@ NativeDoorResult NativeWorld::PrepareDoorActors(NativeMt& owner,unsigned int fra
     if(!NativeInitDoorSet(room->shape,room->geometry,descriptor->doors,frame,owner,doors)){delete doors;return NDR_BAD_REQUEST;}
     //0079c7b0 sets+3c to0 before006cbe50 writes native+76c=1000.
     //Later asset/animation/interaction services still own final door collision.
-    for(int slot=0;slot<8;++slot)if(doors->attached&(1U<<slot))room->collision.Set(doors->actors[slot].grid,true,0,1000,16);
+    for(int slot=0;slot<8;++slot)if(doors->attached&(1U<<slot)){
+        int grid=doors->actors[slot].grid;
+        //79c93a..94b destroys a non-door occupant before replacing +24.
+        //Remove its maintained owner as well as replacing collision data.
+        for(int i=0;i<room->staticGridCount;++i)if(room->staticGrids[i].grid==grid){
+            for(int j=i+1;j<room->staticGridCount;++j)room->staticGrids[j-1]=room->staticGrids[j];--room->staticGridCount;break;}
+        for(int i=0;i<room->decorationCount;++i)if(room->decorations[i].cell==grid){
+            for(int j=i+1;j<room->decorationCount;++j)room->decorations[j-1]=room->decorations[j];--room->decorationCount;break;}
+        room->collision.Set(grid,true,0,1000,16);
+    }
     r.doors=doors;return NDR_OK;
 }
 NativeDoorResult NativeWorld::SelectDoorVariant(int slot,const NativeDoorBinding& c) {

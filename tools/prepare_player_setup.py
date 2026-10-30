@@ -6,6 +6,8 @@ from reference_memory import Memory
 ROOT=Path(__file__).resolve().parents[1]
 def sha(p):return hashlib.sha256(p.read_bytes()).hexdigest()
 def prepare():
+    from prepare_player_runtime import prepare as prepare_runtime
+    prepare_runtime()
     from prepare_player_creation import prepare as prepare_creation
     prepare_creation(None)
     from prepare_player_state import prepare_catalogue as prepare_state_catalogue
@@ -55,4 +57,9 @@ def prepare():
         files=[dict(path=p,sha256=sha(ROOT/p)) for p in sorted(set(refs)|memory_sources)])
     (ROOT/'runtime/port/player_setup_sources.json').write_text(json.dumps(report,indent=2)+'\n')
     print('Prepared normal player setup:41 declarations,36 menu entries,638 award indices; saved native gates retained.')
-if __name__=='__main__':prepare()
+if __name__=='__main__':
+    prepare()
+    from prepare_player_runtime import prepare as prepare_runtime
+    prepare_runtime()
+    from prepare_room_runtime import prepare as prepare_room_runtime
+    prepare_room_runtime()

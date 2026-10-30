@@ -43,12 +43,14 @@ def prepare_constants():
 
 class Missing(Exception):
     def __init__(self,pc,effect=-1):self.pc,self.effect=pc,effect
+class Tail(Exception):
+    def __init__(self,pc,effect):self.pc,self.effect=pc,effect
 
 def evaluate(c,t,e,s,actions,drops,known,effectmask):
     """Separate scalar state transition following saved PCs; floats round per op."""
     before=s[:];trace=[];pc=0;missing=-1
     def query(kind,n,ctx):
-        trace.append((kind,n,0 if kind==2 else ctx[1],ctx[2]))
+        trace.append((kind,n,0 if kind in (2,3) else ctx[1],ctx[2]))
     def movement(ctx,values,drop):
         paired=ctx[0]==20 or ctx[3] and ctx[4]==1 or ctx[0] in (29,38) and ctx[5] and not ctx[6] and ctx[8]<ctx[7]
         if paired and ctx[9] and ctx[10]<=0:
@@ -64,9 +66,15 @@ def evaluate(c,t,e,s,actions,drops,known,effectmask):
         if ctx[13]==1 and ctx[12] in (4,5) and (ctx[11]==2 or ctx[11]==1 and ctx[14]&2):p[0]=mul(p[0],-1.)
         return p
     def effect(n,pc):
-        query(2,n,c);flag=1 if n==63 else 2
+        query(2,n,c);flag=1 if n==63 else 2 if n==50 else 0
+        if not flag:return False
         if not known&flag:raise Missing(pc,n)
         return bool(effectmask&flag)
+    def collectible(n,pc):
+        #The saved velocity packet carries no collectible inventory. Every
+        #query is an explicit absent owner; the action/cache trace still
+        #records the native query position.
+        query(3,n,c);return False
     #e: twinKnown,flagsLow,flagsHigh,1d78,2a0,speed,2ec,1580,1798,1e24,
     #14a4,1ef4,1f80,targetPresent,posXY,targetXY,188,18cXY,194XY.
     try:
@@ -136,9 +144,18 @@ def evaluate(c,t,e,s,actions,drops,known,effectmask):
                 if e[18]:
                     dot=add(mul(e[19],e[21]),mul(e[20],e[22]));correction=scale(scale(e[21:23],dot),K['080'])
                     s[:2]=minus(e[19:21],plus(correction,correction))
-            result,pc=1,0x72b71c
+            if not e[1]&0x4000:
+                for ident,at in ((93,0x72b734),(77,0x72b800),(298,0x72b8a0),(299,0x72b951),(58,0x72b9f9),(313,0x72bab4)):
+                    if effect(ident,at):raise Tail(at,ident)
+                if collectible(594,0x72bb4d):raise Tail(0x72bb5a,594)
+                s[12]=0
+            if collectible(593,0x72c0ff):raise Tail(0x72c11e,593)
+            elif collectible(705,0x72c111):raise Tail(0x72c11e,593)
+            s[13]=s[13]+1 if s[13]<10000 else 10000
+            result,pc=0,0x72c3c4
         source=0
     except Missing as exc:result,pc,missing,source=3,exc.pc,exc.effect,2;s=before
+    except Tail as exc:result,pc,missing,source=1,exc.pc,exc.effect,0
     h=2166136261
     for record in trace:
         for n in record:h=fold(h,n)
@@ -173,7 +190,7 @@ def prepare(out):
         acts=[list(map(f32,a)) for a in acts]
         result,tail=evaluate(c,t,e,s[:],acts,drops,known,mask)
         rows.append(c+t+encode_extra(e)+encode_state(s)+list(map(bits,acts[0]))+[drops[0]]+list(map(bits,acts[1]))+[drops[1],known,mask]+tail[:4]+encode_state(result)+tail[4:])
-        assert len(rows[-1])==103,len(rows[-1])
+        assert len(rows[-1])==107,len(rows[-1])
         return result
     for i in range(16384):
         n=(i*0x9e3779b9+0x1234567)&0xffffffff
@@ -188,11 +205,11 @@ def prepare(out):
         if i%97==0:e[3]=-1.
         if i%101==0:e[4]=-1.
         if i%103==0:e[13]=1
-        s=[float_states[i%9],float_states[(i//9)%9],-8.,9.,float_states[(i//17)%9],float_states[(i//19)%9],1.,-1.,2,[-1080.,-181.,-180.,-90.,0.,90.,180.,181.,1080.][i%9],17,[-3,0,1,2,5,9][i%6]]
+        s=[float_states[i%9],float_states[(i//9)%9],-8.,9.,float_states[(i//17)%9],float_states[(i//19)%9],1.,-1.,2,[-1080.,-181.,-180.,-90.,0.,90.,180.,181.,1080.][i%9],17,[-3,0,1,2,5,9][i%6],0,0]
         row(c,t,e,s,[patterns[i%8],patterns[(i//8)%8]],[int(i%11==0),int(i%13==0)],0 if i%127==0 else 1 if i%131==0 else 3,(i//3)%4)
     #Persist each owner's velocity/counters across unpaced frames; positions
     #are fixed inputs. This does not claim a full tick or a simulated game run.
-    states=[[0.,0.,0.,0.,0.,0.,1.,0.,-1,0.,0,0] for _ in range(4)]
+    states=[[0.,0.,0.,0.,0.,0.,1.,0.,-1,0.,0,0,0,0] for _ in range(4)]
     for tick in range(512):
         for owner in range(4):
             c=[0,owner,100+owner,0,0,0,0,0,0,1,0,1,0,0,0,0,0,0,0];t=c[:]
@@ -200,14 +217,14 @@ def prepare(out):
             states[owner]=row(c,t,e,states[owner],[patterns[(tick//32+owner)%8],patterns[0]],[0,0],3,1 if owner==1 else 2 if owner==2 else 0);sequences+=1
     path=out/'player_motion.bin'
     with path.open('wb') as f:
-        f.write(b'NPVREF1\0');f.write(struct.pack('<II',len(rows),103))
-        for r in rows:f.write(struct.pack('<103I',*(n&0xffffffff for n in r)))
+        f.write(b'NPVREF1\0');f.write(struct.pack('<II',len(rows),107))
+        for r in rows:f.write(struct.pack('<107I',*(n&0xffffffff for n in r)))
     sources=[dict(path='recovered/main/'+r['file'],sha256=r['sha256']) for _,_,r in m.blocks]
     report=dict(format='normal-player-motion-reference-v1',cases=len(rows),sequence_frames=sequences,
         instructions=dict(path=pinned.relative_to(ROOT).as_posix(),sha256=sha(pinned),count=len(lines)),
         source_module_sha256=next(e['sha256'] for e in json.loads((ROOT/'evidence/modules.json').read_text()) if e['id']=='main'),memory_sources=sources,
         constants=[dict(name=k,address='%08x'%at,bits='%08x'%n) for k,(at,n) in CONSTANTS.items()],crt_imports=imports,
-        scope='Saved instruction scalar/branch expectations and query traces for0072ae20 through0072b71b, plus actual early returns. Explicit evaluated fields/effect cache/action values; no recorded original gameplay. Ordinary path still needs0072b71c update tail, player initialization, position integration, swept collision, firing and full play. Finite vectors and host equality are not original gameplay parity.',
+        scope='Saved instruction scalar/branch expectations and query traces for0072ae20 through0072c3be, including the0072b71c effect/collectible tail and actual early returns. Explicit evaluated fields/effect cache/action values; no recorded original gameplay. Player initialization, position integration, swept collision, firing and full play remain separate. Finite vectors and host equality are not original gameplay parity.',
         timing='No invented delta time or +1580 increment; raw evaluated field is divided by60 at0072b2b5.',
         math='Round each scalar operation to float; sqrt/atan2/fmod use double arguments then float result. Cross-CRT transcendental rounding and PowerPC require later target checks.')
     ref=ROOT/'runtime/port/normal_player_motion_reference.json';ref.write_text(json.dumps(report,indent=2)+'\n')

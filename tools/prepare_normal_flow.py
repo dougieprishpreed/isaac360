@@ -252,6 +252,8 @@ def main():
     for path in prepare_player_state(OUT):bind(path)
     from prepare_player_creation import prepare as prepare_player_creation
     for path in prepare_player_creation(OUT):bind(path)
+    from prepare_room_runtime import prepare as prepare_room_runtime
+    for path in prepare_room_runtime():bind(path)
     (OUT/'manifest.json').write_text(json.dumps(dict(format='normal-flow-inputs-v4',records=len(catalog),selectors=len(vectors),floors=len(floors),mid_special=len(mid),secret_geometry=geometry,secret_blacklists=blacklists,offgrid=len(offgrid),level_doors=doors,sources=list(refs.values()),oracle_scope='Pinned raw data and verified instructions with separate arithmetic expectations; no original execution trace.'),indent=2)+'\n')
     print('Normal-flow inputs:',len(catalog),'raw record expectations,',len(vectors),'selection vectors,',len(floors),'floor contexts.')
 if __name__=='__main__':main()

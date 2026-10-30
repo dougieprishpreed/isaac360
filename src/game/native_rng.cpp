@@ -4,7 +4,11 @@
 void NativeMt::Seed(unsigned int seed) {
     words[0]=seed;for(unsigned int i=1;i<624;++i) words[i]=(words[i-1]^(words[i-1]>>30))*1812433253U+i;index=624;
 }
+void NativeMt::ColdStart(){memset(words,0,sizeof(words));index=625;}
 unsigned int NativeMt::Next() {
+    //006ae830..41: only the original unseeded static owner uses5489. An
+    //explicit saved/profile Seed call retains its own supplied seed/state.
+    if(index==625)Seed(5489);
     if(index>=624) {
         for(int i=0;i<624;++i) {
             unsigned int n=(words[i]&0x80000000U)|(words[(i+1)%624]&0x7fffffffU);
@@ -15,8 +19,8 @@ unsigned int NativeMt::Next() {
     unsigned int n=words[index++];n^=n>>11;n^=(n<<7)&0x9d2c5680U;n^=(n<<15)&0xefc60000U;return n^(n>>18);
 }
 bool NativeMt::Valid() const {
-    if(index<0 || index>624) return false;
-    unsigned int any=0;for(int i=0;i<624;++i) any|=words[i];return any!=0;
+    if(index<0 || index>625) return false;
+    unsigned int any=0;for(int i=0;i<624;++i) any|=words[i];return index==625?any==0:any!=0;
 }
 void NativeRng::Default() { state=0xaa17414fU; index=35; }
 unsigned int NativeShift(unsigned int seed,unsigned int right,unsigned int left,unsigned int finalRight) {
@@ -69,9 +73,14 @@ bool NativeSeedDecode(const char* text,unsigned int* seed) {
     if(!result || Checksum(result)!=(((digits[6]&7)<<5)|digits[7])) return false;
     *seed=result; return true;
 }
+NativeSeeds::NativeSeeds():seeded(false){for(int i=0;i<79;++i)effects[i]=false;}
 bool NativeSeeds::SetStart(unsigned int seed) {
     if(!seed) return false;
-    NativeSeeds result; result.start=seed; NativeRng rng; rng.Set(seed,27);
+    //928190 changes seed/RNG words, preserving the constructor/seed-entry
+    //flag and effect-tree ownership. A controlled normal seed is not a
+    //user-entered custom-seed flag.
+    NativeSeeds result;result.seeded=seeded;for(int i=0;i<79;++i)result.effects[i]=effects[i];
+    result.start=seed; NativeRng rng; rng.Set(seed,27);
     for(int i=0;i<14;++i) rng.Next(&result.stage[i]);
     rng.Next(&result.playerInit); result.sequence=rng.state; *this=result; return true;
 }

@@ -548,7 +548,11 @@ public:
     NativePlayerInputResult Value(int a,int c,unsigned int o,float* n){Query(0,a,c,o);for(int i=0;i<2;++i)if(frames[i].controller==c&&frames[i].playerToken==o){NativeFrameActions source(frames[i]);return source.Value(a,c,o,n);}return NPI_SOURCE_MISSING;}
     NativePlayerInputResult Pressed(int a,int c,unsigned int o,bool* n){Query(1,a,c,o);for(int i=0;i<2;++i)if(frames[i].controller==c&&frames[i].playerToken==o){NativeFrameActions source(frames[i]);return source.Pressed(a,c,o,n);}return NPI_SOURCE_MISSING;}
     NativePlayerInputResult Has(int id,unsigned int o,bool* n){Query(2,id,0,o);unsigned int flag=id==63?1U:id==50?2U:0;
-        if(!flag||!n)return NPI_BAD_REQUEST;if(o!=effectOwner||!(knownEffects&flag))return NPI_SOURCE_MISSING;*n=(effects&flag)!=0;return NPI_OK;}
+        if(!n)return NPI_BAD_REQUEST;if(o!=effectOwner)return NPI_SOURCE_MISSING;
+        if(!flag){*n=false;return NPI_OK;} //Saved velocity rows carry no other collectible effects.
+        if(!(knownEffects&flag))return NPI_SOURCE_MISSING;*n=(effects&flag)!=0;return NPI_OK;}
+    NativePlayerInputResult Collectible(int id,unsigned int o,bool* n){Query(3,id,0,o);
+        if(!n)return NPI_BAD_REQUEST;if(o!=effectOwner)return NPI_SOURCE_MISSING;*n=false;return NPI_OK;}
 };
 NativePlayerInputContext InputContext(const unsigned int* v){
     NativePlayerInputContext c={0};c.playerType=v[0];c.controller=(int)v[1];c.playerToken=v[2];c.parentPresent=v[3]!=0;c.parentEntityType=v[4];
@@ -558,32 +562,33 @@ NativePlayerInputContext InputContext(const unsigned int* v){
 NativePlayerVelocityState VelocityState(const unsigned int* v){
     NativePlayerVelocityState s={0};s.velocity.x=FloatBits(v[0]);s.velocity.y=FloatBits(v[1]);s.previousVelocity.x=FloatBits(v[2]);s.previousVelocity.y=FloatBits(v[3]);
     s.movement.x=FloatBits(v[4]);s.movement.y=FloatBits(v[5]);s.lastMovement.x=FloatBits(v[6]);s.lastMovement.y=FloatBits(v[7]);
-    s.direction=(int)v[8];s.angle=FloatBits(v[9]);s.native16d8=(int)v[10];s.native1dc4=(int)v[11];return s;
+    s.direction=(int)v[8];s.angle=FloatBits(v[9]);s.native16d8=(int)v[10];s.native1dc4=(int)v[11];
+    s.native1ddc=(int)v[12];s.native1d94=(int)v[13];return s;
 }
 void PlayerVelocity(const char* root){
     FILE* f=Input(root,"player_motion.bin");if(!f)return;char magic[8];Check(fread(magic,1,8,f)==8&&!memcmp(magic,"NPVREF1\0",8),"player-velocity-packet-magic");
-    unsigned int count=U32(f),fields=U32(f);Check(count==18432&&fields==103,"player-velocity-packet-count");
+    unsigned int count=U32(f),fields=U32(f);Check(count==18432&&fields==107,"player-velocity-packet-count");
     NativePlayerVelocityState owners[4];memset(owners,0,sizeof(owners));
-    for(unsigned int i=0;i<count;++i){unsigned int v[103];for(int k=0;k<103;++k)v[k]=U32(f);
+    for(unsigned int i=0;i<count;++i){unsigned int v[107];for(int k=0;k<107;++k)v[k]=U32(f);
         NativePlayerVelocityContext c={0};c.input=InputContext(v);c.twinInput=InputContext(v+19);c.twinInputKnown=v[38]!=0;c.flagsLow=v[39];c.flagsHigh=v[40];
         c.native1d78=FloatBits(v[41]);c.native2a0=FloatBits(v[42]);c.moveSpeed=FloatBits(v[43]);c.native2ec=FloatBits(v[44]);
         c.native1580=(int)v[45];c.native1798=(int)v[46];c.native1e24=(int)v[47];c.native14a4=v[48]!=0;c.native1ef4=v[49]!=0;c.native1f80=v[50]!=0;
         c.targetPresent=v[51]!=0;c.position.x=FloatBits(v[52]);c.position.y=FloatBits(v[53]);c.targetPosition.x=FloatBits(v[54]);c.targetPosition.y=FloatBits(v[55]);
         c.native188=v[56]!=0;c.native18c.x=FloatBits(v[57]);c.native18c.y=FloatBits(v[58]);c.native194.x=FloatBits(v[59]);c.native194.y=FloatBits(v[60]);
-        NativePlayerVelocityState state=VelocityState(v+61),expected=VelocityState(v+89);
+        NativePlayerVelocityState state=VelocityState(v+61),expected=VelocityState(v+91);
         if(i>=16388){int owner=c.input.controller;Check(!memcmp(&state,&owners[owner],sizeof(state)),"player-velocity-persistent-frame-owner-before-update",i);state=owners[owner];}
-        MotionProbe p;p.effectOwner=c.input.playerToken;p.knownEffects=v[83];p.effects=v[84];
+        MotionProbe p;p.effectOwner=c.input.playerToken;p.knownEffects=v[85];p.effects=v[86];
         for(int k=0;k<2;++k){const NativePlayerInputContext& ctx=k?c.twinInput:c.input;p.frames[k].Clear(ctx.controller,ctx.playerToken,i);
-            int at=k?78:73;for(int a=0;a<4;++a)p.frames[k].SupplyValue(a,FloatBits(v[at+a]));p.frames[k].SupplyDrop(v[at+4]!=0);}
+            int at=k?80:75;for(int a=0;a<4;++a)p.frames[k].SupplyValue(a,FloatBits(v[at+a]));p.frames[k].SupplyDrop(v[at+4]!=0);}
         NativePlayerVelocityContext saved=c;NativePlayerVelocityIssue issue;
         NativePlayerVelocityResult result=NativePlayerVelocityCore(c,p,p,&state,&issue);
-        Check(result==(NativePlayerVelocityResult)v[85]&&issue.nextAddress==v[86]&&issue.missingEffect==(int)v[87]&&issue.sourceResult==(NativePlayerInputResult)v[88],"player-velocity-native-return-or-explicit-update-tail",i);
+        Check(result==(NativePlayerVelocityResult)v[87]&&issue.nextAddress==v[88]&&issue.missingEffect==(int)v[89]&&issue.sourceResult==(NativePlayerInputResult)v[90],"player-velocity-native-return-or-explicit-update-tail",i);
         bool equal=!memcmp(&state,&expected,sizeof(state));
         if(!equal){const unsigned char* actual=(const unsigned char*)&state;const unsigned char* wanted=(const unsigned char*)&expected;
             for(int field=0;field<12;++field){unsigned int a,b;memcpy(&a,actual+field*4,4);memcpy(&b,wanted+field*4,4);
                 if(a!=b)fprintf(events,"VELOCITY_MISMATCH\t%u\t%d\t%08x\t%08x\n",i,field,a,b);}}
         Check(equal,"player-velocity-native-float-and-entity-state",i);
-        Check(p.count==(int)v[101]&&p.hash==v[102],"player-velocity-action-cache-order-and-paired-owner",i);
+        Check(p.count==(int)v[105]&&p.hash==v[106],"player-velocity-action-cache-order-and-paired-owner",i);
         Check(!memcmp(&saved,&c,sizeof(c)),"player-velocity-evaluated-context-immutable",i);
         if(i>=16384)owners[c.input.controller]=state;
     }
@@ -841,7 +846,7 @@ void EntityBodies(const char* root){
         Check(body.BeginFresh(1,variant,0,seeds[seed],gameFrame,1)==NEB_OK&&body.ready,"entity-body-original-player-properties-initialize");
         Check(body.initialSeed==seeds[seed]&&body.random.state==seeds[seed]&&body.random.index==30&&body.type==1&&body.variant==variant&&body.subtype==0,
             "entity-body-native-initial-seed-and-undrawn-index30");
-        Check(body.initialFrame==(int)gameFrame&&body.frameCount==0&&body.state==0&&body.gridCollisionClass==5&&body.entityCollisionClass==0,
+        Check(body.initialFrame==(int)gameFrame&&body.frameCount==0&&body.native27c==-1&&body.state==2&&body.gridCollisionClass==5&&body.entityCollisionClass==4&&body.native169&&body.native16a&&!body.native168,
             "entity-body-base-init-boundary-not-player-specific-collision-reset");
         Check(body.position.x==0&&body.position.y==0&&body.velocity.x==0&&body.velocity.y==0&&body.previousPosition.x==0&&body.previousPosition.y==0&&
             body.previousVelocity.x==0&&body.previousVelocity.y==0,"entity-body-does-not-run-later-player-placement");
@@ -891,6 +896,25 @@ void PlayerSprites(const char* root){
     Check(sprite.Load("missing/actual-asset.anm2")==NSPR_ASSET_MISSING&&sprite.StateHash()==cold,"sprite-unsupported-source-is-not-substituted");
     Check(sprite.Load(props->animationPath)==NSPR_OK&&sprite.asset==asset&&sprite.updateEnabled&&!sprite.mainState.clip&&!sprite.overlayState.clip,
         "sprite-load-preserves-native-no-implicit-default-animation");
+    const NativeSpriteSheet* ghostSheet=sprite.OriginalLayerSheet(sprite.LayerOrdinal("ghost"));
+    unsigned int sheetAssetHash=NativeSpriteAssetHash(*asset);
+    Check(ghostSheet&&sprite.SetFrame("WalkDown",0)==NSPR_OK&&sprite.SetFrame("HeadDown",0,true)==NSPR_OK,
+        "sprite-sheet-replacement-original-ghost-and-stopped-animation-binding");
+    if(!ghostSheet)return;
+    unsigned int layerCursorHash=sprite.mainState.CursorHash(),overlayCursorHash=sprite.overlayState.CursorHash(),sheetBefore=sprite.StateHash();
+    Check(sprite.ReplaceLayerSheet(-1,ghostSheet->path)==NSPR_BAD_REQUEST&&sprite.StateHash()==sheetBefore&&
+        sprite.ReplaceLayerSheet(15,ghostSheet->path)==NSPR_BAD_REQUEST&&sprite.StateHash()==sheetBefore,
+        "sprite-invalid-sheet-layer-preserves-instance");
+    Check(sprite.ReplaceLayerSheet(0,ghostSheet->path)==NSPR_OK&&!sprite.layerSheets[0].ready&&sprite.RefreshSheets()==NSPR_OK&&
+        sprite.layerSheets[0].ready&&sprite.layerSheets[0].path==ghostSheet->path&&sprite.layerSheets[0].width==ghostSheet->width&&
+        sprite.layerSheets[0].height==ghostSheet->height&&sprite.mainState.CursorHash()==layerCursorHash&&sprite.overlayState.CursorHash()==overlayCursorHash&&
+        sprite.mainState.frame==0&&sprite.overlayState.frame==0&&NativeSpriteAssetHash(*asset)==sheetAssetHash,
+        "sprite-sheet-refresh-resolves-real-resource-without-resetting-animation-or-mutating-asset");
+    Check(sprite.ReplaceLayerSheet(1,"unimplemented-sheet.png")==NSPR_OK&&!sprite.layerSheets[1].ready&&sprite.RefreshSheets()==NSPR_ASSET_MISSING&&
+        !sprite.layerSheets[1].ready&&sprite.layerSheets[0].ready&&sprite.layerSheets[1].path=="unimplemented-sheet.png",
+        "sprite-missing-replacement-does-not-reuse-a-loaded-texture");
+    Check(sprite.Load(props->animationPath)==NSPR_OK&&sprite.layerSheets[0].path==sprite.OriginalLayerSheet(0)->path&&sprite.layerSheets[1].ready,
+        "sprite-reload-reconstructs-original-per-layer-bindings");
     f=Input(root,"player_sprite_timelines.tsv");if(!f)return;char kind;unsigned int index,speed,steps,cases=0,updates=0;
     while(fscanf(f," %c%u%u%u",&kind,&index,&speed,&steps)==4){
         Check(kind=='A'&&index<asset->clipCount,"sprite-timeline-case-binding");if(kind!='A'||index>=asset->clipCount)break;
@@ -1068,12 +1092,12 @@ void PlayerState(const char* root){
         unsigned int bodyOwner=body.random.state;
         Check(state.BeginFresh(start,startup,body)&&state.ready&&state.playerType==0&&state.maxRedHearts==6&&state.redHearts==6&&state.soulHearts==0&&
             state.keys==0&&state.bombs==1&&state.coins==0&&state.blackHeartMask==0&&state.FullHealth()&&!state.LowHealth(),"player-state-original-player0-health-resources");
-        Check(body.entityCollisionClass==5&&body.hitPoints==1&&body.maxHitPoints==1&&body.random.state==bodyOwner&&body.position.x==0&&body.position.y==0,
+        Check(body.entityCollisionClass==4&&body.renderDepth==5&&body.hitPoints==1&&body.maxHitPoints==1&&body.random.state==bodyOwner&&body.position.x==0&&body.position.y==0,
             "player-state-specific-Init-overwrites-base-entity-fields-without-gameplay-placement");
         Check(state.native12c8==native12c8&&state.native12ca==0&&startup.banks[NPB_TRINKET][97].state==draw,"player-state-native-trinket97-one-draw-and-unknown-field-range");
         unsigned int index=0;for(int bank=0;bank<4;++bank)for(unsigned int i=0;i<startup.banks[bank].size();++i,++index)
             Check(startup.banks[bank][i].state==((bank==NPB_TRINKET&&i==97)?draw:owners[index])&&startup.banks[bank][i].index==35,"player-state-other-indexed-RNG-owners-unchanged");
-        Check(state.collectibleCounts.size()==733&&state.trinketCounts.size()==190&&state.cardCounts.size()==98&&state.pendingCollectibles.size()==(d6?1U:0U)&&
+        Check(state.collectibleCounts.size()==733&&state.trinketCounts.size()==190&&state.native166c.empty()&&state.native1678.empty()&&state.pendingCollectibles.size()==(d6?1U:0U)&&
             (!d6||state.pendingCollectibles[0]==105)&&state.collectibleCounts[105]==0,"player-state-indexed-inventory-zero-and-genuine-D6-grant-pending");
         for(unsigned int i=0;i<state.collectibleCounts.size();++i)Check(state.collectibleCounts[i]==0,"player-state-no-fabricated-collectible-grants");
         unsigned int hash=state.StateHash(),startupHash=startup.StateHash(),bodyHash=body.StateHash();
@@ -1092,10 +1116,10 @@ void PlayerState(const char* root){
     fclose(f);Check(cases==16,"player-state-reference-case-count");fprintf(events,"TOTAL\tplayer_state\t%d\t97\n",cases);
 }
 void OwnedSession() {
-    PortNormalRuntime* runtime=new PortNormalRuntime;NativeMt random;random.Seed(17);NativeMt previous=random;int cases=0;
-    unsigned int initialized=0,ticks=0;
+    PortNormalRuntime* runtime=new PortNormalRuntime;NativeMt random;random.Seed(17);int cases=0;
+    unsigned int initialized=0,ticks=0,d6Stops=0,contentStops=0;
     for(unsigned int seed=1;seed<=8;++seed)for(int mode=0;mode<2;++mode)for(int gates=0;gates<4;++gates){
-        PortFrontend ui;ui.Init(false);PortMenuInput accept={0},empty={0};accept.accept=true;
+        PortFrontend ui;ui.Init(false);if(!ui.BindSaveDirectory("build/normal_flow/"))return;PortMenuInput accept={0},empty={0};accept.accept=true;
         ui.Step(accept);ui.Step(empty);Check(ui.scene==UI_SLOTS&&ui.Step(accept)==UI_SELECT_SLOT,"owned-session-title-to-slot-path");
         NativeProfile profile={0};profile.difficulty=mode;profile.awards[86]=(gates&1)!=0;profile.awards[342]=(gates&2)!=0;
         profile.awards[29]=(seed&1)!=0;
@@ -1126,52 +1150,98 @@ void OwnedSession() {
             "owned-session-required-static-factory-constructs-and-initializes-default-weapon");
         Check(creation.costumesReset&&creation.costumeCapacity==32,"owned-session-reserves-empty-costume-storage");
         for(int i=0;i<15;++i){const NativePlayerCostumeSlot& slot=creation.costumeSlots[i];
-            Check(slot.native0==-1&&slot.native4==-1&&slot.native8==0&&slot.nativeC==((i>=1&&i<=3)||i==11),"owned-session-native-costume-layer-slot-reset",i);}
+            Check(slot.native0==-1&&slot.native4==-1&&slot.native8==-1&&slot.nativeC==((i>=1&&i<=3)||i==11),"owned-session-native-empty-costume-appearance-refresh",i);}
+        Check(creation.appearancePrepared&&creation.playerName=="Isaac"&&creation.native17a4==-1&&creation.native17a8==-1,
+            "owned-session-original-player-skin-selectors-and-English-localized-name");
+        const NativeSprite& appearance=runtime->playerSprites.sprites[0];
+        Check(appearance.layerSheets.size()==15&&appearance.LayerOrdinal("ghost")==13&&appearance.LayerOrdinal("Ghost")==-1,
+            "owned-session-original-exact-layer-name-lookup");
+        for(unsigned int i=0;i<appearance.layerSheets.size();++i){const NativeSpriteLayerSheet& sheet=appearance.layerSheets[i];
+            const NativeSpriteSheet* original=appearance.OriginalLayerSheet((int)i);
+            Check(original&&sheet.ready&&sheet.path==(i==13?original->path:"resources/gfx/characters/costumes/character_001_isaac.png")&&
+                sheet.width==(i==13?original->width:512)&&sheet.height==(i==13?original->height:512),
+                "owned-session-replaces-per-layer-skin-and-restores-original-ghost-sheet",i);}
+        Check(creation.previews[0].sprite.layerSheets[13].path==creation.previews[0].sprite.OriginalLayerSheet(13)->path&&
+            creation.previews[0].sprite.layerSheets[13].ready,"owned-session-body-replacements-do-not-mutate-preview-or-source-asset");
+        Check(creation.resetTailPrepared&&creation.native1fb0Owned&&creation.native1fac==0&&creation.native1e04.size()==98&&
+            creation.native1e14.size()==15&&creation.native1ec4.size()==733&&creation.native1ed0.size()==190,
+            "owned-session-original-reset-tail-indexed-containers-and-null-reference-owner");
+        bool resetArraysEmpty=true;
+        for(unsigned int i=0;i<creation.native1e04.size();++i)resetArraysEmpty=resetArraysEmpty&&!creation.native1e04[i];
+        for(unsigned int i=0;i<creation.native1e14.size();++i)resetArraysEmpty=resetArraysEmpty&&!creation.native1e14[i];
+        for(unsigned int i=0;i<creation.native1ec4.size();++i)resetArraysEmpty=resetArraysEmpty&&!creation.native1ec4[i];
+        for(unsigned int i=0;i<creation.native1ed0.size();++i)resetArraysEmpty=resetArraysEmpty&&!creation.native1ed0[i];
+        Check(resetArraysEmpty,"owned-session-clears-native-indexed-reset-storage");
+        Check(creation.constructorFields.Scalar(0x14a8,&value)&&value==0xffff&&creation.constructorFields.Scalar(0x1db8,&value)&&value==0xc61c3c00U&&
+            creation.constructorFields.Byte(0x1f68,&byte)&&byte==0xff,"owned-session-reached-reset-tail-values-before-resource-call");
         Check(runtime->playerStartup.ready&&runtime->playerStartup.manager.state==playerSeed&&runtime->playerStartup.manager.index==13&&
             runtime->playerStartup.entityInitSeed==entitySeed,"owned-session-creates-indexed-owners-in-creation-caller");
         NativeRng root;root.Set(playerSeed,5);unsigned int bankSeed=0;root.Next(&bankSeed);root.Next(&bankSeed);
         NativeRng trinket;trinket.Set(bankSeed,7);unsigned int child=0;for(int i=0;i<=97;++i)trinket.Next(&child);
         Check(runtime->playerStartup.banks[NPB_TRINKET][97].state==NativeShift(child,5,9,7)&&runtime->playerState.native12c8==12+NativeShift(child,5,9,7)%9,
             "owned-session-consumes-trinket97-exactly-once-after-weapon-Init");
-        Check(runtime->playerState.ready&&runtime->playerState.canShoot&&!runtime->run.firstPlayerStateOwned&&runtime->run.player.isaacD6==profile.awards[29]&&
-            runtime->playerState.maxRedHearts==0&&runtime->playerState.redHearts==0&&runtime->playerState.bombs==0&&runtime->playerState.pendingCollectibles.empty()&&
-            runtime->playerState.collectibleCounts[105]==0&&runtime->playerBody.entityCollisionClass==5&&runtime->playerBody.hitPoints==1,
-            "owned-session-does-not-project-later-resources-or-genuine-award29-grant-before-appearance");
+        Check(runtime->playerState.ready&&runtime->playerState.canShoot&&runtime->run.player.isaacD6==profile.awards[29]&&
+            runtime->playerState.maxRedHearts==6&&runtime->playerState.redHearts==6&&runtime->playerState.bombs==1&&runtime->playerState.pendingCollectibles.empty()&&
+            runtime->playerState.collectibleCounts[105]==0&&runtime->playerBody.entityCollisionClass==4&&runtime->playerBody.renderDepth==5&&runtime->playerBody.hitPoints==1&&runtime->playerBody.native168&&runtime->playerBody.native16a,
+            "owned-session-applies-player-metadata-resources-before-genuine-award29-grant");
         Check(runtime->playerBody.ready&&runtime->playerBody.initialSeed==entitySeed&&runtime->playerBody.random.state==entitySeed&&runtime->playerBody.random.index==30&&
-            runtime->playerBody.collision.radius==10&&runtime->playerBody.collision.points.size()==40&&runtime->playerBody.position.x==0&&runtime->playerBody.position.y==0,
-            "owned-session-body-geometry-without-premature-placement");
+            runtime->playerBody.collision.radius==10&&runtime->playerBody.collision.points.size()==40&&runtime->playerBody.position.x==320&&runtime->playerBody.position.y==400,
+            "owned-session-body-geometry-registration-position-before-room-placement");
         const NativeSprite& sprite=runtime->playerSprites.sprites[0];
         Check(runtime->playerSprites.bodyReady&&runtime->playerSprites.startupAssetsReady&&sprite.mainState.clip&&sprite.overlayState.clip&&
             !strcmp(sprite.mainState.clip->name,"WalkDown")&&!strcmp(sprite.overlayState.clip->name,"HeadDown")&&sprite.mainState.frame==0&&sprite.overlayState.frame==0&&
             !sprite.mainState.playing&&!sprite.overlayState.playing,"owned-session-original-body-and-head-state");
-        Check(runtime->phase==PNR_NEED_NATIVE_INIT&&runtime->run.phase==NRF_NEED_FLOOR_CONTEXT&&runtime->run.steps==0&&
-            runtime->world.entrySerial==0&&runtime->world.residentCount==0&&runtime->missingNativePrerequisite==0x76ea50,
-            "owned-session-stops-at-reached-pre-generation-appearance-caller");
+        Check(runtime->phase==PNR_GENERATING&&runtime->run.phase==NRF_TOPOLOGY&&runtime->run.steps==0&&
+            runtime->world.entrySerial==0&&runtime->world.residentCount==0&&runtime->missingNativePrerequisite==0,
+            "owned-session-start-commits-generation-before-world-entry");
+        NativeSceneFiles files={indexPath,objectRoot,runtime->run.context.stageType+1,mode,0};
+        NormalRunResult advanced=NFR_PENDING;
+        for(int step=0;step<1000&&(runtime->phase==PNR_GENERATING||runtime->phase==PNR_ROOM_COMPONENTS);++step){
+            NativeActionFrame frame;frame.Clear(runtime->playerCreation.native153c,runtime->playerBody.entityToken,(unsigned int)step);
+            frame.SupplyConnection(true);frame.SupplyDrop(false);
+            for(int action=0;action<11;++action){frame.SupplyHeld(action,false);frame.SupplyPressed(action,false);}
+            for(int action=0;action<8;++action)frame.SupplyValue(action,0);
+            NativeFrameActions frameActions(frame);
+            advanced=session.AdvanceNormalSetup(*runtime,files,&frameActions);
+            files.backdrop=runtime->run.context.stageType+1;
+        }
+        const bool d6=runtime->run.player.isaacD6;
+        if(runtime->phase==PNR_READY)Check(advanced==NFR_PENDING&&runtime->world.residentCount==1&&
+            runtime->completePlayerInitializations==1&&runtime->completePlayerTicks>=1&&runtime->missingNativePrerequisite==0&&
+            runtime->playerBody.position.x==320&&runtime->playerBody.position.y==380,
+            "owned-session-complete-player-and-first-whole-tick");
+        else if(d6&&runtime->missingNativePrerequisite==0x713120){++d6Stops;
+            Check(advanced==NFR_PENDING&&runtime->phase==PNR_NEED_NATIVE_INIT&&runtime->world.residentCount==1&&
+            runtime->completePlayerInitializations==0&&runtime->completePlayerTicks==0,
+            "owned-session-earned-award29-stops-at-genuine-D6-grant");}
+        else {++contentStops;
+            Check(advanced==NFR_PENDING&&runtime->phase!=PNR_ERROR&&runtime->phase!=PNR_SOURCE_ERROR&&
+            runtime->completePlayerInitializations==0&&runtime->completePlayerTicks==0&&runtime->missingNativePrerequisite!=0,
+            "owned-session-profile-content-stops-before-partial-player");}
         unsigned int startupHash=runtime->playerStartup.StateHash(),bodyHash=runtime->playerBody.StateHash(),spriteHash=runtime->playerSprites.StateHash(),
-            playerHash=runtime->playerState.StateHash(),creationHash=creation.StateHash();
-        NativeSceneFiles files={indexPath,objectRoot,1,mode,0};
-        Check(session.AdvanceNormalSetup(*runtime,files)==NFR_BAD_REQUEST&&runtime->world.entrySerial==0&&runtime->run.steps==0&&
-            runtime->playerStartup.StateHash()==startupHash&&runtime->playerBody.StateHash()==bodyHash&&runtime->playerSprites.StateHash()==spriteHash&&
-            runtime->playerState.StateHash()==playerHash&&runtime->playerCreation.StateHash()==creationHash,
-            "owned-session-stopped-Init-neither-replays-draw-nor-bypasses-to-generation");
-        Check(!runtime->playerCreation.PreparePrefix(runtime->run.player,playerSeed,runtime->playerStartup,runtime->playerBody,runtime->playerSprites,runtime->playerState)&&
+            playerHash=runtime->playerState.StateHash(),creationHash=creation.StateHash();const PortNormalPhase donePhase=runtime->phase;
+        Check(!runtime->playerCreation.PreparePrefix(runtime->run.player,playerSeed,runtime->playerStartup,runtime->playerBody,runtime->playerSprites,runtime->playerState,runtime->playerManager,ui.controller)&&
             runtime->playerStartup.StateHash()==startupHash&&runtime->playerState.StateHash()==playerHash&&runtime->playerCreation.StateHash()==creationHash,
             "owned-session-cannot-run-construction-prefix-twice-on-existing-owner");
-        Check(!ui.characterPending&&ui.scene==UI_CHARACTERS&&!ui.hasContinue&&!memcmp(&random,&previous,sizeof(random))&&!memcmp(&profile,&ui.profile,sizeof(profile)),
-            "owned-session-preserves-profile-and-global-MT-before-required-appearance");
+        Check(!ui.characterPending&&ui.scene==UI_CHARACTERS&&!ui.hasContinue&&!memcmp(&profile,&ui.profile,sizeof(profile)),
+            "owned-session-completed-setup-preserves-profile-and-frontend-owner");
         ui.characterChoice=2;
-        Check(session.StartNormalCharacter(seed,*runtime).result==NPS_LOCKED&&runtime->playerStartup.StateHash()==startupHash&&runtime->playerBody.StateHash()==bodyHash&&
+        Check(session.StartNormalCharacter(seed,*runtime).result==NPS_LOCKED&&runtime->phase==donePhase&&runtime->playerStartup.StateHash()==startupHash&&runtime->playerBody.StateHash()==bodyHash&&
             runtime->playerSprites.StateHash()==spriteHash&&runtime->playerState.StateHash()==playerHash&&runtime->playerCreation.StateHash()==creationHash,
             "owned-session-invalid-start-preserves-all-existing-owners");
         ui.characterChoice=1;
-        Check(session.StartNormalCharacter(0,*runtime).result==NPS_BAD_REQUEST&&runtime->playerStartup.StateHash()==startupHash&&
+        Check(session.StartNormalCharacter(0,*runtime).result==NPS_BAD_REQUEST&&runtime->phase==donePhase&&runtime->playerStartup.StateHash()==startupHash&&
             runtime->playerBody.StateHash()==bodyHash&&runtime->playerSprites.StateHash()==spriteHash&&runtime->playerState.StateHash()==playerHash&&
             runtime->playerCreation.StateHash()==creationHash,"owned-session-zero-seed-preserves-existing-creation");
         initialized+=runtime->completePlayerInitializations;ticks+=runtime->completePlayerTicks;
         fprintf(events,"SESSION_PREFIX\t%u\t%d\t%d\t%d\t%u\t%u\t%u\n",seed,mode,gates,profile.awards[29]?1:0,runtime->missingNativePrerequisite,startupHash,creation.weapon.StateHash());++cases;
     }
-    Check(initialized==0&&ticks==0,"owned-session-no-complete-player-or-tick-acceptance");
-    fprintf(events,"TOTAL\towned_session\t%d\t%u\n",cases,ticks);
+    //Authentic profile cases either complete the initialized player and its
+    //first whole collision tick, stop at the genuine award29/D6 grant, or
+    //stop at their exact remaining content/asset caller. No partial player
+    //tick is accepted, and at least one ordinary profile must complete.
+    Check(initialized>0&&ticks>=initialized&&d6Stops>0,"owned-session-complete-player-and-first-whole-tick-by-authentic-profile");
+    fprintf(events,"TOTAL\towned_session\t%d\t%u\t%u\t%u\n",cases,ticks,d6Stops,contentStops);
     fprintf(events,"TOTAL\tplayer_initializations\t%u\n",initialized);delete runtime;
 }
 void PlayerStartup(const char* root) {
@@ -1226,9 +1296,9 @@ void Frontend() {
     NativePlayerVelocityContext motion={0};motion.input=input;motion.moveSpeed=1;motion.native2ec=1;
     NativePlayerVelocityState velocity={0};MotionProbe evaluated;evaluated.effectOwner=input.playerToken;evaluated.frames[0]=frame;NativePlayerVelocityIssue pending;
     NativePlayerVelocityState expectedVelocity=velocity;MotionProbe direct;direct.effectOwner=input.playerToken;direct.frames[0]=frame;
-    Check(NativePlayerVelocityCore(motion,direct,direct,&expectedVelocity)==NPV_NEED_UPDATE_TAIL&&
-        PortGameSession(random,ui).EvaluateNormalVelocity(*run,*world,motion,evaluated,evaluated,&velocity,&pending)==NPV_NEED_UPDATE_TAIL&&pending.nextAddress==0x72b71c&&
-        !memcmp(&velocity,&expectedVelocity,sizeof(velocity))&&velocity.velocity.x>0&&velocity.velocity.y==0&&evaluated.hash==direct.hash,"session-selected-world-velocity-retains-pending-native-update");
+    Check(NativePlayerVelocityCore(motion,direct,direct,&expectedVelocity)==NPV_RETURNED&&
+        PortGameSession(random,ui).EvaluateNormalVelocity(*run,*world,motion,evaluated,evaluated,&velocity,&pending)==NPV_RETURNED&&pending.nextAddress==0x72c3c4&&
+        !memcmp(&velocity,&expectedVelocity,sizeof(velocity))&&velocity.velocity.x>0&&velocity.velocity.y==0&&evaluated.hash==direct.hash,"session-selected-world-velocity-completes-native-effect-tail");
     NativePlayerVelocityState savedVelocity=velocity;MotionProbe invalidMotion;motion.input.stageType=5;
     Check(PortGameSession(random,ui).EvaluateNormalVelocity(*run,*world,motion,invalidMotion,invalidMotion,&velocity,&pending)==NPV_BAD_REQUEST&&invalidMotion.count==0&&
         !memcmp(&velocity,&savedVelocity,sizeof(velocity)),"session-velocity-rejects-wrong-world-before-actions-and-effects");motion.input=input;

@@ -1,6 +1,36 @@
 #include "frontend.h"
+bool PortFrontend::AnyEnabledMod() const {
+    for(unsigned int i=0;i<loadedModEnabled.size();++i)if(loadedModEnabled[i])return true;
+    return false;
+}
 #include <string.h>
-void PortFrontend::Init(bool resume) { memset(this,0,sizeof(*this)); scene=UI_TITLE; hasContinue=resume; slotAnimation=slotPrevious=-1; }
+#include <stdio.h>
+bool PortFrontend::BindSaveDirectory(const char* directory){
+    if(!directory||!*directory)return false;saveDirectory=directory;
+    const char last=saveDirectory[saveDirectory.size()-1];
+    if(last!='/'&&last!='\\')saveDirectory+='/';return true;
+}
+bool PortFrontend::LocalRunFilenames(std::string* primary,std::string* rerun) const{
+    if(!primary||!rerun||saveDirectory.empty()||selectedSlot<0||selectedSlot>2)return false;
+    //8a2860/8a2a01's local-slot path. The platform supplies the directory
+    //(nativebc9f18); save-slot selection supplies the original1-based index.
+    char name[48];sprintf(name,"gamestate%d.dat",selectedSlot+1);*primary=saveDirectory+name;
+    sprintf(name,"rep_rerunstate%d.dat",selectedSlot+1);*rerun=saveDirectory+name;return true;
+}
+void PortFrontend::Init(bool resume) {
+    //Container owners are constructed by C++; do not byte-clear them with
+    //the menu's scalar state, including when the frontend is initialized again.
+    loadedModEnabled.clear();saveDirectory.clear();music.Begin();scene=UI_TITLE;
+    selection=tick=controller=0;debugConsoleEnabled=false;hasContinue=resume;
+    lastUp=lastDown=lastAccept=lastBack=lastPause=false;
+    selectedSlot=slotMode=slotChoice=slotTick=slotAnimTick=0;
+    slotAnimation=slotPrevious=-1;slotExitMode=slotHoldTick=0;
+    slotPending=lastLeft=lastRight=false;mainHoldTick=0;
+    memset(&profile,0,sizeof(profile));
+    profileStorage.ResetFresh();
+    characterChoice=characterPage=characterMode=characterRepeat=0;
+    lastPage=lastSeed=characterPending=false;
+}
 void PortFrontend::OpenMain() { scene=UI_MAIN; selection=hasContinue?MAIN_CONTINUE:MAIN_NEW; mainHoldTick=0; }
 void PortFrontend::OpenCharacters() {scene=UI_CHARACTERS;characterChoice=1;characterPage=0;characterMode=profile.difficulty;characterRepeat=0;characterPending=false;}
 void PortFrontend::CharacterStarted() {characterPending=false;}
@@ -33,7 +63,7 @@ PortAction PortFrontend::Step(const PortMenuInput& in) {
         if(horizontal) {characterChoice=NativeCharacterMove(profile,characterPage,characterChoice,in.left?-1:1);characterRepeat=10;}
         if(!(in.left||in.right))characterRepeat=0;
         if(seed)return UI_SEED_UNIMPLEMENTED;
-        if(accept&&NativeCharacterUnlocked(profile,characterPage,characterChoice)) {characterPending=true;return UI_START_CHARACTER;}
+        if(accept&&NativeCharacterUnlocked(profile,characterPage,characterChoice)) {if(!music.StartCharacter(characterPage))return UI_NONE;characterPending=true;return UI_START_CHARACTER;}
         return UI_NONE;
     }
     if(scene==UI_TITLE) {

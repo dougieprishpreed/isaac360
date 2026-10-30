@@ -25,15 +25,28 @@ bool Cardinal(NativePoint& p,bool movement) {
 }
 void NativeActionFrame::Clear(int device,unsigned int owner,unsigned int tick){memset(this,0,sizeof(*this));controller=device;playerToken=owner;frame=tick;}
 bool NativeActionFrame::SupplyValue(int action,float n){if(action<0||action>7||!Finite(n))return false;values[action]=n;knownValues|=1U<<action;return true;}
+bool NativeActionFrame::SupplyHeld(int action,bool value){if(action<0||action>11)return false;unsigned int bit=1U<<action;knownHeld|=bit;if(value)held|=bit;else held&=~bit;return true;}
+bool NativeActionFrame::SupplyPressed(int action,bool value){if(action<0||action>11)return false;unsigned int bit=1U<<action;knownPressed|=bit;if(value)pressed|=bit;else pressed&=~bit;return true;}
 NativePlayerInputResult NativeFrameActions::Value(int action,int controller,unsigned int owner,float* out) {
     if(!out||action<0||action>7)return NPI_BAD_REQUEST;
     if(controller!=frame.controller||owner!=frame.playerToken||!(frame.knownValues&(1U<<action)))return NPI_SOURCE_MISSING;
     if(!Finite(frame.values[action]))return NPI_BAD_VALUE;*out=frame.values[action];return NPI_OK;
 }
 NativePlayerInputResult NativeFrameActions::Pressed(int action,int controller,unsigned int owner,bool* out) {
-    if(!out||action!=11)return NPI_BAD_REQUEST;
-    if(controller!=frame.controller||owner!=frame.playerToken||!frame.dropKnown)return NPI_SOURCE_MISSING;
-    *out=frame.dropPressed;return NPI_OK;
+    if(!out||action<0||action>11)return NPI_BAD_REQUEST;
+    if(controller!=frame.controller||owner!=frame.playerToken)return NPI_SOURCE_MISSING;
+    if(action==11){if(!frame.dropKnown)return NPI_SOURCE_MISSING;*out=frame.dropPressed;return NPI_OK;}
+    if(!(frame.knownPressed&(1U<<action)))return NPI_SOURCE_MISSING;
+    *out=(frame.pressed&(1U<<action))!=0;return NPI_OK;
+}
+NativePlayerInputResult NativeFrameActions::Held(int action,int controller,unsigned int owner,bool* out){
+    if(!out||action<0||action>11)return NPI_BAD_REQUEST;
+    if(controller!=frame.controller||owner!=frame.playerToken||!(frame.knownHeld&(1U<<action)))return NPI_SOURCE_MISSING;
+    *out=(frame.held&(1U<<action))!=0;return NPI_OK;
+}
+NativePlayerInputResult NativeFrameActions::Connected(int controller,bool* out){
+    if(!out)return NPI_BAD_REQUEST;if(controller!=frame.controller||!frame.connectionKnown)return NPI_SOURCE_MISSING;
+    *out=frame.connected;return NPI_OK;
 }
 NativePlayerInputResult NativeMovementInput(const NativePlayerInputContext& c,NativeActionSource& source,NativePoint* output) {
     if(!output||!Valid(c))return NPI_BAD_REQUEST;

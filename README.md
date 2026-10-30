@@ -8,9 +8,9 @@ The goal is to preserve the original game's content and behavior, including proc
 
 The port is incomplete, and no playable Xbox 360 release is available.
 
-Resource readers, level generation, room components and parts of player initialization have been implemented and checked on Windows. A normal New Run currently stops during player initialization, before playable gameplay begins.
+Resource readers, level generation, room components and the normal player lifecycle have been implemented and checked on Windows. A normal New Run now generates its first floor, registers the player, constructs and enters the selected starting room, completes placement and post-generation initialization, and executes repeated movement and grid-collision ticks in that room. The Windows host has observed a complete initialized player moving to the real room boundary, stopping stably and reversing.
 
-The next milestone is a normal New Run that fully initializes a player and supports repeated movement and collision in its generated starting room. Integrated combat, room transitions, progression, save/Continue and complete presentation and audio remain unfinished. Passing host checks does not establish Xbox 360 playability.
+The full native player-update presentation/effect tail, combat, room transitions, progression, save/Continue and complete presentation and audio remain unfinished. Passing host checks does not establish Xbox 360 playability.
 
 XEX builds and Xenia testing are scheduled to resume after the initial gameplay milestone. Physical-console testing remains necessary before release acceptance.
 
@@ -35,9 +35,9 @@ This builds the maintained Windows executable and runs deterministic simulation 
 
 ## Repository layout
 
-- `src/game/` — shared gameplay runtime.
-- `src/content/` — resource and room readers.
-- `src/xbox/` — Xbox graphics/input adapter and XDK project.
-- `src/simulation/` — Windows simulation checks.
-- `tools/` — preparation, build and verification tools.
-- `tests/` — regression fixtures and supporting checks.
+- `src/game/` â€” shared gameplay runtime.
+- `src/content/` â€” resource and room readers.
+- `src/xbox/` â€” Xbox graphics/input adapter and XDK project.
+- `src/simulation/` â€” Windows simulation checks.
+- `tools/` â€” preparation, build and verification tools.
+- `tests/` â€” regression fixtures and supporting checks.

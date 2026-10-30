@@ -12,6 +12,12 @@ bool NativeDoorGrid(int shape,const NativeRoomGrid& g,int slot,int* output) {
     if(shape==12){x[6]=14;y[7]=8;}
     int cell=y[slot]*g.stride+x[slot];if(cell<0||cell>=kNativeRoomGridLimit)return false;*output=cell;return true;
 }
+void NativeResetDoor(NativeDoorActor& door) {
+    if(door.state==0||door.state==2)door.state=1;
+    door.previousState=door.state;door.previousVariant=door.variant;
+    door.sourceType=door.targetType=0;door.targetGrid=-1;
+    door.native278=door.native279=door.native27a=false;door.flags=0;
+}
 NativeDoorResult NativeCreateDoor(int slot,int grid,unsigned int frame,NativeMt& global,NativeDoorSet* output,const NativeDoorActor* saved) {
     if(!output||slot<0||slot>7)return NDR_BAD_REQUEST;
     if(output->attached&(1U<<slot))return NDR_ALREADY_ATTACHED;
@@ -21,10 +27,7 @@ NativeDoorResult NativeCreateDoor(int slot,int grid,unsigned int frame,NativeMt&
     else {memset(&door,0,sizeof(door));door.type=16;door.local.Default();}
     door.grid=grid;door.seed=global.Next();
     //006cbe50 resets state0/2 to1; other saved states and variants survive.
-    if(door.state==0||door.state==2)door.state=1;
-    door.previousState=door.state;door.previousVariant=door.variant;
-    door.sourceType=door.targetType=0;door.targetGrid=-1;
-    door.native278=door.native279=door.native27a=false;door.flags=0;
+    NativeResetDoor(door);
     ++door.initializations;door.initialized=true;door.spawnFrame=frame;
     static const float angles[4]={-90,0,90,180};door.direction=slot&3;
     door.rotation=door.overlayRotation=angles[door.direction];door.slot=slot;

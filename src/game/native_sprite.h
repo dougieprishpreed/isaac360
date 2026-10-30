@@ -2,6 +2,7 @@
 #define GENERIC_NATIVE_SPRITE_H
 #include "native_room_space.h"
 #include <vector>
+#include <string>
 struct NativeSpriteFrame {
     unsigned int geometry[10],delay,color[7],rotation,end;
     bool visible,interpolated; //Original words/bits; no baked replacement art.
@@ -27,8 +28,14 @@ struct NativeSpriteAsset {
     const NativeSpriteClip* clips;unsigned int clipCount;
 };
 const NativeSpriteAsset* NativePreparedSprite(const char* path);
+const NativeSpriteSheet* NativePreparedSpriteSheet(const char* path);
 unsigned int NativeSpriteAssetHash(const NativeSpriteAsset&); //Canonical data diagnostic.
 enum NativeSpriteResult { NSPR_OK,NSPR_BAD_REQUEST,NSPR_ASSET_MISSING,NSPR_ANIMATION_MISSING,NSPR_UNSUPPORTED_STATE };
+struct NativeSpriteLayerSheet {
+    std::string path;
+    unsigned int width,height;
+    bool ready;
+};
 //004035a0,004037f0..00403c56,00405090. Numeric animation ownership;
 //render interpolation, texture upload, costume changes and callbacks are open.
 struct NativeAnimationState {
@@ -55,13 +62,15 @@ public:
     const NativeSpriteAsset* asset;
     NativeAnimationState mainState,overlayState;
     NativePoint offset,scale;
-    float rotation,color[7],secondaryColor[7],speed;
+    float rotation,color[11],secondaryColor[11],speed;
     bool flipX,flipY,updateEnabled;
     //Logical bindings written by player Init. Viewport scale resolves through
     //native BA3B14/18 at drawing; explicit blend presets resolve through the
     //renderer-dependent94bb50. Neither is a guessed GPU state/default.
     bool viewportScale;
     std::vector<int> layerBlendPresets; //Native layer ordinal; -1=no override.
+    std::vector<NativeSpriteLayerSheet> layerSheets; //Mutable per-instance bindings, not asset edits.
+    std::vector<bool> layerVisible; //Layer+70, separate from timeline-frame visibility.
     NativeSprite();
     void Clear(); //00402360 ->00402d30, including secondary alpha0.
     NativeSpriteResult Load(const char* propertyPath);
@@ -69,6 +78,10 @@ public:
     NativeSpriteResult Play(const char* name,bool force=false,bool overlay=false);
     NativeSpriteResult SetFrame(const char* name,int frame,bool overlay=false);
     NativeSpriteResult SetLayerBlendPreset(int layer,int preset);
+    int LayerOrdinal(const char* name) const; //405f40: first exact layer name.
+    const NativeSpriteSheet* OriginalLayerSheet(int ordinal) const;
+    NativeSpriteResult ReplaceLayerSheet(int ordinal,const char* path); //406f30; invalidates binding.
+    NativeSpriteResult RefreshSheets(); //406f90 resource resolution, independent of GPU upload.
     NativeSpriteResult Update(); //One unpaced component update, no game cadence.
     bool IsPlaying(const char* name="",bool overlay=false) const;
     bool IsFinished(const char* name="",bool overlay=false) const;
@@ -88,6 +101,8 @@ public:
     NativeSprite sprites[14];bool bodyReady,startupAssetsReady;
     NativePlayerSprites():bodyReady(false),startupAssetsReady(false){}
     NativeSpriteResult BeginFresh(const char* originalPropertyPath);
+    NativeSpriteResult PrepareAuxiliary(); //70a344..70a815.
+    NativeSpriteResult PrepareBody(const char* originalPropertyPath); //70a84b..70a91f.
     void Swap(NativePlayerSprites&);
     unsigned int StateHash() const;
 private:

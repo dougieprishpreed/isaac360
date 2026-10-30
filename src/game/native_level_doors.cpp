@@ -33,6 +33,7 @@ bool Apply(NativeLevelLayout& level,NativePlacedRoom& room) {
         }
         room.doors&=~(1U<<slot);if(target)target->doors&=~(1U<<opposite);
     }
+    room.linksPrepared=true;
     return true;
 }
 }

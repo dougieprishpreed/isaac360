@@ -24,6 +24,7 @@ struct NormalRunFlow {
     int firstPlayerKeys,firstPlayerCoins;bool fullHealthPredicate,minibossPlaced;
     int firstPlayerRedHearts,firstPlayerSoulHearts;bool firstPlayerStateOwned;
     unsigned int runFlagsLow,runFlagsHigh;
+    unsigned int roomTypeVisits[30]; //Game+1c30ac; run statistics, not floor-local.
     unsigned int retainedRoomSeed; //006efeb4; secret and type29 local owners.
     NativeMidSpecialReport midReport;
     NativeSecretReport secretReport;
