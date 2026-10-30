@@ -17,6 +17,6 @@ public:
     //player Update and the reached grid collision response. Room-specific
     //presentation/audio services remain separate owners.
     bool TickActors(PortNormalRuntime&,NativeActionSource*,unsigned int* next);
-    bool TickSimulationTail(PortNormalRuntime&,unsigned int* next);
+    bool TickSimulationTail(PortNormalRuntime&,NativeActionSource*,unsigned int* next);
 };
 #endif

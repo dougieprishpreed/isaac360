@@ -18,6 +18,7 @@
 #include "native_save_writer.h"
 #include "native_pause_ui.h"
 #include "native_player_update.h"
+#include "native_projectile.h"
 struct PortSessionStart {NativePlayerStartResult result;int choice,player;};
 enum PortNormalPhase { PNR_IDLE,PNR_GENERATING,PNR_NEED_CURSES,PNR_ROOM_COMPONENTS,PNR_NEED_NATIVE_INIT,PNR_READY,PNR_FACTORY_GAP,PNR_SOURCE_ERROR,PNR_ERROR };
 //One owned creation/generation/world lifetime for both adapters. Normal start
@@ -42,6 +43,7 @@ struct PortNormalRuntime {
     NativePlayerCreation playerCreation;
     NativePlayerManager playerManager;
     NativePlayerUpdate playerUpdate;
+    NativeProjectileSystem projectiles;
     NativeRoomFx roomFx;
     NativeMinimaps minimaps;
     NativePauseUi pauseUi;

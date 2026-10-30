@@ -103,7 +103,7 @@ bool NativeRoomUpdate::PrepareInitialActors(PortNormalRuntime& runtime,NativeAct
         const bool collided=NativePlayerGridCollision(runtime,false,next);
         body.flagsLow&=~0x4000U;
         if(!collided)return false;
-        if(!TickSimulationTail(runtime,next))return false;
+        if(!TickSimulationTail(runtime,actions,next))return false;
         if(!runtime.completePlayerInitializations)runtime.completePlayerInitializations=1;
         ++runtime.completePlayerTicks;
         ++runtime.completeWholeGameplayTicks;
@@ -111,7 +111,7 @@ bool NativeRoomUpdate::PrepareInitialActors(PortNormalRuntime& runtime,NativeAct
     }
     *next=address;return false;
 }
-bool NativeRoomUpdate::TickSimulationTail(PortNormalRuntime& runtime,unsigned int* next){
+bool NativeRoomUpdate::TickSimulationTail(PortNormalRuntime& runtime,NativeActionSource* actions,unsigned int* next){
     if(!next)return false;*next=0;
     NativeWorldResident& live=runtime.world.resident[runtime.world.currentList];
     NativeRoomState* room=runtime.world.Current();
@@ -123,6 +123,10 @@ bool NativeRoomUpdate::TickSimulationTail(PortNormalRuntime& runtime,unsigned in
     //owner reached by this room. Visual/room-tail services between these two
     //addresses are presentation work and do not gate simulation completion.
     if(live.effects->roomEffects.Update(0)!=NEF_OK){*next=0x8798f0;return false;}
+    //Primary weapon/projectile lifecycle follows the room simulation owner.
+    if(!runtime.projectiles.Step(runtime,actions,runtime.tickFrame,next)){
+        if(*next==0)*next=0x61f6d0;return false;
+    }
     return true;
 }
 bool NativeRoomUpdate::TickActors(PortNormalRuntime& runtime,NativeActionSource* actions,unsigned int* next){
@@ -140,7 +144,7 @@ bool NativeRoomUpdate::TickActors(PortNormalRuntime& runtime,NativeActionSource*
     const bool collided=NativePlayerGridCollision(runtime,false,next);
     body.flagsLow&=~0x4000U;
     if(!collided)return false;
-    if(!TickSimulationTail(runtime,next))return false;
+    if(!TickSimulationTail(runtime,actions,next))return false;
     if(!runtime.completePlayerInitializations)runtime.completePlayerInitializations=1;
     ++runtime.completePlayerTicks;
     ++runtime.completeWholeGameplayTicks;

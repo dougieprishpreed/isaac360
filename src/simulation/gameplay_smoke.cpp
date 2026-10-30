@@ -22,6 +22,22 @@ unsigned int RunMovementTicks(PortGameSession& session,PortNormalRuntime& runtim
     }
     return done;
 }
+unsigned int RunProjectileTicks(PortGameSession& session,PortNormalRuntime& runtime,int shootA,int shootB,unsigned int count){
+    unsigned int done=0;
+    for(unsigned int i=0;i<count;++i){
+        NativeSceneFiles files={"runtime/game/file_index.bin","runtime/game/",runtime.run.context.stageType+1,runtime.run.context.nativeMode,0};
+        NativeActionFrame frame;frame.Clear(runtime.playerCreation.native153c,runtime.playerBody.entityToken,files.frame+i);
+        frame.SupplyConnection(true);frame.SupplyDrop(false);
+        for(int action=0;action<12;++action){frame.SupplyHeld(action,false);frame.SupplyPressed(action,false);}
+        for(int action=0;action<8;++action)frame.SupplyValue(action,0);
+        if(shootA>=0)frame.SupplyValue(shootA,1.0f);
+        if(shootB>=0)frame.SupplyValue(shootB,1.0f);
+        NativeFrameActions actions(frame);
+        if(session.TickNormal(runtime,files,&actions)!=NFR_OK)break;
+        ++done;
+    }
+    return done;
+}
 unsigned int AdvanceToBoundary(PortGameSession& session,PortNormalRuntime& runtime){
     unsigned int steps=0;
     while(runtime.phase==PNR_GENERATING||runtime.phase==PNR_ROOM_COMPONENTS){
@@ -108,6 +124,17 @@ int main(int argc,char** argv){
     }
     if(runtime->phase==PNR_READY){
         const NativeRng rngBeforeTail=runtime->gameRandom;
+        //Primary weapon: one diagonal shot whose range expires before the
+        //corner, and repeated downward shots that meet the actual bottom wall.
+        unsigned int projTicks=RunProjectileTicks(session,*runtime,5,6,1);
+        projTicks+=RunProjectileTicks(session,*runtime,-1,-1,160);
+        projTicks+=RunProjectileTicks(session,*runtime,7,-1,1);
+        projTicks+=RunProjectileTicks(session,*runtime,-1,-1,40);
+        printf("PROJECTILES ticks=%u spawned=%u wallHits=%u expired=%u active=%u cooldown=%.9g\n",
+            projTicks,runtime->projectiles.spawned,runtime->projectiles.wallHits,runtime->projectiles.expired,
+            (unsigned int)runtime->projectiles.active.size(),runtime->projectiles.cooldown);
+        if(projTicks!=202||runtime->projectiles.spawned<2||runtime->projectiles.wallHits<1||
+           runtime->projectiles.expired<1||!runtime->projectiles.active.empty())return 17;
         const NativePoint start=runtime->playerBody.position;
         const unsigned int right=RunMovementTicks(session,*runtime,1,0,40);
         const NativePoint afterRight=runtime->playerBody.position;
