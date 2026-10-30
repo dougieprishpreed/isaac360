@@ -10,6 +10,7 @@ def main():
     gameplay=re.search(r'^GAMEPLAY complete=(\d+) ticks=(\d+) collisionStop=\(([^,]+),([^)]+)\) stable=(\d+)',log,re.M)
     ticks=int(gameplay.group(2)) if gameplay else int(session[3])
     complete=int(gameplay.group(1)) if gameplay else int(session[2])
+    tail=re.search(r'^TAIL ticks=(\d+) trailSegments=(\d+) renderCallbacks=(\d+) fields=12c0/2cc/12bc/1ca4 present=(\d)(\d)(\d)(\d)',log,re.M)
     paths=set()
     for folder in ('src/game','src/content','build/generated'):
         paths.update(f for f in (ROOT/folder).rglob('*') if f.suffix in ('.cpp','.h','.inc'))
@@ -26,8 +27,12 @@ def main():
         'observed':{'next_native':session[1],'complete_players':complete,'whole_player_ticks':ticks,
             'collision_stop':('%.9g'%float(gameplay.group(3)),'%.9g'%float(gameplay.group(4))) if gameplay else None,
             'collision_stable':bool(int(gameplay.group(5))) if gameplay else False,
-            'checkpoint_returned':'CHECKPOINT buffer=' in log,'resident_restart_checked':'RESTART invalidRetained=1' in log},
-        'scope':'Focused owned session execution: normal New Run reaches an initialized player and repeated movement/collision ticks in its generated starting room. Native post-755870 presentation/effect tail, native file save/Continue, original boot MT-prefix equality and target execution remain unaccepted.',
+            'checkpoint_returned':'CHECKPOINT buffer=' in log,'resident_restart_checked':'RESTART invalidRetained=1' in log,
+            'player_tail_completed':bool(tail),'tail_ticks':int(tail.group(1)) if tail else 0,
+            'tail_trail_segments':int(tail.group(2)) if tail else 0,
+            'tail_render_callbacks':int(tail.group(3)) if tail else 0,
+            'tail_reached_fields_present':[bool(int(tail.group(i))) for i in (4,5,6,7)] if tail else []},
+        'scope':'Focused owned session execution: normal New Run reaches an initialized player and repeated whole movement/collision ticks in its generated starting room. Native 736d70 executes through the reached post-755870 ordinary tail, including the 73891f state checks, effect-cache update, reached timer/dirty owners, the first 7697a0 footstep-trail block and the 7f0e50 no-callback return. Deferred: 72c430 item/controlled branches, 713120 D6 grant, profile content stops, native file save/Continue, rendering/audio, target execution.',
         'sha256':{f.relative_to(ROOT).as_posix():hashlib.sha256(f.read_bytes()).hexdigest() for f in sorted(paths)}}
     (ROOT/'build/gameplay/result.json').write_text(json.dumps(packet,indent=2)+'\n')
 if __name__=='__main__':main()

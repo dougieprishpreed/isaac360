@@ -8,9 +8,9 @@ The goal is to preserve the original game's content and behavior, including proc
 
 The port is incomplete, and no playable Xbox 360 release is available.
 
-Resource readers, level generation, room components and the normal player lifecycle have been implemented and checked on Windows. A normal New Run now generates its first floor, registers the player, constructs and enters the selected starting room, completes placement and post-generation initialization, and executes repeated movement and grid-collision ticks in that room. The Windows host has observed a complete initialized player moving to the real room boundary, stopping stably and reversing.
+Resource readers, level generation, room components and the normal player lifecycle have been implemented and checked on Windows. A normal New Run now generates its first floor, registers the player, constructs and enters the selected starting room, completes placement and post-generation initialization, and executes repeated whole movement and grid-collision ticks in that room, including the reached ordinary player-update tail and its stateful timer/effect owners. The Windows host has observed a complete initialized player moving to the real room boundary, stopping stably and reversing.
 
-The full native player-update presentation/effect tail, combat, room transitions, progression, save/Continue and complete presentation and audio remain unfinished. Passing host checks does not establish Xbox 360 playability.
+The remaining player-update item/controlled branches, the D6 starting grant, GPU layer composition, combat, room transitions, progression, save/Continue and complete presentation and audio remain unfinished. Passing host checks does not establish Xbox 360 playability.
 
 The shared sources now compile into an Xbox 360 XEX with the installed XDK. Target execution, rendered-content and physical-console testing remain outstanding; no Xenia runtime was available for this pass.
 

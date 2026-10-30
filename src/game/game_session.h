@@ -50,6 +50,13 @@ struct PortNormalRuntime {
     unsigned int missingNativePrerequisite;
     unsigned int completePlayerInitializations,completePlayerTicks;
     unsigned int tickFrame;
+    //736d70's reached post-755870 presentation/effect state. The trail count
+    //is a host-visible record of the original7697a0 first-block segments; the
+    //render-callback count is the live7f0e50 list size (0 on this host, so
+    //7f0e50's ordinary return is executed rather than a fabricated draw).
+    unsigned int playerTailTrailSegments;
+    unsigned int playerTailRenderCallbacks;
+    unsigned int playerTailTicks;
     bool roomEntryPrefixPrepared;
     PortNormalRuntime();
 private:

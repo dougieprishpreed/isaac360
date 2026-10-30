@@ -154,7 +154,7 @@ void NativeAnimationState::Swap(NativeAnimationState& o){
 NativeSprite::NativeSprite():asset(0){Clear();}
 void NativeSprite::Clear(){
     asset=0;mainState.Select(0,true);overlayState.Select(0,true);offset.x=offset.y=rotation=0;scale.x=scale.y=speed=1;
-    for(int i=0;i<11;++i){color[i]=i<4?1.0f:0;secondaryColor[i]=i<3?1.0f:0;}flipX=flipY=updateEnabled=false;
+    for(int i=0;i<11;++i){color[i]=i<4?1.0f:0;secondaryColor[i]=i<3?1.0f:0;}flipX=flipY=updateEnabled=false;renderFlags=0;
     viewportScale=false;layerBlendPresets.clear();layerSheets.clear();layerVisible.clear();
 }
 NativeSpriteResult NativeSprite::Load(const char* path){
@@ -230,6 +230,7 @@ void NativeSprite::Swap(NativeSprite& o){
     float f=rotation;rotation=o.rotation;o.rotation=f;f=speed;speed=o.speed;o.speed=f;
     for(int i=0;i<11;++i){f=color[i];color[i]=o.color[i];o.color[i]=f;f=secondaryColor[i];secondaryColor[i]=o.secondaryColor[i];o.secondaryColor[i]=f;}
     bool b=flipX;flipX=o.flipX;o.flipX=b;b=flipY;flipY=o.flipY;o.flipY=b;b=updateEnabled;updateEnabled=o.updateEnabled;o.updateEnabled=b;
+    unsigned int rf=renderFlags;renderFlags=o.renderFlags;o.renderFlags=rf;
     b=viewportScale;viewportScale=o.viewportScale;o.viewportScale=b;layerBlendPresets.swap(o.layerBlendPresets);layerSheets.swap(o.layerSheets);
     layerVisible.swap(o.layerVisible);
 }
@@ -237,7 +238,7 @@ unsigned int NativeSprite::StateHash() const{
     unsigned int h=2166136261U;String(h,asset?asset->path:"");const NativeAnimationState* states[]={&mainState,&overlayState};
     for(int i=0;i<2;++i){const NativeAnimationState& s=*states[i];Fold(h,ClipIndex(asset,s.clip));Scalar(h,s.frame);Fold(h,s.playing?1:0);Fold(h,s.events);Fold(h,s.history);Fold(h,s.CursorHash());}
     Scalar(h,offset.x);Scalar(h,offset.y);Scalar(h,scale.x);Scalar(h,scale.y);Scalar(h,rotation);Scalar(h,speed);
-    for(int i=0;i<11;++i){Scalar(h,color[i]);Scalar(h,secondaryColor[i]);}Fold(h,flipX?1:0);Fold(h,flipY?1:0);Fold(h,updateEnabled?1:0);
+    for(int i=0;i<11;++i){Scalar(h,color[i]);Scalar(h,secondaryColor[i]);}Fold(h,flipX?1:0);Fold(h,flipY?1:0);Fold(h,updateEnabled?1:0);Fold(h,renderFlags);
     Fold(h,viewportScale?1:0);Fold(h,(unsigned int)layerBlendPresets.size());for(unsigned int i=0;i<layerBlendPresets.size();++i)Fold(h,layerBlendPresets[i]);
     Fold(h,(unsigned int)layerVisible.size());for(unsigned int i=0;i<layerVisible.size();++i)Fold(h,layerVisible[i]?1:0);
     Fold(h,(unsigned int)layerSheets.size());for(unsigned int i=0;i<layerSheets.size();++i){const NativeSpriteLayerSheet& s=layerSheets[i];String(h,s.path.c_str());Fold(h,s.width);Fold(h,s.height);Fold(h,s.ready);}return h;

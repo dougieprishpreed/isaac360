@@ -29,7 +29,7 @@ enum NativeEntityBodyResult { NEB_OK,NEB_BAD_REQUEST,NEB_UNSUPPORTED_PROPERTIES 
 class NativeEntityBody {
 public:
     bool ready;
-    bool native168,native169,native16a,removed,native16e;
+    bool native168,native169,native16a,native16b,removed,native16e;
     unsigned int flagsLow,flagsHigh;
     unsigned int native18,native1c; //66f7a3/aa: separate deferred-status flags.
     int native34c,native350; //66f875/7f: pit/fall lifecycle.
@@ -41,7 +41,7 @@ public:
     NativePoint position,velocity,previousPosition,previousVelocity;
     float shadowScale,friction,mass,collisionDamage,hitPoints,maxHitPoints;
     float native2a0,native2ec,native2fc,appliedFriction,previousTime,time,native304,native308;
-    int statusTimers[20],native26c,native27c,native340;
+    int statusTimers[20],native26c,native27c,native340,native360; //360..36c base-Init vector/timers.
     NativePoint native264;
     bool boundStatus,damagePending;
     std::vector<unsigned int> tintRecords,damageQueue;

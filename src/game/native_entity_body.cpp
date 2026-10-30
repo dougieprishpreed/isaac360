@@ -37,8 +37,8 @@ void NativeEntityCollisionShape::Swap(NativeEntityCollisionShape& other){
     float r=radius,x=xMultiplier,y=yMultiplier;radius=other.radius;xMultiplier=other.xMultiplier;yMultiplier=other.yMultiplier;
     other.radius=r;other.xMultiplier=x;other.yMultiplier=y;points.swap(other.points);
 }
-NativeEntityBody::NativeEntityBody():ready(false),native168(false),native169(false),native16a(false),removed(false),native16e(false),flagsLow(0),flagsHigh(0),type(0),variant(0),subtype(0),frameCount(0),initialFrame(0),state(0),gridCollisionClass(0),entityCollisionClass(0),renderDepth(0),initialSeed(0),entityToken(0),native34(0),native38(0),parentToken(0),childToken(0),
-    shadowScale(0),friction(0),mass(0),collisionDamage(0),hitPoints(0),maxHitPoints(0),native2a0(0),native2ec(0),native2fc(0),appliedFriction(0),previousTime(0),time(0),native304(0),native308(0),native26c(0),native27c(0),native340(0),boundStatus(false),damagePending(false){
+NativeEntityBody::NativeEntityBody():ready(false),native168(false),native169(false),native16a(false),native16b(false),removed(false),native16e(false),flagsLow(0),flagsHigh(0),type(0),variant(0),subtype(0),frameCount(0),initialFrame(0),state(0),gridCollisionClass(0),entityCollisionClass(0),renderDepth(0),initialSeed(0),entityToken(0),native34(0),native38(0),parentToken(0),childToken(0),
+    shadowScale(0),friction(0),mass(0),collisionDamage(0),hitPoints(0),maxHitPoints(0),native2a0(0),native2ec(0),native2fc(0),appliedFriction(0),previousTime(0),time(0),native304(0),native308(0),native26c(0),native27c(0),native340(0),native360(0),boundStatus(false),damagePending(false){
     position.x=position.y=velocity.x=velocity.y=previousPosition.x=previousPosition.y=previousVelocity.x=previousVelocity.y=0;random.Default();
     native264.x=native264.y=0;memset(statusTimers,0,sizeof(statusTimers));
     native18=native1c=0;native34c=native350=0;
@@ -73,7 +73,7 @@ void NativeEntityBody::Swap(NativeEntityBody& other){
     //serialization. Swap named members; the shape owns its vector separately.
 #define EXCHANGE(member,type) {type n=member;member=other.member;other.member=n;}
     EXCHANGE(ready,bool);EXCHANGE(type,int);EXCHANGE(variant,int);EXCHANGE(subtype,int);EXCHANGE(frameCount,int);EXCHANGE(initialFrame,int);EXCHANGE(state,int);
-    EXCHANGE(native168,bool);EXCHANGE(native169,bool);EXCHANGE(native16a,bool);EXCHANGE(removed,bool);EXCHANGE(native16e,bool);EXCHANGE(flagsLow,unsigned int);EXCHANGE(flagsHigh,unsigned int);
+    EXCHANGE(native168,bool);EXCHANGE(native169,bool);EXCHANGE(native16a,bool);EXCHANGE(native16b,bool);EXCHANGE(removed,bool);EXCHANGE(native16e,bool);EXCHANGE(flagsLow,unsigned int);EXCHANGE(flagsHigh,unsigned int);
     EXCHANGE(native18,unsigned int);EXCHANGE(native1c,unsigned int);EXCHANGE(native34c,int);EXCHANGE(native350,int);
     EXCHANGE(gridContactKnown,bool);EXCHANGE(gridContact,bool);EXCHANGE(contactVelocity,NativePoint);EXCHANGE(contactNormal,NativePoint);
     EXCHANGE(gridCollisionClass,int);EXCHANGE(entityCollisionClass,int);EXCHANGE(renderDepth,int);EXCHANGE(initialSeed,unsigned int);EXCHANGE(random,NativeRng);
@@ -82,7 +82,7 @@ void NativeEntityBody::Swap(NativeEntityBody& other){
     EXCHANGE(native2a0,float);EXCHANGE(native2ec,float);EXCHANGE(native2fc,float);
     EXCHANGE(entityToken,unsigned int);EXCHANGE(appliedFriction,float);EXCHANGE(previousTime,float);EXCHANGE(time,float);EXCHANGE(native304,float);EXCHANGE(native308,float);
     EXCHANGE(native34,unsigned int);EXCHANGE(native38,unsigned int);EXCHANGE(parentToken,unsigned int);EXCHANGE(childToken,unsigned int);
-    EXCHANGE(native26c,int);EXCHANGE(native27c,int);EXCHANGE(native340,int);EXCHANGE(native264,NativePoint);EXCHANGE(boundStatus,bool);EXCHANGE(damagePending,bool);
+    EXCHANGE(native26c,int);EXCHANGE(native27c,int);EXCHANGE(native340,int);EXCHANGE(native360,int);EXCHANGE(native264,NativePoint);EXCHANGE(boundStatus,bool);EXCHANGE(damagePending,bool);
     for(int i=0;i<20;++i){EXCHANGE(statusTimers[i],int);}
 #undef EXCHANGE
     tintRecords.swap(other.tintRecords);damageQueue.swap(other.damageQueue);
@@ -90,7 +90,7 @@ void NativeEntityBody::Swap(NativeEntityBody& other){
 }
 unsigned int NativeEntityBody::StateHash() const{
     unsigned int h=2166136261U;Fold(h,ready?1:0);Fold(h,type);Fold(h,variant);Fold(h,subtype);Fold(h,frameCount);Fold(h,initialFrame);Fold(h,state);
-    Fold(h,native168);Fold(h,native169);Fold(h,native16a);Fold(h,removed);Fold(h,native16e);Fold(h,flagsLow);Fold(h,flagsHigh);
+    Fold(h,native168);Fold(h,native169);Fold(h,native16a);Fold(h,native16b);Fold(h,removed);Fold(h,native16e);Fold(h,flagsLow);Fold(h,flagsHigh);
     Fold(h,native18);Fold(h,native1c);Fold(h,native34c);Fold(h,native350);
     Fold(h,gridContactKnown);if(gridContactKnown){Fold(h,gridContact);Scalar(h,contactNormal.x);Scalar(h,contactNormal.y);
         if(gridContact){Scalar(h,contactVelocity.x);Scalar(h,contactVelocity.y);}}
@@ -100,7 +100,7 @@ unsigned int NativeEntityBody::StateHash() const{
     Scalar(h,collision.radius);Scalar(h,collision.xMultiplier);Scalar(h,collision.yMultiplier);Fold(h,(unsigned int)collision.points.size());
     Fold(h,renderDepth);Fold(h,entityToken);Scalar(h,appliedFriction);Scalar(h,previousTime);Scalar(h,time);Scalar(h,native304);Scalar(h,native308);
     Fold(h,native34);Fold(h,native38);Fold(h,parentToken);Fold(h,childToken);
-    Fold(h,native26c);Fold(h,native27c);Fold(h,native340);Scalar(h,native264.x);Scalar(h,native264.y);Fold(h,boundStatus);Fold(h,damagePending);
+    Fold(h,native26c);Fold(h,native27c);Fold(h,native340);Fold(h,native360);Scalar(h,native264.x);Scalar(h,native264.y);Fold(h,boundStatus);Fold(h,damagePending);
     for(int i=0;i<20;++i)Fold(h,statusTimers[i]);Fold(h,(unsigned int)tintRecords.size());Fold(h,(unsigned int)damageQueue.size());
     for(unsigned int i=0;i<collision.points.size();++i){Scalar(h,collision.points[i].x);Scalar(h,collision.points[i].y);}return h;
 }

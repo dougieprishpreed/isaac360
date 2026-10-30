@@ -64,6 +64,7 @@ public:
     NativePoint offset,scale;
     float rotation,color[11],secondaryColor[11],speed;
     bool flipX,flipY,updateEnabled;
+    unsigned int renderFlags; //Sprite+110; 739a33/73a990 set native bit8.
     //Logical bindings written by player Init. Viewport scale resolves through
     //native BA3B14/18 at drawing; explicit blend presets resolve through the
     //renderer-dependent94bb50. Neither is a guessed GPU state/default.

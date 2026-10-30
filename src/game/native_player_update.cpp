@@ -42,6 +42,172 @@ bool Action(NativeActionSource* source,bool held,int id,const NativePlayerCreati
     if(!source)return false;return (held?source->Held(id,creation.native153c,token,value):source->Pressed(id,creation.native153c,token,value))==NPI_OK;
 }
 }
+namespace {
+//The reached ordinary73891f..73d829 tail. Every checked owner below is read
+//from the live player cache. A true/item/effect branch that is outside this
+//initialized ordinary player stops with its actual native address; it is not
+//folded into a neutral return.
+bool Dec(Live& f,unsigned int at,int* value,bool* hit=0){
+    unsigned int n;if(!f.Get(at,4,&n))return false;*value=(int)n;
+    if(hit)*hit=false;
+    if(*value>0){--*value;f.Put(at,(unsigned int)*value);if(hit)*hit=(*value==0);}return true;
+}
+bool Reached(Live& f,unsigned int at,int* value){unsigned int n;if(!f.Get(at,4,&n))return false;*value=(int)n;return true;}
+bool RunReachedPlayerTail(NativePlayerUpdate& call,PortNormalRuntime& runtime,Live& f,unsigned int* next){
+    (void)call;
+    NativePlayerState& state=runtime.playerState;NativeEntityBody& body=runtime.playerBody;
+    NativePlayerCreation& creation=runtime.playerCreation;NativePlayerSprites& sprites=runtime.playerSprites;
+    unsigned int raw;int n;bool present;
+    //73891f: [30c] is the camera/target owner. Fresh Init writes0 at66f7dd;
+    //483ce0(0) returns null, so the 738958..738adf camera/aim loop is not
+    //entered. 78bba0 only admits native types29/38 and cannot select this type0.
+    //66f7dd resets the separate entity parent/held owner to0; it is the same
+    //live value the native reads at73891f.
+    if(body.parentToken!=0){*next=0x483ce0;return false;}
+    if(state.playerType==29||state.playerType==38){*next=0x78bba0;return false;}
+    //738ae2: variant0/ghost0, no held collectible397, no1370 owner, no effect478.
+    if(body.variant==0&&!state.ghost){
+        if(!state.HasCollectible(397,&present)){*next=0x738b02;return false;}
+        if(present){*next=0x738b0f;return false;}
+        if(!f.Zero(0x1370)){*next=0x738d07;return false;}
+        if(!state.HasCollectible(478,&present)){*next=0x738d1b;return false;}
+        if(present){*next=0x738d32;return false;}
+    }
+    //738d78: direction/head direction flag ownership. A direction of-1 is the
+    //native absent value; every other value sets its original dirty flag.
+    if(!f.Get(0x12c0,4,&raw))return false;
+    unsigned int direction,headDirection;
+    if(!f.Get(0x1548,4,&direction))return false;if((int)direction!=-1)raw|=2;
+    if(!f.Get(0x1550,4,&headDirection))return false;if((int)headDirection!=-1)raw|=4;
+    f.Put(0x12c0,raw);
+    //738d98: collectible210 owns the following weapon/held-object branch.
+    if(!state.HasCollectible(210,&present)){*next=0x738d98;return false;}
+    if(present){*next=0x738dae;return false;}
+    //738f00/738f4a: collision damage is copied from the actual body record
+    //+44 (NativeEntityBody.collisionDamage). 1000.0 is the native sentinel
+    //that asks for the item4/default-damage service; a fresh body is0.
+    //2cc is the entity body's live collision-damage word (66f947 copies
+    //record+44); NativeEntityBody owns that value independently of the
+    //constructor cache. The sentinel branch is retained explicitly.
+    float damage=body.collisionDamage;
+    if(damage==1000.0f){*next=0x738f15;return false;}
+    f.Put(0x12bc,0);
+    f.Float(0x2cc,body.collisionDamage);
+    //738f6e..738fdc: collectible593, timer1798, collectible714, cleared
+    //4-byte flag owner, then the live1440 cache changed/Update path.
+    if(!state.HasCollectible(593,&present)){*next=0x738f74;return false;}
+    if(present){*next=0x738fad;return false;}
+    if(!Reached(f,0x1798,&n))return false;if(n>0){*next=0x738fad;return false;}
+    if(!state.HasCollectible(714,&present)){*next=0x738f8d;return false;}
+    if(present){*next=0x738fad;return false;}
+    bool changed=state.effects.changed;
+    if(changed){*next=0x738fca;return false;} //716840 stat evaluation dependency.
+    NativeEffectResult ur=state.effects.Update(0);
+    if(ur!=NEF_OK){*next=0x738ff5;return false;}
+    if(!f.Zero(0x1dd8)){*next=0x73900a;return false;}
+    //739451..73a6b3: the reached ordinary sprite stop/anchor/layer pass has
+    //no player simulation write. Its numeric Sprite owner is updated here
+    //from the same1428/142c anchors the native layer copy uses (fresh zero).
+    float ax,ay;
+    if(!f.Float(0x1428,&ax)||!f.Float(0x142c,&ay))return false;
+    sprites.sprites[0].offset.x=ax;sprites.sprites[0].offset.y=ay;
+    //739a33 ->5aa2f0(8): the reached primary Sprite+110 render flag.
+    sprites.sprites[0].renderFlags|=8U;
+    //73a6b4..73b1f5: fifteen costume slots. Fresh Reset wrote index-1 for
+    //every slot; the native loop takes its per-slot skip and performs no
+    //layer replacement. The 73b151 timer scan then decrements reached timers.
+    int v1300,v35c,v360,v1794,v19f8,v17d0,v17d4,v17d8,v17dc,v17e0,v17e4,v17e8,v17ec,v17f0;bool hit;
+    if(!Dec(f,0x1300,&v1300)||!Dec(f,0x35c,&v35c))return false;
+    if(!Dec(f,0x1794,&v1794)||!Dec(f,0x19f8,&v19f8))return false;
+    if(body.native360>0)--body.native360;v360=body.native360;
+    if(!Dec(f,0x17d0,&v17d0,&hit))return false;if(hit){*next=0x716840;return false;}
+    if(!Dec(f,0x17d4,&v17d4,&hit))return false;if(hit){*next=0x716840;return false;}
+    if(!Dec(f,0x17d8,&v17d8,&hit))return false;if(hit){*next=0x716840;return false;}
+    if(!Dec(f,0x17dc,&v17dc,&hit))return false;if(hit){*next=0x716840;return false;}
+    if(!Dec(f,0x17e0,&v17e0,&hit))return false;if(hit){*next=0x716840;return false;}
+    if(!Dec(f,0x17e4,&v17e4,&hit))return false;if(hit){*next=0x716840;return false;}
+    if(!Dec(f,0x17e8,&v17e8,&hit))return false;if(hit){*next=0x716840;return false;}
+    if(!Dec(f,0x17ec,&v17ec)||!Dec(f,0x17f0,&v17f0))return false;
+    //739b52/739bd8/739c5a/739d44: reached fade/scale owners. Fresh values are
+    //zero; the following effect/collectible checks are read in native order.
+    float f1f7c;if(!f.Float(0x1f7c,&f1f7c))return false;
+    if(f1f7c>0.0f){*next=0x739b6b;return false;}
+    if(!Reached(f,0x19f8,&n))return false;
+    if(n>0){*next=0x739bf6;return false;}
+    //879ab0 returns the owned effect count. The fresh1440 cache is empty, so
+    //the native comparison to4 falls through without a callback.
+    if(!state.effects.Entries().empty()){*next=0x739bec;return false;}
+    int v1de4;float v1de8;
+    if(!Reached(f,0x1de4,&v1de4))return false;if(v1de4>0){*next=0x739c67;return false;}
+    if(!f.Float(0x1de8,&v1de8))return false;if(v1de8>0.0f){*next=0x739d59;return false;}
+    if(!state.HasCollectible(593,&present)){*next=0x739eb7;return false;}
+    if(present){*next=0x739ec0;return false;}
+    //739f29..73a6b3 reached transform/layer pass. It writes only numeric
+    //Sprite layer state; the player cache is not written on this ordinary path.
+    //73b84e..73b9e1 selects the body layer pair from actual layer state; fresh
+    //ordinary layers are inactive and take the documented empty path.
+    //73b9e2..73bbdc: scale owner. The body sprite scale stays its Init value1;
+    //the native operation writes Sprite channels only.
+    //73bbdd..73bc99: collectibles77/93/299 are absent.
+    if(!state.HasCollectible(77,&present)){*next=0x73bbe5;return false;}if(present){*next=0x73bc2d;return false;}
+    if(!state.HasCollectible(93,&present)){*next=0x73bbf6;return false;}if(present){*next=0x73bc2d;return false;}
+    if(!state.HasCollectible(299,&present)){*next=0x73bc0a;return false;}if(present){*next=0x73bc2d;return false;}
+    //73bc9a..73c822: type/stage/seed-effect gates. Ordinary player0 has none.
+    if(body.flagsLow&0x80U){*next=0x73bcaa;return false;} //size blend dependency.
+    if(runtime.run.context.stageType==0x37){*next=0x73bcde;return false;}
+    //73bdac76a600: reached sprite timer update.
+    if(body.native16b){*next=0x73bdb3;return false;}
+    //73c823: flags4000 bypass, then collectible375/399/117 gates.
+    if(!(body.flagsLow&0x4000U)){
+        if(!state.HasCollectible(375,&present)){*next=0x73c83f;return false;}if(present){*next=0x73c848;return false;}
+        if(!state.HasCollectible(399,&present)){*next=0x73c8d3;return false;}if(present){*next=0x73c8dc;return false;}
+        if(!state.HasCollectible(117,&present)){*next=0x73c966;return false;}if(present){*next=0x73c96f;return false;}
+    }
+    //73c9fe/7697a0: the first reached footstep block runs when1770==0. It
+    //writes the trail timer/color/position owners; the blood/dust spawn at
+    //7699e0 requires76a4d0, which rejects this player because1184 is-1 and
+    //collectibles6/12 are absent. No game RNG is consumed on that path.
+    float trail;if(!f.Float(0x1770,&trail))return false;
+    if(trail==0.0f){
+        ++runtime.playerTailTrailSegments;
+        f.Put(0x1764,0);f.Put(0x1768,0);f.Put(0x176c,0);
+        f.Float(0x1770,0.7f);
+        f.Float(0x1784,body.position.x*0.9f);
+        f.Float(0x1788,body.position.y*0.9f);
+        f.Float(0x178c,0.0f);
+        //7699db ->402050 copies the 0x2c-byte trail/color struct from1764 to1738.
+        for(unsigned int i=0;i<0x2c;++i){unsigned int b;if(!f.Get(0x1764+i,1,&b))return false;f.Put(0x1738+i,b,1);}
+    }
+    //76a4d0: 1184 is slot1's native0 selector (slots start at1174,stride10),
+    //not a separate scalar. Fresh Init leaves it-1, so the native function
+    //returns before its costume-gated/RNG effect path.
+    if(creation.costumeSlots[1].native0>=0){*next=0x76a4d0;return false;}
+    //76a960 is reached only for variant1/ghost; this ordinary call skips it.
+    if(body.variant==1||state.ghost){*next=0x76a960;return false;}
+    //73ca1b: the separate1a3c timer is zero on this owner.
+    if(!Reached(f,0x1a3c,&n))return false;if(n>0){*next=0x73ca25;return false;}
+    //73ca5f..73cb0f: greed/seed-effect queries are false for normal mode0.
+    if(runtime.run.context.nativeMode){*next=0x73ca5f;return false;}
+    //73cb10..73d1d9: seed effect2/0x25/0xe/0x35/0x18/0x1a/0x7/0xa/... gates
+    //all false for the ordinary no-seed-effect run; no player cache is written.
+    //73d1da/73d2f6/73d3a4: clear flags four-byte owner, element type0x16 and
+    //low-health timer are not reached;1de0 is the reached zero write.
+    f.Put(0x1de0,0);
+    //73d3ae/76f6d0: ordinary body has no costume-gated animation owner, so16ec
+    //is the native false return.
+    f.Put(0x16ec,0,1);
+    //73d3c1/73d454: 1a2c owner is empty;6b5fc0 leaves the reached no-overlay
+    //path. 73d4e5/73d50a/73d607 perform no player-cache write on this state.
+    //73d7fc: the reached clear-word write is the original two-byte1ca4=0.
+    f.Put(0x1ca4,0,2);
+    //73d805: ghost/78bba0 false, so the native180=0 write is not reached.
+    //73d823/7f0e50: the render-callback list is empty in this host runtime.
+    if(runtime.playerTailRenderCallbacks!=0){*next=0x7f0e50;return false;}
+    ++runtime.playerTailTicks;
+    (void)creation;(void)sprites;(void)ax;(void)ay;(void)f1f7c;(void)v1300;(void)v35c;(void)v360;(void)v1794;(void)v19f8;
+    return true;
+}
+}
 void NativePlayerUpdate::Begin(){
     address=0x736d70;missingOffset=0;active=false;returned=false;
 }
@@ -67,7 +233,10 @@ bool NativePlayerUpdate::Resume(PortNormalRuntime& runtime,NativeActionSource* a
         if(!firstTick){
             if(!state.native1734||!creation.postGenerationPrepared)return false;
             fields.Put(0x1304,state.playerType); //7098a0; ordinary player0.
-            fields.Put(0x19fc,0); //7098d2: player0's ESI value0, not a fixture.
+            //7098e3: the manager's virtual Init passes arg2=0 (not1), so the
+            //0x19fc selector takes the native-1 branch. It is only7 for the
+            //alternate arg2=1/type path.
+            fields.Put(0x19fc,0xffffffffU);
             fields.Put(0x1735,state.canShoot?1U:0U,1);
             fields.Put(0x314,0); //66ec42/66f7f1/708cc8 clear the held-object owner.
             for(int i=0;i<4;++i)fields.Put(0x1334+4*i,0);
@@ -261,7 +430,7 @@ bool NativePlayerUpdate::Resume(PortNormalRuntime& runtime,NativeActionSource* a
         //Ordinary primary: subtype0/ghost0. The reached item-drop press
         //branch is not taken when the external device supplies action11
         //released, so the native early return writes16d8=0.
-        if(body.subtype||state.ghost){address=0;}
+        if(body.subtype||state.ghost){*next=0x7558ea;return false;}
         else {
             unsigned int timer;
             if(!fields.Get(0x1538,4,&timer)){*next=0x755870;return false;}
@@ -270,8 +439,15 @@ bool NativePlayerUpdate::Resume(PortNormalRuntime& runtime,NativeActionSource* a
             if(!actions||actions->Pressed(11,creation.native153c,body.entityToken,&pressed)!=NPI_OK){*next=0x755acf;return false;}
             if(pressed){*next=0x755acf;return false;}
             fields.Put(0x16d8,0);
-            address=0;
+            //The ordinary subtype0/ghost0 call returns to73891f. The later
+            //73891f..73d829 tail is part of the same native update, not a
+            //separate optional presentation call.
+            address=0x73891f;
         }
+    }
+    if(address==0x73891f){
+        if(!RunReachedPlayerTail(*this,runtime,fields,next))return false;
+        address=0;
     }
     if(address==0){
         returned=true;active=false;*next=0;return true;

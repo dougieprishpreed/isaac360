@@ -107,6 +107,7 @@ int main(int argc,char** argv){
         printf("RESUME residentRetained=1 RNGretained=1 roomCallbacks=%u next=%08x\n",callbackCount,runtime->missingNativePrerequisite);
     }
     if(runtime->phase==PNR_READY){
+        const NativeRng rngBeforeTail=runtime->gameRandom;
         const NativePoint start=runtime->playerBody.position;
         const unsigned int right=RunMovementTicks(session,*runtime,1,0,40);
         const NativePoint afterRight=runtime->playerBody.position;
@@ -116,6 +117,7 @@ int main(int argc,char** argv){
         const NativePoint settled=runtime->playerBody.position;
         const unsigned int left=RunMovementTicks(session,*runtime,-1,0,40);
         const NativePoint afterLeft=runtime->playerBody.position;
+
         const NativeRoomState& room=*runtime->world.Current();
         printf("TICKS ready=%d right=%u start=(%.9g,%.9g) afterRight=(%.9g,%.9g) wall=%u atWall=(%.9g,%.9g) settle=%u settled=(%.9g,%.9g) left=%u afterLeft=(%.9g,%.9g) ticks=%u extent=(%.9g,%.9g,%.9g,%.9g)\n",
             runtime->phase==PNR_READY,right,start.x,start.y,afterRight.x,afterRight.y,wall,atWall.x,atWall.y,settle,settled.x,settled.y,left,afterLeft.x,afterLeft.y,
@@ -124,6 +126,22 @@ int main(int argc,char** argv){
             left<10||afterLeft.x>=atWall.x-1||runtime->completePlayerTicks<right+wall+settle+left)return 14;
         printf("GAMEPLAY complete=%u ticks=%u collisionStop=(%.9g,%.9g) stable=%d\n",
             runtime->completePlayerInitializations,runtime->completePlayerTicks,settled.x,settled.y,fabsf(settled.x-atWall.x)<=0.01f);
+        printf("TAIL_RNG unchanged=%d\n",memcmp(&rngBeforeTail,&runtime->gameRandom,sizeof(NativeRng))==0);
+        unsigned int t12c0=0,t2cc=0,t12bc=0,t1ca4=0;float f2cc=0;
+        const NativePlayerCreationCache& cf=runtime->playerCreation.constructorFields;
+        if(cf.Scalar(0x2cc,&t2cc))memcpy(&f2cc,&t2cc,4);
+        unsigned int t1548=0;
+        bool p12c0=cf.Scalar(0x12c0,&t12c0),p2cc=cf.Scalar(0x2cc,&t2cc),p12bc=cf.Scalar(0x12bc,&t12bc),p1ca4=cf.Scalar(0x1ca4,&t1ca4);
+        cf.Scalar(0x1548,&t1548);
+        printf("TAIL ticks=%u trailSegments=%u renderCallbacks=%u fields=12c0/2cc/12bc/1ca4 present=%d%d%d%d values=%u/%.9g/%u/%u direction=%d spriteFlags=%08x\n",
+            runtime->playerTailTicks,runtime->playerTailTrailSegments,runtime->playerTailRenderCallbacks,
+            p12c0?1:0,p2cc?1:0,p12bc?1:0,p1ca4?1:0,
+            t12c0,f2cc,t12bc,t1ca4,(int)t1548,runtime->playerSprites.sprites[0].renderFlags);
+        //The final left tick leaves the native direction flag set, the body
+        //damage at the actual record value, and the reached clear word zero.
+        if(!p12c0||!p2cc||!p12bc||!p1ca4||t12c0!=2U||f2cc!=0.0f||t12bc!=0U||t1ca4!=0U||
+           runtime->playerTailTrailSegments!=1U||runtime->playerTailTicks!=runtime->completePlayerTicks||
+           (runtime->playerSprites.sprites[0].renderFlags&8U)==0)return 15;
     }
     if(runtime->world.Current()){
         NativeRoomState& room=*runtime->world.Current();
