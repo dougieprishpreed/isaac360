@@ -35,6 +35,7 @@ def main():
     greedDone=re.search(r'^GREED complete waves=(\d+) next=(\d+) room=(\d+)',log,re.M)
     greedBoss=re.search(r'^GREED boss room=(\d+) type=(\d+) variant=(\d+) enemies=(\d+) ultraGreed=(\d+)',log,re.M)
     greedContinue=re.search(r'^GREED continue wave=(\d+) room=(\d+) count=(\d+)',log,re.M)
+    greedNative=re.search(r'^GREED native continue wave=(\d+) room=(\d+) count=(\d+)',log,re.M)
     deathflow=re.search(r'^DEATH_FLOW dyingTicks=(\d+) gameOver=(\d+) restartResult=(\d+) restartPhase=(\d+) restartHP=(-?\d+)/(-?\d+)',log,re.M)
     lock=re.search(r'^LOCK treasureSlot=(\d+) noKeyClosed=(\d+) keyOpened=(\d+) keysLeft=(-?\d+) doorsUnlocked=(\d+) bossOpenWithoutDefeat=(\d+) bossDefeated=(\d+)',log,re.M)
     paths=set()
@@ -138,6 +139,8 @@ def main():
             'greed_boss_ultra':int(greedBoss.group(5)) if greedBoss else 0,
             'greed_continue_wave':int(greedContinue.group(1)) if greedContinue else -1,
             'greed_continue_room':int(greedContinue.group(2)) if greedContinue else -1,
+            'native_greed_continue_wave':int(greedNative.group(1)) if greedNative else -1,
+            'native_greed_continue_room':int(greedNative.group(2)) if greedNative else -1,
             'dying_ticks':int(deathflow.group(1)) if deathflow else 0,
             'game_over':bool(int(deathflow.group(2))) if deathflow else False,
             'restart_ready':bool(deathflow and int(deathflow.group(4))==5) if deathflow else False,

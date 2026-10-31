@@ -165,7 +165,13 @@ bool NativeGamePersistent::CaptureState(const NormalRunFlow& run,NativeWorld& wo
     fields.Put(0x1e554,(int)dormantCount>0?1:0,1);fields.Put(0x1fb38,flags,2);
     if(next)*next=0x907350;
     players.clear();players.resize(manager.members.size());
-    if(allowCurrent){if(!players[0].CaptureCurrent(player,startup,creation,body,next))return false;}
+    if(allowCurrent){if(!players[0].CaptureCurrent(player,startup,creation,body,next))return false;
+        if(run.context.nativeMode>=2&&world.layout.count>1&&world.layout.count<=30){
+            std::vector<unsigned int> metadata;metadata.push_back(0x47524431U);metadata.push_back((unsigned int)(world.currentGrid/2));
+            metadata.push_back((unsigned int)(world.layout.count-1));metadata.push_back((unsigned int)(world.layout.count-1));
+            players[0].words[0x4f4]=metadata;
+        }
+    }
     else if(checkpoint){if(!players[0].CaptureInitial(player,startup,creation,body,next))return false;}
     else{
         if(!creation.initialSaveNormalized&&!creation.NormalizeInitialSave(player,sprites,next))return false;

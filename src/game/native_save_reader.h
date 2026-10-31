@@ -8,9 +8,9 @@
 //their verified encoded length.
 struct NativeSaveSummary {
     struct Effect {int type,id,count,timer;};
-    bool valid,hasPlayer,hasPools;
+    bool valid,hasPlayer,hasPools,greed;
     unsigned int seed;
-    int playerId,stage,stageType,currentGrid,dimension,roomDefinition;
+    int playerId,stage,stageType,currentGrid,dimension,roomDefinition,roomCount,greedWave,greedWaveCount,greedBossWave;
     int redHearts,maxRedHearts,soulHearts,blackHeartMask;
     int keys,bombs,coins;
     std::vector<int> collectibles;

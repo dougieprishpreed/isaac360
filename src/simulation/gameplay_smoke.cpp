@@ -461,6 +461,13 @@ int RunBombProbe(NativeMt& random,PortFrontend& ui){
     if(!resumedGreed->greedMode||resumedGreed->greedWave!=1||resumedGreed->world.currentGrid!=2){delete resumedGreed;delete runtime;return 185;}
     printf("GREED continue wave=%d room=%d count=%d\n",resumedGreed->greedWave,resumedGreed->world.currentGrid,resumedGreed->greedWaveCount);
     delete resumedGreed;
+    if(!session.SaveNativeContinue("build/gameplay/greed_native.dat",*runtime)){printf("GREED native save failed=%08x\n",runtime->nativeSaveCaptureAddress);delete runtime;return 186;}
+    PortNormalRuntime* nativeGreed=new PortNormalRuntime;NativeMt nativeRandom;nativeRandom.Seed(888);
+    PortGameSession nativeSession(nativeRandom,ui);NativeSceneFiles nativeFiles={"runtime/game/file_index.bin","runtime/game/",1,0,0};
+    if(!nativeSession.ContinueNativeSave("build/gameplay/greed_native.dat",*nativeGreed,nativeFiles)){delete nativeGreed;delete runtime;return 187;}
+    if(!nativeGreed->greedMode||nativeGreed->greedWave!=1||nativeGreed->world.currentGrid!=2){delete nativeGreed;delete runtime;return 188;}
+    printf("GREED native continue wave=%d room=%d count=%d\n",nativeGreed->greedWave,nativeGreed->world.currentGrid,nativeGreed->greedWaveCount);
+    delete nativeGreed;
     for(int wave=runtime->greedWave+1;wave<runtime->greedWaveCount;++wave){
         NativeRoomState* room=runtime->world.Current();if(!room){delete runtime;return 174;}
         room->clear=true;

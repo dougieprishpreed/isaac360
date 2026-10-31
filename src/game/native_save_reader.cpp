@@ -106,7 +106,11 @@ bool ReadPlayer(Cursor& c,NativeSaveSummary& out){
     if(!c.Skip(1))return false;
     for(int i=0;i<4;++i)if(!c.Skip(5))return false;
     if(!c.Skip(8)||!c.Skip(8)||!c.Skip(4)){return false;}
-    if(!SkipWords(c,1)||!c.Skip(8)){return false;}
+    unsigned int metadataCount=0;if(!c.Read(1,&metadataCount))return false;
+    std::vector<unsigned int> metadata;
+    for(unsigned int i=0;i<metadataCount;++i){unsigned int value=0;if(!c.Read(4,&value))return false;metadata.push_back(value);}
+    if(metadata.size()>=4&&metadata[0]==0x47524431U){out.greed=true;out.greedWave=(int)metadata[1];out.greedWaveCount=(int)metadata[2];out.greedBossWave=(int)metadata[3];}
+    if(!c.Skip(8)){return false;}
     unsigned int special=0;if(!c.Read(1,&special))return false;
     if(special!=255&&!c.Skip(8)){return false;}
     if(!SkipWords(c,4))return false;
@@ -149,7 +153,7 @@ bool ReadPools(Cursor& c,NativeSaveSummary& out){
     out.hasPools=true;return true;
 }
 }
-NativeSaveSummary::NativeSaveSummary():valid(false),hasPlayer(false),hasPools(false),seed(0),playerId(-1),stage(0),stageType(0),currentGrid(-1),dimension(-1),roomDefinition(-1),
+NativeSaveSummary::NativeSaveSummary():valid(false),hasPlayer(false),hasPools(false),greed(false),seed(0),playerId(-1),stage(0),stageType(0),currentGrid(-1),dimension(-1),roomDefinition(-1),roomCount(0),greedWave(0),greedWaveCount(0),greedBossWave(0),
     redHearts(0),maxRedHearts(0),soulHearts(0),blackHeartMask(0),keys(0),bombs(0),coins(0),heldCard(0),heldPill(-1),hasExtras(false),
     positionX(0.0f),positionY(0.0f),fireDelay(0.0f),damage(0.0f),moveSpeed(0.0f),luck(0.0f){
     activeItems[0]=activeItems[1]=activeItems[2]=activeItems[3]=0;heldTrinkets[0]=heldTrinkets[1]=0;
@@ -180,7 +184,7 @@ bool NativeReadSaveSummary(const char* path,NativeSaveSummary& output){
     if(!c.Read(2,&value)||value>24||!c.Skip(value))return false;
     if(!c.Skip(4+48+12+56))return false;
     unsigned int configs=0;if(!c.Read(4,&configs)||configs>100000||!c.Skip((size_t)configs*4))return false;
-    unsigned int rooms=0;if(!c.Read(4,&rooms)||rooms>507)return false;
+    unsigned int rooms=0;if(!c.Read(4,&rooms)||rooms>507)return false;output.roomCount=(int)rooms;
     for(unsigned int i=0;i<rooms+18;++i)if(!ReadRoom(c,output))return false;
     unsigned int owners=0;if(!c.Read(2,&owners)||!c.Skip((size_t)owners*2))return false;
     static const unsigned int sizes[]={4,1,1,4,4,4,4,4,4,4,1,1,4,4,4,4,4,1,1,4,4,1};

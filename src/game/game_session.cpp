@@ -569,22 +569,40 @@ bool PortGameSession::ContinueNativeSave(const char* path,PortNormalRuntime& run
         }
     }
     files.backdrop=NativeStageBackdrop(1);
-    PortSessionStart start=StartNormalCharacter(seed,runtime);
-    if(start.result!=NPS_WORLD_PENDING)return false;
-    for(int step=0;step<2000&&(runtime.phase==PNR_GENERATING||runtime.phase==PNR_ROOM_COMPONENTS);++step){
-        NativeActionFrame frame;frame.Clear(runtime.playerCreation.native153c,runtime.playerBody.entityToken,files.frame+step);
-        frame.SupplyConnection(true);frame.SupplyDrop(false);
-        for(int a=0;a<12;++a){frame.SupplyHeld(a,false);frame.SupplyPressed(a,false);if(a<8)frame.SupplyValue(a,0);}
-        NativeFrameActions generated(frame);
-        NormalRunResult r=AdvanceNormalSetup(runtime,files,actions?actions:&generated);
-        if(r==NFR_BAD_REQUEST)return false;
+    PortSessionStart start;
+    if(exact&&summary.greed){
+        frontend.characterMode=2;
+        start=StartGreedCharacter(seed,runtime,files);
+        if(start.result!=NPS_WORLD_PENDING)return false;
+        if(runtime.phase!=PNR_READY)return false;
+    }else{
+        start=StartNormalCharacter(seed,runtime);
+        if(start.result!=NPS_WORLD_PENDING)return false;
+        for(int step=0;step<2000&&(runtime.phase==PNR_GENERATING||runtime.phase==PNR_ROOM_COMPONENTS);++step){
+            NativeActionFrame frame;frame.Clear(runtime.playerCreation.native153c,runtime.playerBody.entityToken,files.frame+step);
+            frame.SupplyConnection(true);frame.SupplyDrop(false);
+            for(int a=0;a<12;++a){frame.SupplyHeld(a,false);frame.SupplyPressed(a,false);if(a<8)frame.SupplyValue(a,0);}
+            NativeFrameActions generated(frame);
+            NormalRunResult r=AdvanceNormalSetup(runtime,files,actions?actions:&generated);
+            if(r==NFR_BAD_REQUEST)return false;
+        }
+        if(runtime.phase!=PNR_READY)return false;
     }
-    if(runtime.phase!=PNR_READY)return false;
     if(!exact)return true;
-    if(summary.stage<1||summary.stage>12)return false;
-    while(runtime.run.context.stage<summary.stage){
-        files.backdrop=NativeStageBackdrop(runtime.run.context.stage+1);
-        if(!DescendNormal(runtime,files,actions))return false;
+    if(summary.greed){
+        const int targetWave=summary.greedWave;
+        if(targetWave<0||targetWave>runtime.greedWaveCount)return false;
+        while(runtime.greedWave<targetWave){
+            NativeRoomState* current=runtime.world.Current();if(!current)return false;
+            current->clear=true;
+            if(!AdvanceGreedWave(runtime,files)||runtime.greedWave>targetWave)return false;
+        }
+    }else{
+        if(summary.stage<1||summary.stage>12)return false;
+        while(runtime.run.context.stage<summary.stage){
+            files.backdrop=NativeStageBackdrop(runtime.run.context.stage+1);
+            if(!DescendNormal(runtime,files,actions))return false;
+        }
     }
     //Replay the saved collectible counts through the maintained grant path so
     //stats/active slots see the same item owners, then restore the exact
@@ -616,7 +634,7 @@ bool PortGameSession::ContinueNativeSave(const char* path,PortNormalRuntime& run
     runtime.playerState.keys=summary.keys;runtime.playerState.bombs=summary.bombs;runtime.playerState.coins=summary.coins;
     runtime.startingItemsGranted=true;
     if(summary.hasPools&&!runtime.itemPools.ApplySnapshot(summary.pools))return false;
-    if(summary.currentGrid>=0&&(runtime.world.currentGrid!=summary.currentGrid||
+    if(!summary.greed&&summary.currentGrid>=0&&(runtime.world.currentGrid!=summary.currentGrid||
        runtime.world.layout.currentDimension!=summary.dimension)){
         NativeWorldIssue issue;NativeRoomSetupContext setup={files.backdrop,runtime.run.floor.plan.configStage,false,0};
         if(runtime.world.Enter(summary.currentGrid,summary.dimension,files,&issue,&setup)!=NWR_OK)return false;
@@ -640,7 +658,7 @@ bool PortGameSession::ContinueNativeSave(const char* path,PortNormalRuntime& run
     return true;
 }
 bool PortGameSession::SaveNativeContinue(const char* path,PortNormalRuntime& runtime){
-    if(!path||runtime.phase!=PNR_READY||runtime.playerDead||runtime.greedMode)return false;
+    if(!path||runtime.phase!=PNR_READY||runtime.playerDead)return false;
     NativeGamePersistent snapshot;unsigned int next=0;
     if(!snapshot.CaptureCurrent(runtime.run,runtime.world,runtime.gameRandom,runtime.itemPools,runtime.nightmares,runtime.history,
         runtime.playerState,runtime.playerStartup,runtime.playerCreation,runtime.playerSprites,runtime.playerBody,runtime.playerManager,&next))return false;
