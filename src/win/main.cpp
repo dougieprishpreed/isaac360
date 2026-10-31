@@ -145,7 +145,7 @@ static void DrawRocks(){
     float rw=bg.right-bg.left,rh=bg.bottom-bg.top,ww=space.right-space.left,wh=space.bottom-space.top;if(ww<=0||wh<=0)return;
     float cw=40*rw/ww,ch=40*rh/wh;
     for(int i=0;i<live.room->staticGridCount;++i){const NativeStaticGrid& g=live.room->staticGrids[i];
-        if(g.type!=1000&&g.type!=1001&&g.type!=1002&&g.type!=1400&&g.type!=1500)continue;float wx,wy;
+        if(g.type!=1000&&g.type!=1001&&g.type!=1002&&g.type!=1008&&g.type!=1010&&g.type!=1400&&g.type!=1500)continue;float wx,wy;
         if(!live.room->geometry.Position(g.grid,&wx,&wy))continue;float px=bg.left+(wx-space.left)*rw/ww,py=bg.top+(wy-space.top)*rh/wh;
         int sx=kGameplayRocksbasementX,sy=kGameplayRocksbasementY,cx=0,cy=0;
         if(g.type==1002)cy=32;else if(g.type==1400){sx=kGameplayFireplacesheetX;sy=kGameplayFireplacesheetY;}

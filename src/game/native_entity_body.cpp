@@ -94,7 +94,75 @@ const NativeEntityBodyProperties kEnemyBodies[]={
     {99,0,0,12,0.57f,1.0f,35.0f,1.0f,1.0f,1.0f,80.0f,250.0f,0.0f,"gfx/099.000_Gurdy Jr..anm2"},
     {262,0,0,12,0.50f,1.0f,33.0f,1.0f,1.0f,1.0f,100.0f,350.0f,0.0f,"gfx/262.000_MegaMaw.anm2"},
     {264,0,0,12,0.56f,1.0f,40.0f,1.0f,1.0f,1.0f,100.0f,600.0f,0.0f,"gfx/264.000_Mega Fatty.anm2"},
-    {916,0,0,12,0.40f,1.0f,30.0f,1.0f,1.0f,1.0f,40.0f,385.0f,0.0f,"gfx/916.000_bumbino.anm2"}
+    {916,0,0,12,0.40f,1.0f,30.0f,1.0f,1.0f,1.0f,40.0f,385.0f,0.0f,"gfx/916.000_bumbino.anm2"},
+    {32,0,0,12,0.25f,1.0f,13.0f,1.0f,1.0f,2.0f,10.0f,20.0f,0.0f,"gfx/032.000_Brain.anm2"},
+    {34,0,0,12,0.14f,1.0f,13.0f,1.0f,1.0f,1.0f,10.0f,25.0f,0.0f,"gfx/034.000_Leaper.anm2"},
+    {35,0,0,12,0.12f,1.0f,13.0f,1.0f,1.0f,1.0f,10.0f,25.0f,0.0f,"gfx/035.000_Mr. Maw Body.anm2"},
+    {38,0,0,8,0.16f,1.0f,13.0f,1.0f,1.0f,1.0f,10.0f,25.0f,0.0f,"gfx/038.000_Baby.anm2"},
+    {39,0,0,12,0.14f,1.0f,13.0f,1.0f,1.0f,1.0f,10.0f,25.0f,0.0f,"gfx/039.000_Vis.anm2"},
+    {40,0,0,12,0.22f,1.0f,13.0f,1.0f,1.0f,1.0f,10.0f,25.0f,0.0f,"gfx/040.000_Guts.anm2"},
+    {41,0,0,12,0.14f,1.0f,13.0f,1.0f,1.0f,1.0f,10.0f,20.0f,0.0f,"gfx/041.000_Knight.anm2"},
+    {44,0,0,12,0.0f,1.0f,16.0f,1.0f,1.0f,1.0f,15.0f,100.0f,0.0f,"gfx/044.000_Poky.anm2"},
+    {90,0,0,12,0.14f,1.0f,13.0f,1.0f,1.0f,0.0f,30.0f,40.0f,0.0f,"gfx/090.000_Hanger.anm2"},
+    {91,0,0,12,0.26f,1.0f,13.0f,1.0f,1.0f,0.0f,30.0f,40.0f,0.0f,"gfx/091.000_Swarmer.anm2"},
+    {92,0,0,12,0.18f,1.0f,13.0f,1.0f,1.0f,0.0f,30.0f,40.0f,0.0f,"gfx/092.000_Heart.anm2"},
+    {93,0,0,12,0.15f,1.0f,13.0f,1.0f,1.0f,1.0f,30.0f,40.0f,0.0f,"gfx/093.000_Mask.anm2"},
+    {209,0,0,12,0.16f,1.0f,13.0f,1.0f,1.0f,1.0f,10.0f,16.0f,0.0f,"gfx/208.000_Fatsack.anm2"},
+    {212,0,0,12,0.17f,1.0f,13.0f,1.0f,1.0f,1.0f,20.0f,20.0f,0.0f,"gfx/212.000_DeathsHead.anm2"},
+    {219,0,0,12,0.21f,1.0f,13.0f,1.0f,1.0f,1.0f,10.0f,20.0f,0.0f,"gfx/219.000_Wizoob.anm2"},
+    {229,0,0,12,0.26f,1.0f,16.0f,1.0f,1.0f,1.0f,22.0f,20.0f,0.0f,"gfx/229.000_Tumor.anm2"},
+    {235,0,0,0,0.24f,1.0f,13.0f,1.0f,1.0f,0.0f,100.0f,100.0f,0.0f,"gfx/235.000_GapingMaw.anm2"},
+    {241,0,0,12,0.0f,1.0f,13.0f,1.0f,1.0f,1.0f,14.0f,10.0f,0.0f,"gfx/241.000_Rage Creep.anm2"},
+    {254,0,0,12,0.14f,1.0f,13.0f,1.0f,1.0f,1.0f,10.0f,20.0f,0.0f,"gfx/254.000_Floating Knight.anm2"},
+    {277,0,0,12,0.14f,1.0f,13.0f,1.0f,1.0f,1.0f,14.0f,8.0f,0.0f,"gfx/277.000_Black Boney.anm2"},
+    {280,0,0,12,0.13f,1.0f,13.0f,1.0f,1.0f,1.0f,3.0f,10.0f,0.0f,"gfx/280.000_Black Globins Body.anm2"},
+    {260,10,0,12,0.11f,1.0f,13.0f,1.0f,1.0f,1.0f,16.0f,25.0f,0.0f,"gfx/260.010_Lil Haunt.anm2"},
+    {19,1,0,8,0.23f,1.0f,20.0f,1.0f,1.0f,1.0f,50.0f,22.0f,0.0f,"gfx/019.001_The Hollow.anm2"},
+    {33,2,0,0,0.0f,1.0f,13.0f,1.0f,1.0f,1.0f,100.0f,5.0f,0.0f,"gfx/033.002_Blue Fireplace.anm2"},
+    {72,1,0,12,0.27f,1.0f,25.0f,1.0f,1.0f,2.0f,30.0f,15.0f,0.0f,"gfx/072.001_Teratoma Medium.anm2"},
+    {44,1,0,12,0.0f,1.0f,13.0f,1.0f,1.0f,1.0f,15.0f,100.0f,0.0f,"gfx/044.001_Slide.anm2"},
+    {43,0,0,12,0.52f,1.0f,35.0f,1.0f,1.0f,1.0f,50.0f,632.5f,0.0f,"gfx/043.000_Monstro II.anm2"},
+    {45,0,0,0,0.33f,1.0f,35.0f,1.0f,1.0f,2.0f,70.0f,645.0f,0.0f,"gfx/045.000_Mom.anm2"},
+    {263,0,0,12,0.0f,1.0f,33.0f,1.0f,1.0f,1.0f,100.0f,500.0f,0.0f,"gfx/263.000_MegaMaw2.anm2"},
+    {265,0,0,12,0.56f,1.0f,40.0f,1.0f,1.0f,1.0f,100.0f,800.0f,0.0f,"gfx/265.000_Mega Fatty 2.anm2"},
+    {900,0,0,12,0.54f,1.0f,35.0f,1.0f,1.0f,1.0f,38.0f,690.0f,0.0f,"gfx/900.000_reap creep.anm2"},
+    {24,2,0,12,0.14f,1.0f,13.0f,1.0f,1.0f,2.0f,10.0f,33.0f,0.0f,"gfx/024.002_Dank Globin.anm2"},
+    {33,3,0,0,0.0f,1.0f,13.0f,1.0f,1.0f,1.0f,100.0f,5.0f,0.0f,"gfx/033.003_Purple Fireplace.anm2"},
+    {39,1,0,12,0.14f,1.0f,13.0f,1.0f,1.0f,1.0f,10.0f,25.0f,0.0f,"gfx/039.001_Double Vis.anm2"},
+    {42,0,0,0,0.24f,1.0f,13.0f,1.0f,1.0f,0.0f,100.0f,20.0f,0.0f,"gfx/042.000_Stone Grimace.anm2"},
+    {42,1,0,0,0.24f,1.0f,13.0f,1.0f,1.0f,0.0f,100.0f,20.0f,0.0f,"gfx/042.001_Vomit Grimace.anm2"},
+    {55,0,0,12,0.17f,1.0f,13.0f,1.0f,1.0f,2.0f,10.0f,25.0f,0.0f,"gfx/055.000_Leech.anm2"},
+    {72,0,0,12,0.25f,1.0f,25.0f,1.0f,1.0f,2.0f,30.0f,15.0f,0.0f,"gfx/072.000_Fistula Medium.anm2"},
+    {73,1,0,12,0.23f,1.0f,13.0f,1.0f,1.0f,2.0f,20.0f,8.0f,0.0f,"gfx/073.001_Teratoma Small.anm2"},
+    {80,0,0,0,0.13f,1.0f,17.0f,1.0f,1.0f,1.0f,3.0f,10.0f,0.0f,"gfx/080.000_Moter.anm2"},
+    {83,0,0,0,0.23f,1.0f,16.0f,1.0f,1.0f,2.0f,30.0f,100.0f,0.0f,"gfx/083.000_Headless Horsemans Head.anm2"},
+    {204,0,0,12,0.14f,1.0f,13.0f,1.0f,1.0f,1.0f,10.0f,14.0f,0.0f,"gfx/204.000_Mobile Host.anm2"},
+    {205,0,0,12,0.14f,1.0f,13.0f,1.0f,1.0f,0.0f,7.0f,20.0f,0.0f,"gfx/205.000_Nest.anm2"},
+    {210,0,0,12,0.16f,1.0f,13.0f,1.0f,1.0f,1.0f,10.0f,16.0f,0.0f,"gfx/209.000_Blubber.anm2"},
+    {211,0,0,12,0.16f,1.0f,13.0f,1.0f,1.0f,1.0f,10.0f,10.0f,0.0f,"gfx/210.000_Half Sack.anm2"},
+    {212,1,0,12,0.17f,1.0f,13.0f,1.0f,1.0f,1.0f,20.0f,20.0f,0.0f,"gfx/212.001_Dank DeathsHead.anm2"},
+    {213,0,0,12,0.42f,1.0f,40.0f,1.0f,1.0f,1.0f,16.0f,20.0f,0.0f,"gfx/212.000_Moms Hand.anm2"},
+    {223,0,0,12,0.11f,1.0f,17.0f,1.0f,1.0f,2.0f,3.0f,62.0f,0.0f,"gfx/223.000_Dinga.anm2"},
+    {246,0,0,12,0.28f,1.0f,13.0f,1.0f,1.0f,1.0f,10.0f,13.0f,0.0f,"gfx/246.000_Ragling.anm2"},
+    {252,0,0,12,0.14f,1.0f,13.0f,1.0f,1.0f,1.0f,5.0f,30.0f,0.0f,"gfx/252.000_Nulls.anm2"},
+    {258,0,0,12,0.18f,1.0f,13.0f,1.0f,1.0f,1.0f,14.0f,35.0f,0.0f,"gfx/258.000_Fat Bat.anm2"},
+    {282,0,0,12,0.28f,1.0f,13.0f,1.0f,1.0f,1.0f,10.0f,20.0f,0.0f,"gfx/282.000_MegaClotty.anm2"},
+    {288,0,0,12,0.17f,1.0f,13.0f,1.0f,1.0f,1.0f,20.0f,25.0f,0.0f,"gfx/288.000_Dukie.anm2"},
+    {868,0,0,4,0.11f,1.0f,14.0f,1.0f,1.0f,1.0f,3.0f,5.0f,0.0f,"gfx/868.000_army fly.anm2"},
+    {881,0,0,12,0.14f,1.0f,14.0f,1.0f,1.0f,1.0f,30.0f,10.0f,0.0f,"gfx/881.000_needle.anm2"},
+    {881,1,0,12,0.14f,1.0f,14.0f,1.0f,1.0f,1.0f,30.0f,10.0f,0.0f,"gfx/881.001_pasty.anm2"},
+    {35,2,0,12,0.12f,1.0f,13.0f,1.0f,1.0f,1.0f,10.0f,25.0f,0.0f,"gfx/035.002_Mr. Red Maw Body.anm2"},
+    {29,2,0,12,0.14f,1.0f,13.0f,1.0f,1.0f,1.0f,10.0f,20.0f,0.0f,"gfx/029.002_Eggy.anm2"},
+    {42,2,0,0,0.24f,1.0f,13.0f,1.0f,1.0f,0.0f,100.0f,20.0f,0.0f,"gfx/042.002_Triple Grimace.anm2"},
+    {202,0,0,0,0.24f,1.0f,13.0f,1.0f,1.0f,0.0f,100.0f,1.0f,0.0f,"gfx/202.000_Constant Stone Shooter.anm2"},
+    {202,10,0,0,0.24f,1.0f,13.0f,1.0f,1.0f,0.0f,100.0f,1.0f,0.0f,"gfx/202.010_cross stone shooter.anm2"},
+    {231,0,0,12,0.22f,1.0f,13.0f,1.0f,1.0f,1.0f,100.0f,20.0f,0.0f,"gfx/231.000_NerveEnding.anm2"},
+    {236,0,0,0,0.24f,1.0f,13.0f,1.0f,1.0f,0.0f,100.0f,100.0f,0.0f,"gfx/236.000_Broken GapingMaw.anm2"},
+    {301,0,0,12,0.14f,1.0f,13.0f,1.0f,1.0f,1.0f,5.0f,20.0f,0.0f,"gfx/301.000_PoisonMind.anm2"},
+    {303,0,0,12,0.14f,1.0f,13.0f,1.0f,1.0f,1.0f,5.0f,16.0f,0.0f,"gfx/303.000_Blister.anm2"},
+    {304,0,0,12,0.0f,1.0f,13.0f,1.0f,1.0f,1.0f,5.0f,15.0f,0.0f,"gfx/304.000_TheThing.anm2"},
+    {305,0,0,12,0.20f,1.0f,13.0f,1.0f,1.0f,1.0f,5.0f,9.0f,0.0f,"gfx/305.000_Ministro.anm2"},
+    {306,0,0,0,0.24f,1.0f,13.0f,1.0f,1.0f,0.0f,100.0f,9.0f,0.0f,"gfx/306.000_Portal.anm2"}
 };
 }
 const NativeEntityBodyProperties* NativePreparedEnemyBody(int type,int variant){
@@ -106,7 +174,7 @@ bool NativeBossEntityType(int type,int variant){
     //Prepared floor-boss families. Variant coverage expands with each
     //prepared body record.
     if(type==261)return variant==0||variant==1;
-    if(type==19)return variant==0;
+    if(type==19)return variant==0||variant==1;
     if(type==20)return variant==0;
     if(type==67)return variant==0;
     if(type==260)return variant==0;
@@ -122,6 +190,12 @@ bool NativeBossEntityType(int type,int variant){
     if(type==262)return variant==0;
     if(type==264)return variant==0;
     if(type==916)return variant==0;
+    if(type==72)return variant==0||variant==1;
+    if(type==43)return variant==0;
+    if(type==45)return variant==0;
+    if(type==263)return variant==0;
+    if(type==265)return variant==0;
+    if(type==900)return variant==0;
     return false;
 }
 const NativeEntityBodyProperties* NativePreparedPlayerBody(int variant){
