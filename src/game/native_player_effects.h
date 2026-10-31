@@ -24,6 +24,8 @@ public:
     const std::vector<NativeEffectEntry>& Entries() const {return entries;}
     bool Has(int type,int id) const; //collectibles include native types1/3/4.
     int Count(int type,int id) const;
+    int Timer(int type,int id) const;
+    bool SetTimer(int type,int id,int timer);
     NativeEffectResult Add(const NativeEffectDef*,int count,bool costume,NativeEffectCallbacks* =0);
     NativeEffectResult Remove(const NativeEffectDef*,unsigned int count,NativeEffectCallbacks* =0);
     NativeEffectResult Clear(bool all,NativeEffectCallbacks* =0);

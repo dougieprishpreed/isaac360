@@ -46,7 +46,7 @@ bool NativePlayerPersistent::CaptureCurrent(const NativePlayerState& state,const
 bool NativePlayerPersistent::CaptureState(const NativePlayerState& state,const NativePlayerStartup& startup,const NativePlayerCreation& creation,const NativeEntityBody& body,bool afterSetup,bool allowCurrent,unsigned int* next){
     if(next)*next=0x761de0;
     if(captured||!creation.prefixPrepared||!startup.ready||!state.resourcesReady||state.ghost||state.stats.ready!=afterSetup||
-       !state.effects.Entries().empty()||!state.collectibleOverrides.empty()||state.temporaryCollectible||
+       (!allowCurrent&&!state.effects.Entries().empty())||!state.collectibleOverrides.empty()||state.temporaryCollectible||
        (!allowCurrent&&(!Empty(state.collectibleCounts)||!Empty(state.trinketCounts)||!Empty(state.pillEffectCounts))))return false;
     //This caller is the first room-entry checkpoint, BEFORE76c990. A real
     //grant/update is not accepted as the fresh path merely because its counts
@@ -137,6 +137,14 @@ bool NativePlayerPersistent::CaptureState(const NativePlayerState& state,const N
         //761de0's live-to-persistent pocket/active owners. The four active
         //records are native+54c/+550 stride8; card/pill use the 1f28/1f34
         //transfers to+53c/+548. Narrowed fields match the save encoder.
+        effects.clear();
+        const std::vector<NativeEffectEntry>& liveEffects=state.effects.Entries();
+        for(unsigned int i=0;i<liveEffects.size();++i){
+            const NativeEffectEntry& e=liveEffects[i];
+            if(!e.definition)return false;
+            NativePersistentEffect saved; saved.type=e.definition->type; saved.id=e.definition->id;
+            saved.count=e.count;saved.timer=e.timer;effects.push_back(saved);
+        }
         for(int i=0;i<4;++i){
             fields.Put(0x54c+8*i,(unsigned int)state.activeItems[i],4);
             fields.Put(0x550+8*i,0,1);

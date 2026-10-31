@@ -41,7 +41,7 @@ bool BoundedByte(NativeSaveWriter& w,const NativePersistentFields& f,unsigned in
 }
 }
 bool NativeSaveWriter::Player(const NativePlayerPersistent& player){
-    if(!valid||!player.captured||!player.effects.empty()||!player.persistentEffects.empty())return Fail(0x916040);
+    if(!valid||!player.captured||!player.persistentEffects.empty())return Fail(0x916040);
     const NativePersistentFields& f=player.fields;
     if(!Fields(f,0,11,0x91605a)||!Field(f,0x2c,2,0x9161e6)||!Field(f,0x2e,4,0x916230))return false;
     const unsigned int flags[]={0x32,0x528,0x529};if(!PackedFlags(f,flags,3,0x9162a7))return false;
@@ -60,7 +60,15 @@ bool NativeSaveWriter::Player(const NativePlayerPersistent& player){
     if(!Empty(*this,player,0x37c,0x91728e,1)||!Field(f,0x388,1,0x9172e1))return false;
     if(!f.Get(0x388,1,&count)||count)return Fail(0x917305,0x388);
     if(!Field(f,0x3a4,2,0x91731c)||!Field(f,0x41c,4,0x917344)||!Field(f,0x420,2,0x917372)||!Field(f,0x424,2,0x91739f)||!Fields(f,0x428,4,0x9173c5)||!Field(f,0x444,24,0x917461)||!Field(f,0x45c,4,0x91749f))return false;
-    if(!BoundedByte(*this,f,0x438,0x9174ef)||!BoundedByte(*this,f,0x440,0x917541)||!BoundedByte(*this,f,0x43c,0x917593)||!Fields(f,0x460,7,0x9175b9)||!Empty(*this,player,0x50c,0x9176f4,2))return false;
+    if(!BoundedByte(*this,f,0x438,0x9174ef)||!BoundedByte(*this,f,0x440,0x917541)||!BoundedByte(*this,f,0x43c,0x917593)||!Fields(f,0x460,7,0x9175b9))return false;
+    //0x50c effect vector: native ushort count followed by four native words
+    //per live entry (type,id,count,timer). 916040 emits the same order.
+    if(player.effects.size()>65535)return Fail(0x9176f4,0x50c);
+    Value((unsigned int)player.effects.size(),2);
+    for(unsigned int i=0;i<player.effects.size();++i){
+        Value((unsigned int)player.effects[i].type,4);Value((unsigned int)player.effects[i].id,4);
+        Value((unsigned int)player.effects[i].count,4);Value((unsigned int)player.effects[i].timer,4);
+    }
     if(!Fields(f,0x47c,2,0x9177f9)||!Field(f,0x484,2,0x91784e)||!Fields(f,0x488,5,0x917874))return false;
     for(unsigned int at=0x49c;at<=0x4ac;at+=16){std::map<unsigned int,std::vector<bool> >::const_iterator b=player.bits.find(at);
         if(b==player.bits.end())return Fail(0x917938,at);Bits(b->second);}

@@ -22,6 +22,15 @@ int NativePlayerEffects::Count(int type,int id) const {
     if(!disabled)for(unsigned int i=0;i<entries.size();++i)if(Match(*entries[i].definition,type,id))return entries[i].count;
     return 0;
 }
+int NativePlayerEffects::Timer(int type,int id) const {
+    if(!disabled)for(unsigned int i=0;i<entries.size();++i)if(Match(*entries[i].definition,type,id))return entries[i].timer;
+    return 0;
+}
+bool NativePlayerEffects::SetTimer(int type,int id,int timer){
+    if(inCallback||disabled)return false;
+    for(unsigned int i=0;i<entries.size();++i)if(Match(*entries[i].definition,type,id)){entries[i].timer=timer;return true;}
+    return false;
+}
 NativeEffectResult NativePlayerEffects::Add(const NativeEffectDef* d,int count,bool costume,NativeEffectCallbacks* callbacks){
     if(inCallback)return NEF_CALLBACK_REENTRY;
     if(disabled||!count)return NEF_OK;

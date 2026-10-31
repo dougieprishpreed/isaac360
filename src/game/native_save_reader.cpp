@@ -77,7 +77,16 @@ bool ReadPlayer(Cursor& c,NativeSaveSummary& out){
     if(!c.Skip(1)||!c.Skip(1)||!c.Skip(2)||!c.Skip(4)||!c.Skip(2)||!c.Skip(2)||!c.Skip(16)||!c.Skip(24)||!c.Skip(4))return false;
     if(!c.Skip(3)||!c.Skip(28))return false;
     
-    if(!SkipWords(c,2)){return false;}
+    unsigned int effectCount=0;if(!c.Read(2,&effectCount))return false;
+    out.effects.clear();
+    for(unsigned int i=0;i<effectCount;++i){
+        NativeSaveSummary::Effect e;unsigned int value=0;
+        if(!c.Read(4,&value))return false;e.type=(int)value;
+        if(!c.Read(4,&value))return false;e.id=(int)value;
+        if(!c.Read(4,&value))return false;e.count=(int)value;
+        if(!c.Read(4,&value))return false;e.timer=(int)value;
+        out.effects.push_back(e);
+    }
     
     if(!c.Skip(8)){return false;}
     if(!c.Skip(2)){return false;}

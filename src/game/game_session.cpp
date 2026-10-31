@@ -469,6 +469,12 @@ bool PortGameSession::ContinueNativeSave(const char* path,PortNormalRuntime& run
     for(int i=0;i<4;++i)runtime.playerState.activeItems[i]=summary.activeItems[i];
     runtime.playerState.heldCard=summary.heldCard;
     runtime.playerState.heldPill=summary.heldPill;
+    for(unsigned int i=0;i<summary.effects.size();++i){
+        const NativeSaveSummary::Effect& e=summary.effects[i];
+        const NativeEffectDef* def=NativePreparedEffect(e.type,e.id);
+        if(!def||runtime.playerState.effects.Add(def,e.count,false,0)!=NEF_OK)return false;
+        if(!runtime.playerState.effects.SetTimer(e.type,e.id,e.timer))return false;
+    }
     runtime.playerState.maxRedHearts=summary.maxRedHearts;runtime.playerState.redHearts=summary.redHearts;
     runtime.playerState.soulHearts=summary.soulHearts;runtime.playerState.blackHeartMask=summary.blackHeartMask;
     runtime.playerState.keys=summary.keys;runtime.playerState.bombs=summary.bombs;runtime.playerState.coins=summary.coins;

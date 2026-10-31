@@ -29,7 +29,8 @@ def main():
     familiar=re.search(r'^FAMILIAR spawned=(\d+) shots=(\d+) hits=(\d+) enemies=(\d+)',log,re.M)
     cont=re.search(r'^CONTINUE stage=(\d+) hp=(-?\d+)/(-?\d+) keys=(-?\d+) card=(-?\d+) pill=(-?\d+) items=(\d+)',log,re.M)
     nativeCont=re.search(r'^NATIVE_CONTINUE seed=(\d+) stage=(\d+) hp=(-?\d+)/(-?\d+)',log,re.M)
-    nativeCurrent=re.search(r'^NATIVE_CURRENT stage=(\d+) hp=(-?\d+)/(-?\d+) soul=(-?\d+) keys=(-?\d+) bombs=(-?\d+) coins=(-?\d+) active=(-?\d+) card=(-?\d+) pill=(-?\d+) poolCounter=(\d+)(?: pos=\((-?[0-9.]+),(-?[0-9.]+)\) fd=(-?[0-9.]+) dmg=(-?[0-9.]+) spd=(-?[0-9.]+) luck=(-?[0-9.]+))?',log,re.M)
+    nativeCurrent=re.search(r'^NATIVE_CURRENT stage=(\d+) hp=(-?\d+)/(-?\d+) soul=(-?\d+) keys=(-?\d+) bombs=(-?\d+) coins=(-?\d+) active=(-?\d+) card=(-?\d+) pill=(-?\d+) poolCounter=(\d+)(?: pos=\((-?[0-9.]+),(-?[0-9.]+)\) fd=(-?[0-9.]+) dmg=(-?[0-9.]+) spd=(-?[0-9.]+) luck=(-?[0-9.]+)(?: effects=(-?\d+))?)?',log,re.M)
+    nativeEffect=re.search(r'^NATIVE_CURRENT_EFFECT count=(\d+) timer=(-?\d+)',log,re.M)
     deathflow=re.search(r'^DEATH_FLOW dyingTicks=(\d+) gameOver=(\d+) restartResult=(\d+) restartPhase=(\d+) restartHP=(-?\d+)/(-?\d+)',log,re.M)
     lock=re.search(r'^LOCK treasureSlot=(\d+) noKeyClosed=(\d+) keyOpened=(\d+) keysLeft=(-?\d+) doorsUnlocked=(\d+) bossOpenWithoutDefeat=(\d+) bossDefeated=(\d+)',log,re.M)
     paths=set()
@@ -122,6 +123,8 @@ def main():
             'native_current_y':float(nativeCurrent.group(13)) if nativeCurrent and nativeCurrent.group(13) else 0.0,
             'native_current_fire_delay':float(nativeCurrent.group(14)) if nativeCurrent and nativeCurrent.group(14) else 0.0,
             'native_current_damage':float(nativeCurrent.group(15)) if nativeCurrent and nativeCurrent.group(15) else 0.0,
+            'native_current_effects':int(nativeCurrent.group(18)) if nativeCurrent and nativeCurrent.group(18) else 0,
+            'native_current_effect_timer':int(nativeEffect.group(2)) if nativeEffect else 0,
             'dying_ticks':int(deathflow.group(1)) if deathflow else 0,
             'game_over':bool(int(deathflow.group(2))) if deathflow else False,
             'restart_ready':bool(deathflow and int(deathflow.group(4))==5) if deathflow else False,
