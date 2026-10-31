@@ -338,7 +338,7 @@ int RunBombProbe(NativeMt& random,PortFrontend& ui){
     PortSessionStart start=session.StartNormalCharacter(1,*runtime);
     if(start.result!=NPS_WORLD_PENDING){delete runtime;return 127;}
     if(!AdvanceToBoundary(session,*runtime)||runtime->phase!=PNR_READY){delete runtime;return 128;}
-    if(!runtime->playerState.GrantCollectible(8)||!runtime->playerState.GrantCollectible(117)){delete runtime;return 129;}
+    if(!runtime->playerState.GrantCollectible(8)||!runtime->playerState.GrantCollectible(10)||!runtime->playerState.GrantCollectible(117)){delete runtime;return 129;}
     NativeWorldResident& live=runtime->world.resident[runtime->world.currentList];
     if(!live.room||live.enemies.count>=64){delete runtime;return 130;}
     NativePoint at=runtime->playerBody.position;at.x+=150.0f;
@@ -346,7 +346,7 @@ int RunBombProbe(NativeMt& random,PortFrontend& ui){
     if(!enemy->Begin(10,0,777,at,0,1)){delete enemy;delete runtime;return 131;}
     live.enemies.entries[live.enemies.count++]=enemy;
     if(!RunProjectileTicks(session,*runtime,-1,-1,180)){delete runtime;return 132;}
-    if(runtime->familiars.spawned!=2||(runtime->familiars.shots+runtime->familiars.hits)==0){delete runtime;return 133;}
+    if(runtime->familiars.spawned!=3||(runtime->familiars.shots+runtime->familiars.hits)==0){delete runtime;return 133;}
     printf("FAMILIAR spawned=%u shots=%u hits=%u enemies=%d\n",runtime->familiars.spawned,
         runtime->familiars.shots,runtime->familiars.hits,live.enemies.count);
     delete runtime;return 0;

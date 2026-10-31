@@ -610,9 +610,19 @@ bool NativePlayerUpdate::Resume(PortNormalRuntime& runtime,NativeActionSource* a
                     //Prepared active effects: Yum Heart heals one heart; other
                     //actives consume their press until their native effect
                     //branches are ported.
-                    if(state.activeItems[0]==45){
+                    switch(state.activeItems[0]){
+                    case 45: //Yum Heart
                         if(state.redHearts<state.maxRedHearts)state.redHearts=std::min(state.maxRedHearts,state.redHearts+2);
-                        else state.soulHearts=std::min(99,state.soulHearts+2);
+                        else state.soulHearts=std::min(99,state.soulHearts+2);break;
+                    case 35: //Necronomicon
+                        DamageAllEnemies(runtime,40.0f);break;
+                    case 40: //Kamikaze
+                        DamageAllEnemies(runtime,60.0f);break;
+                    case 47: //My Little Unicorn
+                        runtime.playerInvulnerable=120;break;
+                    case 186: //Blood Rights
+                        DamageAllEnemies(runtime,40.0f);break;
+                    default:break;
                     }
                     fields.Put(0x14c4,120);
                 }

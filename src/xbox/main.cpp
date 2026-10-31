@@ -337,6 +337,7 @@ static void DrawFamiliars(){
         const NativeFamiliar& f=gNormalRuntime.familiars.active[i];
         int sx=0,sy=0,frames=0;
         if(f.item==8){sx=kGameplayBrotherbobbywalkX;sy=kGameplayBrotherbobbywalkY;frames=kGameplayBrotherbobbywalkFrames;}
+        else if(f.item==10){sx=kGameplayFlywalkX;sy=kGameplayFlywalkY;frames=kGameplayFlywalkFrames;}
         else if(f.item==117){sx=kGameplayDeadbirdwalkX;sy=kGameplayDeadbirdwalkY;frames=kGameplayDeadbirdwalkFrames;}
         else continue;
         if(frames<=0)continue;

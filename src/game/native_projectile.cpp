@@ -202,8 +202,8 @@ NativeFamiliarSystem::NativeFamiliarSystem(){spawned=shots=hits=0;}
 void NativeFamiliarSystem::Clear(){active.clear();spawned=shots=hits=0;}
 bool NativeFamiliarSystem::Sync(PortNormalRuntime& runtime){
     if(runtime.playerDead||!runtime.playerBody.ready)return true;
-    const int familiarItems[]={8,117}; //Brother Bobby, Dead Bird.
-    for(int k=0;k<2;++k){
+    const int familiarItems[]={8,10,117}; //Brother Bobby, Halo of Flies, Dead Bird.
+    for(int k=0;k<3;++k){
         bool held=false;
         if(!runtime.playerState.HasCollectible(familiarItems[k],&held))return false;
         if(!held)continue;
@@ -242,6 +242,20 @@ bool NativeFamiliarSystem::Step(PortNormalRuntime& runtime){
                     p.owner=runtime.playerBody.entityToken;
                     runtime.projectiles.active.push_back(p);++runtime.projectiles.spawned;
                     ++shots;f.shootCooldown=45;
+                }
+            }
+        }else if(f.item==10){
+            const float angle=f.time*0.10f+(i%2?3.14159265f:0.0f);
+            f.position.x=runtime.playerBody.position.x+(float)cos((double)angle)*52.0f;
+            f.position.y=runtime.playerBody.position.y+(float)sin((double)angle)*52.0f;
+            if(f.contactCooldown>0)--f.contactCooldown;
+            if(nearest&&f.contactCooldown<=0){
+                float dx=nearest->body.position.x-f.position.x,dy=nearest->body.position.y-f.position.y;
+                if(dx*dx+dy*dy<22.0f*22.0f){
+                    nearest->Damage(5.0f);++hits;f.contactCooldown=30;
+                    if(nearest->dead){++runtime.enemyKills;
+                        if(NativeBossEntityType(nearest->type,nearest->body.variant)){runtime.bossDefeated=true;
+                            if(room->trapdoorState==0){room->trapdoorState=1;room->trapdoorTimer=0;room->trapdoorX=nearest->body.position.x;room->trapdoorY=nearest->body.position.y;}}}
                 }
             }
         }else if(f.item==117){

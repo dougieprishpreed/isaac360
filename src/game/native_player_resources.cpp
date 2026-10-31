@@ -71,6 +71,10 @@ bool NativePlayerState::GrantCollectible(int id){
         case 1:{ //The Sad Onion: +0.7 tears.
             float tears=30.0f/(stats.fireDelay+1.0f)-1.0f;
             tears+=0.7f;stats.fireDelay=30.0f/(tears+1.0f)-1.0f;break;}
+        case 5: //My Reflection: +1.5 range.
+            stats.range+=1.5f;break;
+        case 7: //Blood of the Martyr: +1 damage.
+            stats.damage+=1.0f;stats.baseDamage+=1.0f;break;
         case 4: //Cricket's Head: damage x1.5.
             stats.damage*=1.5f;stats.baseDamage*=1.5f;break;
         case 6:{ //Number One: +1.5 tears, -1.5 range.
