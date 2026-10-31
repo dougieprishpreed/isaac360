@@ -299,6 +299,10 @@ static bool EnemyWalkRect(int type,int variant,int* sx,int* sy,int* frames){
     if(type==226&&variant==0){*sx=kGameplaySkinnywalkX;*sy=kGameplaySkinnywalkY;*frames=kGameplaySkinnywalkFrames;return true;}
     if(type==226&&variant==1){*sx=kGameplayRottywalkX;*sy=kGameplayRottywalkY;*frames=kGameplayRottywalkFrames;return true;}
     if(type==284){*sx=kGameplayCyclopiawalkX;*sy=kGameplayCyclopiawalkY;*frames=kGameplayCyclopiawalkFrames;return true;}
+    if(type==217){*sx=kGameplayDipwalkX;*sy=kGameplayDipwalkY;*frames=kGameplayDipwalkFrames;return true;}
+    if(type==256){*sx=kGameplayDartflywalkX;*sy=kGameplayDartflywalkY;*frames=kGameplayDartflywalkFrames;return true;}
+    if(type==261&&variant==1){*sx=kGameplayDanglewalkX;*sy=kGameplayDanglewalkY;*frames=kGameplayDanglewalkFrames;return true;}
+    if(type==261){*sx=kGameplayDinglewalkX;*sy=kGameplayDinglewalkY;*frames=kGameplayDinglewalkFrames;return true;}
     return false;
 }
 static void DrawEnemies(){

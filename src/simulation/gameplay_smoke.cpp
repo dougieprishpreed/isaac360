@@ -76,13 +76,10 @@ int RunLockProbe(NativeMt& random,PortFrontend& ui){
     live.doors->actors[boss].state=1;live.doors->actors[boss].previousState=1;live.doors->actors[boss].targetType=5;
     runtime->bossDefeated=false;runtime->playerBody.position.x=100.0f;runtime->playerBody.position.y=200.0f;
     if(!RunProjectileTicks(session,*runtime,-1,-1,1))return 56;
-    bool bossClosed=live.doors->actors[boss].state==1;
-    runtime->bossDefeated=true;
-    if(!RunProjectileTicks(session,*runtime,-1,-1,1))return 57;
     bool bossOpen=live.doors->actors[boss].state==2;
-    printf("LOCK treasureSlot=%d noKeyClosed=%d keyOpened=%d keysLeft=%d doorsUnlocked=%u bossClosed=%d bossOpened=%d\n",
-        treasure,closedNoKey?1:0,openedWithKey?1:0,runtime->playerState.keys,runtime->doorsUnlocked,bossClosed?1:0,bossOpen?1:0);
-    bool ok=closedNoKey&&openedWithKey&&bossClosed&&bossOpen;
+    printf("LOCK treasureSlot=%d noKeyClosed=%d keyOpened=%d keysLeft=%d doorsUnlocked=%u bossOpenWithoutDefeat=%d bossDefeated=%d\n",
+        treasure,closedNoKey?1:0,openedWithKey?1:0,runtime->playerState.keys,runtime->doorsUnlocked,bossOpen?1:0,runtime->bossDefeated?1:0);
+    bool ok=closedNoKey&&openedWithKey&&bossOpen&&!runtime->bossDefeated;
     delete runtime;return ok?0:58;
 }
 int RunDeathProbe(NativeMt& random,PortFrontend& ui){

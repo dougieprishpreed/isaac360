@@ -14,6 +14,9 @@ struct NativeEntityBodyProperties {
 const NativeEntityBodyProperties* NativePreparedPlayerBody(int variant);
 const NativeEntityBodyProperties* NativePreparedEffectBody(int variant,int subtype);
 const NativeEntityBodyProperties* NativePreparedEnemyBody(int type,int variant);
+//True when the prepared actor is a floor boss whose defeat unlocks the next
+//floor owner. Populated as each boss family gains a prepared body.
+bool NativeBossEntityType(int type,int variant);
 class NativeSprite;
 struct NativeEntityCollisionShape {
     float radius,xMultiplier,yMultiplier;

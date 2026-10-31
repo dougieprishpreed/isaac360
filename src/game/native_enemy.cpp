@@ -64,6 +64,28 @@ void NativeEnemy::Update(const NativeRoomState& room,const NativeEntityBody& pla
         const int cycle=phase%70;const float speed=body.variant==1?1.55f:1.10f;
         if(cycle>=16&&cycle<46){vx=dx*speed;vy=dy*speed;}
         else{vx=dx*0.22f;vy=dy*0.22f;}
+    }else if(type==217){
+        //Dip: short hop then a slow approach.
+        const int cycle=phase%90;
+        if(cycle<12){vx=dx*1.6f;vy=dy*1.6f;}
+        else if(cycle<30){vx=body.velocity.x*0.90f;vy=body.velocity.y*0.90f;}
+        else{vx=dx*0.25f;vy=dy*0.25f;}
+    }else if(type==256){
+        //Dart Fly: committed fast dart toward the player.
+        vx=dx*1.05f;vy=dy*1.05f;
+    }else if(type==261){
+        //Dingle/Dangle: slide toward the player, then spit a three-tear
+        //spread before recovering.
+        const int cycle=phase%150;
+        if(cycle<20){vx=dx*0.18f;vy=dy*0.18f;}
+        else if(cycle<85){const float speed=body.variant==1?0.85f:0.95f;vx=dx*speed;vy=dy*speed;}
+        if(shots&&distance<520.0f&&cycle==100){
+            const float px=-dy,py=dx;
+            for(int k=-1;k<=1;++k){
+                NativePoint origin={body.position.x+dx*24.0f+px*(float)k*10.0f,body.position.y+dy*24.0f+py*(float)k*10.0f};
+                shots->Fire(origin,dx*3.0f+px*(float)k*0.9f,dy*3.0f+py*(float)k*0.9f,1.0f,8.0f,240,body.entityToken);
+            }
+        }
     }else if(type==284){
         //Cyclopia: longer wind-up, then a committed charge.
         const int cycle=phase%110;

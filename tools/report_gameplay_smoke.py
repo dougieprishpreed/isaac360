@@ -19,7 +19,7 @@ def main():
     transition=re.search(r'^TRANSITION seed=(\d+) from=(-?\d+) slot=(\d+) to=(-?\d+) definition=(-?\d+) room=(\d+) enemies=(\d+) transitions=(\d+)',log,re.M)
     death=re.search(r'^DEATH seed=(\d+) room=(\d+) hits=(\d+) hp=(-?\d+)/(-?\d+) soul=(-?\d+) dead=(\d+) ticks=(\d+) enemies=(\d+)',log,re.M)
     deathflow=re.search(r'^DEATH_FLOW dyingTicks=(\d+) gameOver=(\d+) restartResult=(\d+) restartPhase=(\d+) restartHP=(-?\d+)/(-?\d+)',log,re.M)
-    lock=re.search(r'^LOCK treasureSlot=(\d+) noKeyClosed=(\d+) keyOpened=(\d+) keysLeft=(-?\d+) doorsUnlocked=(\d+) bossClosed=(\d+) bossOpened=(\d+)',log,re.M)
+    lock=re.search(r'^LOCK treasureSlot=(\d+) noKeyClosed=(\d+) keyOpened=(\d+) keysLeft=(-?\d+) doorsUnlocked=(\d+) bossOpenWithoutDefeat=(\d+) bossDefeated=(\d+)',log,re.M)
     paths=set()
     for folder in ('src/game','src/content','build/generated'):
         paths.update(f for f in (ROOT/folder).rglob('*') if f.suffix in ('.cpp','.h','.inc'))
@@ -59,8 +59,8 @@ def main():
             'lock_no_key_closed':bool(int(lock.group(2))) if lock else False,
             'lock_key_opened':bool(int(lock.group(3))) if lock else False,
             'lock_keys_left':int(lock.group(4)) if lock else -1,
-            'boss_door_closed_before':bool(int(lock.group(6))) if lock else False,
-            'boss_door_opened_after':bool(int(lock.group(7))) if lock else False,
+            'boss_door_open_without_defeat':bool(int(lock.group(6))) if lock else False,
+            'boss_defeated_flag':bool(int(lock.group(7))) if lock else False,
             'dying_ticks':int(deathflow.group(1)) if deathflow else 0,
             'game_over':bool(int(deathflow.group(2))) if deathflow else False,
             'restart_ready':bool(deathflow and int(deathflow.group(4))==5) if deathflow else False,

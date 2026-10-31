@@ -21,13 +21,21 @@ const NativeEntityBodyProperties kEnemyBodies[]={
     {208,0,0,12,0.16f,1.0f,13.0f,1.0f,1.0f,1.0f,10.0f,20.0f,0.0f,"gfx/characters/207.000_Fatty.anm2"},
     {226,0,0,12,0.14f,1.0f,13.0f,1.0f,1.0f,1.0f,14.0f,10.0f,4.0f,"gfx/226.000_Skinny.anm2"},
     {226,1,0,12,0.14f,1.0f,13.0f,1.0f,1.0f,1.0f,14.0f,16.0f,5.0f,"gfx/226.001_Rotty.anm2"},
-    {284,0,0,12,0.14f,1.0f,13.0f,1.0f,1.0f,1.0f,5.0f,10.0f,0.0f,"gfx/284.000_Cyclopia.anm2"}
+    {284,0,0,12,0.14f,1.0f,13.0f,1.0f,1.0f,1.0f,5.0f,10.0f,0.0f,"gfx/284.000_Cyclopia.anm2"},
+    {217,0,0,12,0.12f,1.0f,9.0f,1.0f,1.0f,1.0f,6.0f,3.0f,1.0f,"gfx/216.000_Dip.anm2"},
+    {256,0,0,4,0.11f,1.0f,17.0f,1.0f,1.0f,1.0f,3.0f,5.0f,0.0f,"gfx/256.000_DartFly.anm2"},
+    {261,0,0,12,0.28f,1.0f,20.0f,1.0f,1.0f,1.0f,75.0f,300.0f,0.0f,"gfx/261.000_Dingle.anm2"},
+    {261,1,0,12,0.28f,1.0f,20.0f,1.0f,1.0f,1.0f,75.0f,375.0f,0.0f,"gfx/261.001_Dangle.anm2"}
 };
 }
 const NativeEntityBodyProperties* NativePreparedEnemyBody(int type,int variant){
     for(unsigned int i=0;i<sizeof(kEnemyBodies)/sizeof(kEnemyBodies[0]);++i)
         if(kEnemyBodies[i].type==type&&kEnemyBodies[i].variant==variant)return &kEnemyBodies[i];
     return 0;
+}
+bool NativeBossEntityType(int type,int variant){
+    //Dingle/Dangle are the first fully prepared floor boss family.
+    return type==261&&(variant==0||variant==1);
 }
 const NativeEntityBodyProperties* NativePreparedPlayerBody(int variant){
     for(unsigned int i=0;i<sizeof(kNativePlayerBodies)/sizeof(kNativePlayerBodies[0]);++i)
@@ -64,7 +72,7 @@ NativeEntityBody::NativeEntityBody():ready(false),native168(false),native169(fal
 NativeEntityBodyResult NativeEntityBody::BeginFresh(int t,int v,int sub,unsigned int seed,unsigned int frame,int stage,const NativePoint* pos,const NativePoint* vel){
     if(t<0||v<0||sub<0||!seed||stage<0)return NEB_BAD_REQUEST;
     const NativeEntityBodyProperties* p=t==1&&sub==0?NativePreparedPlayerBody(v):
-        (t==10||t==13||t==14||t==208||t==226||t==284)?NativePreparedEnemyBody(t,v):t==1000?NativePreparedEffectBody(v,sub):0;
+        (t==1000?NativePreparedEffectBody(v,sub):(sub==0?NativePreparedEnemyBody(t,v):0));
     if(!p)return NEB_UNSUPPORTED_PROPERTIES;
     NativeEntityBody next;next.type=t;next.variant=v;next.subtype=sub;next.initialSeed=seed;next.random.Set(seed,30);
     next.frameCount=0; //66f544: native+24 reset.

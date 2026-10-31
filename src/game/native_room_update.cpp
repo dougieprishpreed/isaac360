@@ -169,18 +169,18 @@ bool NativeRoomUpdate::TickSimulationTail(PortNormalRuntime& runtime,NativeActio
     }
     //Native door interaction rules reached by the ordinary runtime:
     //target1 opens on clear, target10 consumes one key on contact, target5
-    //opens only after the floor boss is defeated. Other locked/secret targets
-    //remain closed for their later services.
+    //is the boss-room entry and opens on clear like an ordinary door. Other
+    //locked/secret targets remain closed for their later services.
     if(room->clear&&live.doors)for(int slot=0;slot<8;++slot)if(live.doors->attached&(1U<<slot)){
         NativeDoorActor& door=live.doors->actors[slot];
         if(door.state!=1)continue;
-        if(door.targetType==1){door.previousState=door.state;door.state=2;++runtime.doorsOpened;openedThisTick[slot]=true;continue;}
+        if(door.targetType==1||door.targetType==5){door.previousState=door.state;door.state=2;++runtime.doorsOpened;openedThisTick[slot]=true;continue;}
         float px,py;if(!room->geometry.Position(door.grid,&px,&py))continue;px+=20.0f;py+=20.0f;
         float dx=runtime.playerBody.position.x-px,dy=runtime.playerBody.position.y-py;
         bool near=dx*dx+dy*dy<=60.0f*60.0f;
         if(door.targetType==10&&near&&runtime.playerState.keys>0){
             --runtime.playerState.keys;door.previousState=door.state;door.state=2;++runtime.doorsUnlocked;openedThisTick[slot]=true;
-        }else if(door.targetType==5&&runtime.bossDefeated){door.previousState=door.state;door.state=2;++runtime.doorsUnlocked;openedThisTick[slot]=true;}
+        }
     }
     //Interactive passage on a cleared normal door. The target resident is
     //constructed from the exact linked descriptor and the player is placed at

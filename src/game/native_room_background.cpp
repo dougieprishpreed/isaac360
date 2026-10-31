@@ -24,7 +24,7 @@ void NativeRoomBackground::Quad(std::vector<NativeBackgroundQuad>& list,float sx
 }
 bool NativeRoomBackground::Prepare(const NativeRoomState& room,int backdrop,unsigned int spawn){
     nextAddress=0x8867f0;
-    if(ready||spawnSeed||!spawn||room.type!=1||room.shape!=1||room.geometry.stride!=15||room.geometry.rows!=9||backdrop<1||backdrop>2)return false;
+    if(ready||spawnSeed||!spawn||(room.type!=1&&room.type!=5)||room.shape!=1||room.geometry.stride!=15||room.geometry.rows!=9||backdrop<1||backdrop>2)return false;
     definition=kBackgroundDefs+backdrop-1;spawnSeed=spawn;
     //79f1c5: separate mutable owner at Room+69e4, seeded from descriptor+58.
     if(!random.Set(spawn,35))return false;

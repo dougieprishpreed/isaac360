@@ -105,8 +105,9 @@ static void DrawBackground(){
     NativeWorldResident& live=gRuntime->world.resident[gRuntime->world.currentList];
     if(!live.view)live.view=new NativeRoomView;
     if(live.room&&!live.view->background.ready){const NativePlacedRoom* d=gRuntime->world.CurrentDescriptor();if(d)live.view->background.Prepare(*live.room,live.backdrop,d->seeds.spawn);}
-    if(!live.view->background.ready||!live.view->background.definition)return;
-    const NativeRoomBackground& bg=live.view->background;int ox,oy;if(!BackdropAtlasRect(bg.definition->id,&ox,&oy))return;
+    if(!live.view->background.ready||!live.view->background.definition){static bool nl=false;if(!nl){nl=true;const NativePlacedRoom* d=gRuntime->world.CurrentDescriptor();
+        Log("WIN bg not ready=%d def=%d definition=%d type=%d",live.view->background.ready?1:0,live.view->background.definition?1:0,d?d->definition:-1,live.room?live.room->type:-1);}return;}
+    const NativeRoomBackground& bg=live.view->background;int ox,oy;if(!BackdropAtlasRect(bg.definition->id,&ox,&oy)){static bool bl=false;if(!bl){bl=true;Log("WIN bg unsupported id=%d",bg.definition->id);}return;}
     for(unsigned int pass=0;pass<2;++pass){const std::vector<NativeBackgroundQuad>& list=pass?bg.wall:bg.floor;
         for(unsigned int i=0;i<list.size();++i){const NativeBackgroundQuad& q=list[i];float xy[8],uv[8];
             for(int k=0;k<4;++k){xy[k*2]=q.destination[k].x;xy[k*2+1]=q.destination[k].y;uv[k*2]=q.source[k].x+ox;uv[k*2+1]=q.source[k].y+oy;}
@@ -167,6 +168,10 @@ static bool EnemyWalkRect(int type,int variant,int* sx,int* sy,int* frames){
     if(type==226&&variant==0){*sx=kGameplaySkinnywalkX;*sy=kGameplaySkinnywalkY;*frames=kGameplaySkinnywalkFrames;return true;}
     if(type==226&&variant==1){*sx=kGameplayRottywalkX;*sy=kGameplayRottywalkY;*frames=kGameplayRottywalkFrames;return true;}
     if(type==284){*sx=kGameplayCyclopiawalkX;*sy=kGameplayCyclopiawalkY;*frames=kGameplayCyclopiawalkFrames;return true;}
+    if(type==217){*sx=kGameplayDipwalkX;*sy=kGameplayDipwalkY;*frames=kGameplayDipwalkFrames;return true;}
+    if(type==256){*sx=kGameplayDartflywalkX;*sy=kGameplayDartflywalkY;*frames=kGameplayDartflywalkFrames;return true;}
+    if(type==261&&variant==1){*sx=kGameplayDanglewalkX;*sy=kGameplayDanglewalkY;*frames=kGameplayDanglewalkFrames;return true;}
+    if(type==261){*sx=kGameplayDinglewalkX;*sy=kGameplayDinglewalkY;*frames=kGameplayDinglewalkFrames;return true;}
     return false;
 }
 static void DrawEnemies(){
@@ -279,13 +284,14 @@ static void BuildActions(const bool* held,unsigned int frame,NativeActionFrame* 
     for(int i=0;i<12;++i)gPrev[i]=held[i];
 }
 int main(int argc,char** argv){
-    unsigned int seed=1;int frames=0,shotFrame=-1;bool hidden=false,fast=false,interactive=true,teleport=false,rewardTest=false,windowShot=false;const char* scriptText=0;const char* shotFile="build/windows/frame.bmp";
+    unsigned int seed=1;int frames=0,shotFrame=-1;bool hidden=false,fast=false,interactive=true,teleport=false,rewardTest=false,windowShot=false,layoutDump=false,bossEnter=false,invulnerable=false;const char* scriptText=0;const char* shotFile="build/windows/frame.bmp";
     for(int i=1;i<argc;++i){if(!strcmp(argv[i],"--seed")&&i+1<argc)seed=(unsigned int)strtoul(argv[++i],0,10);
         else if(!strcmp(argv[i],"--frames")&&i+1<argc)frames=atoi(argv[++i]);else if(!strcmp(argv[i],"--hidden"))hidden=true;
         else if(!strcmp(argv[i],"--fast"))fast=true;else if(!strcmp(argv[i],"--script")&&i+1<argc){scriptText=argv[++i];interactive=false;}
         else if(!strcmp(argv[i],"--shot-frame")&&i+1<argc)shotFrame=atoi(argv[++i]);else if(!strcmp(argv[i],"--shot-file")&&i+1<argc)shotFile=argv[++i];
         else if(!strcmp(argv[i],"--teleport-pickups"))teleport=true;else if(!strcmp(argv[i],"--reward-test"))rewardTest=true;
-        else if(!strcmp(argv[i],"--window-shot"))windowShot=true;}
+        else if(!strcmp(argv[i],"--window-shot"))windowShot=true;else if(!strcmp(argv[i],"--layout"))layoutDump=true;else if(!strcmp(argv[i],"--boss"))bossEnter=true;
+        else if(!strcmp(argv[i],"--invulnerable"))invulnerable=true;}
     CreateDirectoryA("build\\windows",0);CreateDirectoryA("build\\windows\\profile",0);gLog=fopen("build/windows/port.log","wt");
     std::vector<Segment> script;if(scriptText)ParseScript(scriptText,script);
     if(!CreateHiddenWindow(hidden)||!InitD3D())return 2;
@@ -305,6 +311,18 @@ int main(int argc,char** argv){
         if(r==NFR_BAD_REQUEST){Log("WIN setup rejected prerequisite=%08x",runtime.missingNativePrerequisite);break;}}
     Log("WIN setup phase=%d steps=%d resident=%d prerequisite=%08x",runtime.phase,setup,runtime.world.residentCount,runtime.missingNativePrerequisite);
     if(runtime.phase!=PNR_READY)return 4;
+    if(bossEnter){int grid=-1,dimension=0;const NativePlacedRoom* target=0;
+        for(int i=0;i<runtime.world.layout.count;++i){const NativePlacedRoom& p=runtime.world.layout.rooms[i];const NativeRoomDef* d=NativeRoom(p.definition);
+            if(d&&d->type==5){grid=p.gridIndex;dimension=p.dimension;target=&p;break;}}
+        if(grid>=0){NativeWorldIssue issue;NativeWorldResult result=runtime.world.Enter(grid,dimension,files,&issue,0);
+            NativeRoomState* entered=runtime.world.Current();
+            if(entered){runtime.playerBody.position.x=(entered->space.left+entered->space.right)*0.5f;
+                runtime.playerBody.position.y=(entered->space.top+entered->space.bottom)*0.5f;
+                runtime.playerBody.previousPosition=runtime.playerBody.position;runtime.playerBody.velocity.x=runtime.playerBody.velocity.y=0;}
+            NativeWorldResident& live=runtime.world.resident[runtime.world.currentList];
+            Log("WIN boss enter result=%d grid=%d dim=%d mode=%d def=%d enemies=%d src=%d stage=%d type=%u",result,grid,dimension,files.nativeMode,target?target->definition:-1,live.enemies.count,issue.source,issue.construction.stage,issue.construction.type);}}
+    if(layoutDump){const NativeLevelLayout& L=runtime.world.layout;for(int i=0;i<L.count;++i){const NativePlacedRoom& p=L.rooms[i];const NativeRoomDef* d=NativeRoom(p.definition);
+        Log("WIN layout list=%d grid=%d def=%d source=%d ordinal=%d type=%d variant=%u path=%s",p.listIndex,p.gridIndex,p.definition,d?d->source:-1,d?d->ordinal:-1,d?d->type:-1,d?d->variant:0,d&&NativeRoomSource(d->source)?NativeRoomSource(d->source):"?");}return 0;}
     LARGE_INTEGER freq,last;QueryPerformanceFrequency(&freq);QueryPerformanceCounter(&last);
     int frame=0;for(;;){if(frames>0&&frame>=frames)break;
         MSG msg;while(PeekMessage(&msg,0,0,0,PM_REMOVE)){TranslateMessage(&msg);DispatchMessage(&msg);}
@@ -321,10 +339,11 @@ int main(int argc,char** argv){
                 runtime.playerBody.velocity.x=runtime.playerBody.velocity.y=0;
                 Log("WIN teleport frame=%d pickup=%d variant=%d",frame,index,tr.pickups.entries[index]->variant);}}
         if(runtime.phase==PNR_READY||runtime.phase==PNR_DYING||runtime.phase==PNR_GAME_OVER)session.TickNormal(runtime,files,&fa);
+        if(invulnerable&&runtime.phase==PNR_READY)runtime.playerInvulnerable=30;
         if(frame%30==0){NativeWorldResident& live=runtime.world.resident[runtime.world.currentList];const NativePlacedRoom* d=runtime.world.CurrentDescriptor();
-            Log("WIN tick=%d phase=%d room=%d list=%d act=%u pos=(%.2f,%.2f) hp=%d/%d soul=%d enemies=%d shots=%u fired=%u wall=%u hits=%u pickups=%d collected=%u coins=%d keys=%d bombs=%d transitions=%u",
+            Log("WIN tick=%d phase=%d room=%d list=%d act=%u pos=(%.2f,%.2f) hp=%d/%d soul=%d enemies=%d shots=%u fired=%u wall=%u hits=%u pickups=%d collected=%u coins=%d keys=%d bombs=%d transitions=%u boss=%d",
                 frame,runtime.phase,d?d->definition:-1,runtime.world.currentList,live.activations,runtime.playerBody.position.x,runtime.playerBody.position.y,runtime.playerState.redHearts,runtime.playerState.maxRedHearts,runtime.playerState.soulHearts,
-                live.enemies.count,(unsigned int)runtime.enemyShots.active.size(),(unsigned int)runtime.enemyShots.spawned,(unsigned int)runtime.enemyShots.wallHits,runtime.playerHits,live.pickups.count,runtime.pickupsCollected,runtime.playerState.coins,runtime.playerState.keys,runtime.playerState.bombs,runtime.roomTransitions);}
+                live.enemies.count,(unsigned int)runtime.enemyShots.active.size(),(unsigned int)runtime.enemyShots.spawned,(unsigned int)runtime.enemyShots.wallHits,runtime.playerHits,live.pickups.count,runtime.pickupsCollected,runtime.playerState.coins,runtime.playerState.keys,runtime.playerState.bombs,runtime.roomTransitions,runtime.bossDefeated?1:0);}
         Render();
         if(frame==shotFrame){bool ok=windowShot?SaveWindowBMP(shotFile):SaveBMP(shotFile);Log("WIN screenshot frame=%d file=%s ok=%d",frame,shotFile,ok?1:0);}
         gDevice->Present(0,0,0,0);

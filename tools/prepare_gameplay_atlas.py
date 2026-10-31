@@ -55,6 +55,10 @@ ANIMATED=[
     ('skinnywalk','gfx/226.000_Skinny.anm2','WalkHori','Head',(0,1824)),
     ('rottywalk','gfx/226.001_Rotty.anm2','WalkHori','Head',(512,1824)),
     ('cyclopiawalk','gfx/284.000_Cyclopia.anm2','WalkHori','Head',(1024,1824)),
+    ('dinglewalk','gfx/261.000_Dingle.anm2','Slide',None,(1536,1824)),
+    ('dartflywalk','gfx/256.000_DartFly.anm2','Fly',None,(0,1888)),
+    ('dipwalk','gfx/216.000_Dip.anm2','Move',None,(512,1888)),
+    ('danglewalk','gfx/261.001_Dangle.anm2','Slide',None,(1024,1888)),
 ]
 ANIMATION_FRAME_LIMIT=8
 _sheet_cache={}

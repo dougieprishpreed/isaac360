@@ -4,17 +4,17 @@
 #include <stdio.h>
 #include <string.h>
 namespace {
-enum Factory { FACTORY_MISSING,FACTORY_MARKER,FACTORY_DECORATION,FACTORY_WALL,FACTORY_ENEMY,FACTORY_ROCK,FACTORY_PICKUP };
+enum Factory { FACTORY_MISSING,FACTORY_MARKER,FACTORY_DECORATION,FACTORY_WALL,FACTORY_ENEMY,FACTORY_ROCK,FACTORY_PIT,FACTORY_PICKUP };
 Factory SelectedFactory(const RoomRecord& record,const NativeSpawnChoice& choice,int backdrop,int mode) {
     const RoomRecordOption& e=choice.entry;
     if(e.type==970)return FACTORY_MARKER;
     //Inherited ordinary actor records with maintained physical factories.
-    if(e.subtype==0&&((e.type==10&&(e.variant==0||e.variant==1))||(e.type==13&&e.variant==0)||
-        (e.type==14&&e.variant==0)||(e.type==208&&e.variant==0)||
-        (e.type==226&&(e.variant==0||e.variant==1))||
-        (e.type==284&&e.variant==0)))return FACTORY_ENEMY;
+    if(e.subtype==0&&NativePreparedEnemyBody(e.type,e.variant))return FACTORY_ENEMY;
     //Ordinary rock/block grids: solid static obstacles without destruction yet.
     if((e.type==1000||e.type==1002)&&e.variant==0&&e.subtype==0)return FACTORY_ROCK;
+    //1490/1495 are the room pit grids. Construction is accepted; pit art and
+    //fall collision remain separate services.
+    if((e.type==1490||e.type==1495)&&e.subtype==0)return FACTORY_PIT;
     //1500 poop and1400 fireplace are static grids, not entity actors.
     if(e.type==1500||e.type==1400)return FACTORY_ROCK;
     //0079c1b3 maps1999 to grid15. Ordinary wall Init has no asset/MT calls;
@@ -127,6 +127,11 @@ NativeSceneResult NativeSceneBuildRoom(const RoomRecord& record,const NativeRoom
             NativeStaticGrid& wall=room.staticGrids[room.staticGridCount];
             if(!NativeSelectedWall(record.type,choice.grid,entry.variant,entry.subtype,choice.seed,frame,&wall)){delete plan;return NSC_BAD_REQUEST;}
             ++room.staticGridCount;room.collision.Set(choice.grid,true,wall.collisionClass,1000,15);continue;
+        }
+        if(factory==FACTORY_PIT){
+            //Pit grids are accepted without a drawn/colliding static object
+            //until their original pit graphics and fall rule are implemented.
+            continue;
         }
         if(factory==FACTORY_DECORATION){
             if(room.collision.occupied[choice.grid])continue;

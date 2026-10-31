@@ -45,7 +45,8 @@ bool NativeProjectileSystem::Step(PortNormalRuntime& runtime,NativeActionSource*
             float radius=enemy->body.collision.radius+4.0f;
             if(dx*dx+dy*dy<=radius*radius){
                 enemy->Damage(p.damage);hitEnemy=true;
-                if(enemy->dead){++enemyKills;++runtime.enemyKills;}
+                if(enemy->dead){++enemyKills;++runtime.enemyKills;
+                    if(NativeBossEntityType(enemy->type,enemy->body.variant))runtime.bossDefeated=true;}
                 break;
             }
         }
