@@ -63,6 +63,9 @@ struct PortNormalRuntime {
     bool playerDead,bossDefeated,descendRequested,startingItemsGranted;
     bool greedMode,greedComplete;
     int greedWave,greedWaveCount,greedBossWave,greedConfigStage;
+    //Boss-defeat progression result for the current run, including the
+    //persistent profile award id (0 means no award for this boss family).
+    int bossAwardIdentity,bossAwardAchievement;
     int doorTransitionGrace;
     unsigned int tickFrame,nativeSaveCaptureAddress;
     //736d70's reached post-755870 presentation/effect state. The trail count
@@ -108,6 +111,9 @@ struct PortGameSession {
     bool SaveNativeContinue(const char* path,PortNormalRuntime&);
     NormalRunResult AdvanceNormalSetup(PortNormalRuntime&,const NativeSceneFiles&,NativeActionSource* actions=0);
     NormalRunResult TickNormal(PortNormalRuntime&,const NativeSceneFiles&,NativeActionSource* actions);
+    //Boss-defeat progression: resolve the selected boss identity from the
+    //current boss room, grant its profile award and persist the profile.
+    void AwardBossProgress(PortNormalRuntime&);
     NativeWorldResult PrepareNormalWorld(const NormalRunFlow&,NativeWorld&,const NativeSceneFiles&,NativeWorldIssue* issue=0);
     //Component boundary only: real evaluated entity/action inputs are required.
     //Does not initialize a player, advance simulation or enable normal Play.

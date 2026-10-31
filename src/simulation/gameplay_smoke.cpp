@@ -358,7 +358,61 @@ int RunBombProbe(NativeMt& random,PortFrontend& ui){
     state.activeItems[0]=37;
     if(!RunActionPress(session,*runtime,9,1)){delete runtime;return 173;}
     if(state.bombs!=bombs0||runtime->bombs.placed!=placed0+1){delete runtime;return 174;} //Mr. Boom is free
-    printf("ACTIVE_BATCH belial=%d tammy=10 shadows=%d mrboom=1\n",(int)(state.roomDamageBonus),shadowsOk?1:0);
+    if(!RunProjectileTicks(session,*runtime,-1,-1,121)){delete runtime;return 175;}
+    if(!state.GrantCollectible(406)){delete runtime;return 176;}
+    state.activeItems[0]=406;
+    if(!RunActionPress(session,*runtime,9,1)){delete runtime;return 177;}
+    if(!(state.permDamageBonus||state.permFireRateBonus||state.permRangeBonus||state.permShotSpeedBonus||state.permSpeedBonus||state.permLuckBonus)){delete runtime;return 178;}
+    printf("ACTIVE_BATCH belial=%d tammy=10 shadows=%d mrboom=1 d8=1\n",(int)(state.roomDamageBonus),shadowsOk?1:0);
+    delete runtime;return 0;
+}int RunBossAwardProbe(NativeMt& random,PortFrontend& ui){
+    if(!ui.BindSaveDirectory("build/gameplay/profile/"))return 175;
+    ui.characterPage=0;ui.characterChoice=1;ui.characterMode=0;
+    PortNormalRuntime* runtime=new PortNormalRuntime;PortGameSession session(random,ui);
+    PortSessionStart start=session.StartNormalCharacter(1,*runtime);
+    if(start.result!=NPS_WORLD_PENDING||!AdvanceToBoundary(session,*runtime)||runtime->phase!=PNR_READY){delete runtime;return 176;}
+    int dingleId=-1;
+    if(NativeFindRoomVariant(0,5,1097,&dingleId,NC_NORMAL)!=NR_OK){delete runtime;return 177;}
+    const NativeRoomDef* dingle=NativeRoom(dingleId);
+    if(!dingle||dingle->type!=5||dingle->subtype!=58){delete runtime;return 177;}
+    NativePlacedRoom* descriptor=const_cast<NativePlacedRoom*>(runtime->world.CurrentDescriptor());
+    if(!descriptor){delete runtime;return 178;}
+    descriptor->definition=dingleId;
+    runtime->bossDefeated=true;
+    session.AwardBossProgress(*runtime);
+    if(runtime->bossAwardIdentity!=58||runtime->bossAwardAchievement!=346||!ui.profile.awards[346]){delete runtime;return 179;}
+    if(!ui.profileStorage.primaryWritten){delete runtime;return 180;}
+    printf("BOSS_AWARD identity=%d achievement=%d persisted=%d\n",runtime->bossAwardIdentity,
+        runtime->bossAwardAchievement,ui.profileStorage.primaryWritten?1:0);
+    delete runtime;return 0;
+}int RunRerollCacheProbe(NativeMt& random,PortFrontend& ui){
+    ui.characterPage=0;ui.characterChoice=1;ui.characterMode=0;
+    PortNormalRuntime* runtime=new PortNormalRuntime;PortGameSession session(random,ui);
+    PortSessionStart start=session.StartNormalCharacter(1,*runtime);
+    if(start.result!=NPS_WORLD_PENDING||!AdvanceToBoundary(session,*runtime)||runtime->phase!=PNR_READY||!runtime->playerState.stats.ready){delete runtime;return 181;}
+    NativePlayerState& state=runtime->playerState;
+    const float baseDamage=state.stats.damage,baseDelay=state.stats.fireDelay,baseSpeed=state.stats.moveSpeed,baseRange=state.stats.range;
+    if(!state.GrantCollectible(407)){delete runtime;return 182;} //Purity
+    state.ResetRoomConditionalCache(0); //Red: +4 damage
+    if(state.purityAura!=1||fabs(state.stats.damage-(baseDamage+4.0f))>0.001f){delete runtime;return 183;}
+    state.ResetRoomConditionalCache(1); //Blue: +2 fire rate
+    if(state.purityAura!=2||fabs(state.stats.damage-baseDamage)>0.001f||!(state.stats.fireDelay<baseDelay)){delete runtime;return 184;}
+    state.ResetRoomConditionalCache(2); //Yellow: +0.5 speed
+    if(state.purityAura!=3||fabs(state.stats.moveSpeed-(baseSpeed+0.5f))>0.001f){delete runtime;return 185;}
+    state.ResetRoomConditionalCache(3); //Orange: +3 range
+    if(state.purityAura!=4||fabs(state.stats.range-(baseRange+3.0f))>0.001f){delete runtime;return 186;}
+    state.Damage(1);
+    if(state.purityActive||fabs(state.stats.damage-baseDamage)>0.001f){delete runtime;return 187;} //aura removed on damage
+    if(!state.GrantCollectible(240)){delete runtime;return 188;} //Experimental Treatment
+    if(!(state.permDamageBonus||state.permFireRateBonus||state.permRangeBonus||state.permShotSpeedBonus||state.permSpeedBonus||state.permLuckBonus)){delete runtime;return 189;}
+    const float d8Damage=state.permDamageBonus,d8Range=state.permRangeBonus;
+    state.RerollStats(5678);
+    if(state.permDamageBonus==d8Damage&&state.permRangeBonus==d8Range){delete runtime;return 190;}
+    if(!state.GrantCollectible(1)||!state.GrantCollectible(4)||!state.GrantCollectible(27)||!state.GrantCollectible(258)){delete runtime;return 191;}
+    if(!state.ApplyMissingNo(runtime->itemPools,999)){delete runtime;return 192;}
+    if(!(state.permDamageBonus||state.permFireRateBonus||state.permRangeBonus||state.permShotSpeedBonus||state.permSpeedBonus||state.permLuckBonus)){delete runtime;return 193;}
+    printf("REROLL purity=%d treatment=%d d8=1 missing=1 damage=%.3f range=%.3f\n",
+        state.purityAura?1:0,1,state.stats.damage,state.stats.range);
     delete runtime;return 0;
 }int RunFamiliarProbe(NativeMt& random,PortFrontend& ui){
     PortNormalRuntime* runtime=new PortNormalRuntime;PortGameSession session(random,ui);
@@ -432,6 +486,9 @@ int RunBombProbe(NativeMt& random,PortFrontend& ui){
     first->playerBody.previousPosition=first->playerBody.position;
     first->playerState.stats.fireDelay=8.5f;first->playerState.stats.damage=7.25f;
     first->playerState.stats.baseDamage=7.25f;first->playerState.stats.moveSpeed=1.4f;first->playerState.stats.luck=3.0f;
+    first->playerState.permDamageBonus=0.75f;first->playerState.permRangeBonus=-2.0f;
+    first->playerState.purityAura=2;first->playerState.purityActive=true;
+    first->playerState.damageTakenThisFloor=3;first->playerState.crownOfLightDisabled=true;
     const NativeEffectDef* probeEffect=NativePreparedEffect(0,60);
     if(!probeEffect||first->playerState.effects.Add(probeEffect,2,false,0)!=NEF_OK||!first->playerState.effects.SetTimer(0,60,1234)){delete first;return 160;}
     const int poolItem=first->itemPools.SelectCollectible(0);
@@ -448,6 +505,9 @@ int RunBombProbe(NativeMt& random,PortFrontend& ui){
        second->playerState.redHearts!=5||second->playerState.soulHearts!=2||second->playerState.keys!=42||
        second->playerState.bombs!=3||second->playerState.coins!=17||second->playerState.activeItems[0]!=45||
        second->playerState.heldCard!=9||second->playerState.heldPill!=7){delete second;return 155;}
+    if(fabs(second->playerState.permDamageBonus-0.75f)>0.0001f||fabs(second->playerState.permRangeBonus+2.0f)>0.0001f||
+       second->playerState.purityAura!=2||!second->playerState.purityActive||second->playerState.damageTakenThisFloor!=3||
+       !second->playerState.crownOfLightDisabled){delete second;return 159;}
     bool owned=false;
     if(!second->playerState.HasCollectible(1,&owned)||!owned||!second->playerState.HasCollectible(25,&owned)||!owned){delete second;return 156;}
     if(second->itemPools.pools[0].counter!=poolCounter){delete second;return 157;}
@@ -462,6 +522,10 @@ int RunBombProbe(NativeMt& random,PortFrontend& ui){
         second->playerBody.position.x,second->playerBody.position.y,second->playerState.stats.fireDelay,
         second->playerState.stats.damage,second->playerState.stats.moveSpeed,second->playerState.stats.luck,
         second->playerState.effects.Count(0,60));printf("NATIVE_CURRENT_EFFECT count=%d timer=%d\n",second->playerState.effects.Count(0,60),second->playerState.effects.Timer(0,60));
+    printf("NATIVE_CURRENT_TRIGGER perm_damage=%.2f perm_range=%.2f purity=%d active=%d stacks=%d crown_disabled=%d\n",
+        second->playerState.permDamageBonus,second->playerState.permRangeBonus,second->playerState.purityAura,
+        second->playerState.purityActive?1:0,second->playerState.damageTakenThisFloor,
+        second->playerState.crownOfLightDisabled?1:0);
     NativePlayerEffects clearedEffects;second->playerState.effects.Swap(clearedEffects);
     if(!RunProjectileTicks(resumed,*second,-1,-1,2)){delete second;return 158;}
     printf("NATIVE_CURRENT_TICK pos=(%.1f,%.1f) ticks=2\n",second->playerBody.position.x,second->playerBody.position.y);
@@ -809,6 +873,8 @@ int main(int argc,char** argv){
     if(!failed){int pocket=RunPocketProbe(random,ui);if(pocket){printf("POCKET_RESULT failed=%d\n",pocket);failed=true;}}
     if(!failed){int active=RunActiveProbe(random,ui);if(active){printf("ACTIVE_RESULT failed=%d\n",active);failed=true;}}
     if(!failed){int activeBatch=RunActiveBatchProbe(random,ui);if(activeBatch){printf("ACTIVE_BATCH_RESULT failed=%d\n",activeBatch);failed=true;}}
+    if(!failed){int bossAward=RunBossAwardProbe(random,ui);if(bossAward){printf("BOSS_AWARD_RESULT failed=%d\n",bossAward);failed=true;}}
+    if(!failed){int reroll=RunRerollCacheProbe(random,ui);if(reroll){printf("REROLL_RESULT failed=%d\n",reroll);failed=true;}}
     if(!failed){int familiar=RunFamiliarProbe(random,ui);if(familiar){printf("FAMILIAR_RESULT failed=%d\n",familiar);failed=true;}}
     if(!failed){int cont=RunContinueProbe(random,ui);if(cont){printf("CONTINUE_RESULT failed=%d\n",cont);failed=true;}}
     if(!failed){int nativeCont=RunNativeContinueProbe(random,ui);if(nativeCont){printf("NATIVE_CONTINUE_RESULT failed=%d\n",nativeCont);failed=true;}}

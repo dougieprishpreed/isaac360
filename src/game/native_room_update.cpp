@@ -177,6 +177,8 @@ bool NativeRoomUpdate::TickSimulationTail(PortNormalRuntime& runtime,NativeActio
             //branches remain separate services.
             int id=runtime.itemPools.SelectCollectible(0);
             if(id>0&&runtime.playerState.GrantCollectible(id)){
+                unsigned int sample=0;if(global)sample=global->Next();
+                if(id==258)runtime.playerState.ApplyMissingNo(runtime.itemPools,sample);
                 runtime.lastCollectible=id;++runtime.collectiblesCollected;taken=true;
             }
         }else if(p->variant==300){
@@ -263,7 +265,7 @@ bool NativeRoomUpdate::TickSimulationTail(PortNormalRuntime& runtime,NativeActio
                 }}
             }
             runtime.projectiles.Reset();runtime.enemyShots.Clear();runtime.bombs.Clear();runtime.familiars.Clear();runtime.doorTransitionGrace=30;++runtime.roomTransitions;
-            runtime.playerState.ResetRoomConditionalCache();
+            {unsigned int sample=0;if(global)sample=global->Next();runtime.playerState.ResetRoomConditionalCache(sample);}
             return true;
         }
     }

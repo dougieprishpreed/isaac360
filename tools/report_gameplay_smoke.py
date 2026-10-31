@@ -26,7 +26,10 @@ def main():
     stat=re.search(r'^STAT fd=(-?[0-9.]+) damage=(-?[0-9.]+) speed=(-?[0-9.]+) luck=(-?[0-9.]+)',log,re.M)
     statOrder=re.search(r'^STAT order=(\d+) resource_hp=(-?\d+)/(-?\d+) cache_damage=(-?[0-9.]+) cache_speed=(-?[0-9.]+)',log,re.M)
     conditional=re.search(r'^CONDITIONAL crown=(\d+) disabled=(\d+) lust=(\d+) gust=(\d+) dprince=(\d+) blood_oath=(\d+) hp=(-?\d+)/(-?\d+) oath_damage=(-?[0-9.]+) oath_speed=(-?[0-9.]+)',log,re.M)
-    activeBatch=re.search(r'^ACTIVE_BATCH belial=(\d+) tammy=(\d+) shadows=(\d+) mrboom=(\d+)',log,re.M)
+    activeBatch=re.search(r'^ACTIVE_BATCH belial=(\d+) tammy=(\d+) shadows=(\d+) mrboom=(\d+)(?: d8=(\d+))?',log,re.M)
+    reroll=re.search(r'^REROLL purity=(\d+) treatment=(\d+) d8=(\d+) missing=(\d+) damage=(-?[0-9.]+) range=(-?[0-9.]+)',log,re.M)
+    bossAward=re.search(r'^BOSS_AWARD identity=(\d+) achievement=(\d+) persisted=(\d+)',log,re.M)
+    trigger=re.search(r'^NATIVE_CURRENT_TRIGGER perm_damage=(-?[0-9.]+) perm_range=(-?[0-9.]+) purity=(\d+) active=(\d+) stacks=(\d+) crown_disabled=(\d+)',log,re.M)
     pocket=re.search(r'^POCKET hp=(-?\d+)/(-?\d+) bombs=(-?\d+) keys=(-?\d+) coins=(-?\d+)',log,re.M)
     active=re.search(r'^ACTIVE id=(\d+) hp=(-?\d+)/(-?\d+)',log,re.M)
     familiar=re.search(r'^FAMILIAR spawned=(\d+) shots=(\d+) hits=(\d+) enemies=(\d+)',log,re.M)
@@ -123,6 +126,20 @@ def main():
             'active_batch_tammy':int(activeBatch.group(2)) if activeBatch else 0,
             'active_batch_shadows':int(activeBatch.group(3)) if activeBatch else 0,
             'active_batch_mrboom':int(activeBatch.group(4)) if activeBatch else 0,
+            'active_batch_d8':int(activeBatch.group(5)) if activeBatch and activeBatch.group(5) else 0,
+            'reroll_purity':int(reroll.group(1)) if reroll else 0,
+            'reroll_treatment':int(reroll.group(2)) if reroll else 0,
+            'reroll_d8':int(reroll.group(3)) if reroll else 0,
+            'reroll_missing_no':int(reroll.group(4)) if reroll else 0,
+            'boss_award_identity':int(bossAward.group(1)) if bossAward else 0,
+            'boss_award_achievement':int(bossAward.group(2)) if bossAward else 0,
+            'boss_award_persisted':int(bossAward.group(3)) if bossAward else 0,
+            'native_trigger_perm_damage':float(trigger.group(1)) if trigger else 0.0,
+            'native_trigger_perm_range':float(trigger.group(2)) if trigger else 0.0,
+            'native_trigger_purity':int(trigger.group(3)) if trigger else 0,
+            'native_trigger_active':int(trigger.group(4)) if trigger else 0,
+            'native_trigger_stacks':int(trigger.group(5)) if trigger else 0,
+            'native_trigger_crown_disabled':int(trigger.group(6)) if trigger else 0,
             'pocket_hp':int(pocket.group(1)) if pocket else -1,
             'pocket_max_hp':int(pocket.group(2)) if pocket else -1,
             'pocket_bombs':int(pocket.group(3)) if pocket else -1,

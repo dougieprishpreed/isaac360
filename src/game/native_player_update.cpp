@@ -639,6 +639,8 @@ bool NativePlayerUpdate::Resume(PortNormalRuntime& runtime,NativeActionSource* a
                         state.roomDamageBonus+=2.0f;state.roomSpeedBonus-=0.18f;state.stats.RecomputeCache(state);break;
                     case 126: //Razor Blade: self-damage then room damage
                         state.Damage(1);state.roomDamageBonus+=1.2f;state.stats.RecomputeCache(state);break;
+                    case 406:{ //D8: reroll permanent stats
+                        unsigned int sample=0;if(runtime.gameRandom.Next(&sample))state.RerollStats(sample);break;}
                     case 35: //Necronomicon
                         DamageAllEnemies(runtime,40.0f);break;
                     case 40: //Kamikaze

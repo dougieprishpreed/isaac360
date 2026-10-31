@@ -4,7 +4,7 @@
 namespace {
 void Fold(unsigned int& h,unsigned int n){for(int i=0;i<4;++i)h=(h^((n>>(i*8))&255))*16777619U;}
 }
-NativePlayerState::NativePlayerState():ready(false),playerType(-1),canShoot(false),maxRedHearts(0),redHearts(0),soulHearts(0),blackHeartMask(0),keys(0),bombs(0),coins(0),resourcesReady(false),runInitializing(false),native1734(false),playerTearsEnabled(false),damageTakenThisFloor(0),crownOfLightDisabled(false),bloodOathDamage(0),bloodOathSpeed(0),roomDamageBonus(0),roomSpeedBonus(0),boneHearts(0),boneMask(0),brokenHearts(0),rottenHearts(0),storedHearts(0),bombReserve(0),healthItemSlots(0),healthItemRemainder(0),changingHealthItems(false),temporaryCollectible(0),transformationFlags(0),native12c8(0),native12ca(0){for(int i=0;i<4;++i)activeItems[i]=0;for(int i=0;i<15;++i)formCounts[i]=0;heldTrinkets[0]=heldTrinkets[1]=temporaryTrinket=native17ec=native17f0=0;heldCard=0;heldPill=-1;trinketsDisabled=ghost=temporaryTrinketGolden=false;}
+NativePlayerState::NativePlayerState():ready(false),playerType(-1),canShoot(false),maxRedHearts(0),redHearts(0),soulHearts(0),blackHeartMask(0),keys(0),bombs(0),coins(0),resourcesReady(false),runInitializing(false),native1734(false),playerTearsEnabled(false),damageTakenThisFloor(0),crownOfLightDisabled(false),bloodOathDamage(0),bloodOathSpeed(0),roomDamageBonus(0),roomSpeedBonus(0),permDamageBonus(0),permFireRateBonus(0),permRangeBonus(0),permShotSpeedBonus(0),permSpeedBonus(0),permLuckBonus(0),purityAura(0),purityActive(false),boneHearts(0),boneMask(0),brokenHearts(0),rottenHearts(0),storedHearts(0),bombReserve(0),healthItemSlots(0),healthItemRemainder(0),changingHealthItems(false),temporaryCollectible(0),transformationFlags(0),native12c8(0),native12ca(0){for(int i=0;i<4;++i)activeItems[i]=0;for(int i=0;i<15;++i)formCounts[i]=0;heldTrinkets[0]=heldTrinkets[1]=temporaryTrinket=native17ec=native17f0=0;heldCard=0;heldPill=-1;trinketsDisabled=ghost=temporaryTrinketGolden=false;}
 bool NativePlayerState::ResetFreshNumbers(const NativeRunStart& start,const NativePlayerStartup& startup,NativeEntityBody& body){
     const NativePlayerDef* d=NativePlayer(start.player);
     if(ready||playerType!=-1||!NativeRunStartValid(start)||!d||!startup.ready||!body.ready||body.type!=1||body.variant!=0||body.subtype!=start.player||
@@ -59,7 +59,7 @@ bool NativePlayerState::BeginFresh(const NativeRunStart& start,NativePlayerStart
 bool NativePlayerState::Damage(int amount){
     if(amount<=0)return redHearts<=0&&soulHearts<=0;
     if(damageTakenThisFloor<1000000)++damageTakenThisFloor;
-    crownOfLightDisabled=true;
+    crownOfLightDisabled=true;purityActive=false;
     if(soulHearts>0){int take=std::min(soulHearts,amount);soulHearts-=take;amount-=take;}
     if(amount>0){redHearts-=amount;if(redHearts<0)redHearts=0;}
     if(stats.ready)stats.RecomputeCache(*this);
@@ -69,13 +69,16 @@ bool NativePlayerState::FullHealth() const {
     unsigned int sum=(unsigned int)redHearts+(unsigned int)soulHearts;int total;memcpy(&total,&sum,4);
     return total>=maxRedHearts||effects.Has(0,112)||playerType==39;
 }
-void NativePlayerState::ResetRoomConditionalCache(){
+void NativePlayerState::ResetRoomConditionalCache(unsigned int sample){
     crownOfLightDisabled=false;roomDamageBonus=roomSpeedBonus=0.0f;
+    if(407<collectibleCounts.size()&&collectibleCounts[407]>0){
+        purityAura=1+(int)(sample%4U);purityActive=true;
+    }else{purityAura=0;purityActive=false;}
     if(stats.ready)stats.RecomputeCache(*this);
 }
-void NativePlayerState::ResetFloorConditionalCache(){
+void NativePlayerState::ResetFloorConditionalCache(unsigned int sample){
     damageTakenThisFloor=0;bloodOathDamage=bloodOathSpeed=0;
-    crownOfLightDisabled=false;roomDamageBonus=roomSpeedBonus=0.0f;
+    ResetRoomConditionalCache(sample);
     //Blood Oath: drain red health at floor start, leaving half a red heart
     //only when red health is the sole health pool. Each half heart counts as
     //one damage event for Bloody Lust/Bloody Gust.
@@ -87,7 +90,7 @@ void NativePlayerState::ResetFloorConditionalCache(){
             damageTakenThisFloor=std::min(6,damageTakenThisFloor+drain);
             const float lost=(float)drain*0.5f;
             bloodOathDamage=0.15f*lost*lost;bloodOathSpeed=0.1f*lost;
-            crownOfLightDisabled=true;
+            crownOfLightDisabled=true;purityActive=false;
         }
     }
     if(stats.ready)stats.RecomputeCache(*this);
@@ -104,6 +107,9 @@ void NativePlayerState::Swap(NativePlayerState& b){
     std::swap(damageTakenThisFloor,b.damageTakenThisFloor);std::swap(crownOfLightDisabled,b.crownOfLightDisabled);
     std::swap(bloodOathDamage,b.bloodOathDamage);std::swap(bloodOathSpeed,b.bloodOathSpeed);
     std::swap(roomDamageBonus,b.roomDamageBonus);std::swap(roomSpeedBonus,b.roomSpeedBonus);
+    std::swap(permDamageBonus,b.permDamageBonus);std::swap(permFireRateBonus,b.permFireRateBonus);std::swap(permRangeBonus,b.permRangeBonus);
+    std::swap(permShotSpeedBonus,b.permShotSpeedBonus);std::swap(permSpeedBonus,b.permSpeedBonus);std::swap(permLuckBonus,b.permLuckBonus);
+    std::swap(purityAura,b.purityAura);std::swap(purityActive,b.purityActive);
     std::swap(rottenHearts,b.rottenHearts);std::swap(storedHearts,b.storedHearts);std::swap(bombReserve,b.bombReserve);
     std::swap(healthItemSlots,b.healthItemSlots);std::swap(healthItemRemainder,b.healthItemRemainder);std::swap(changingHealthItems,b.changingHealthItems);
     std::swap(temporaryCollectible,b.temporaryCollectible);collectibleOverrides.swap(b.collectibleOverrides);for(int i=0;i<4;++i)std::swap(activeItems[i],b.activeItems[i]);
@@ -116,6 +122,10 @@ unsigned int NativePlayerState::StateHash() const {
     Fold(h,resourcesReady);Fold(h,runInitializing);Fold(h,boneHearts);Fold(h,boneMask);Fold(h,brokenHearts);Fold(h,rottenHearts);Fold(h,storedHearts);Fold(h,bombReserve);
     Fold(h,native1734);Fold(h,playerTearsEnabled);Fold(h,damageTakenThisFloor);Fold(h,crownOfLightDisabled);
     {unsigned int bits=0;memcpy(&bits,&bloodOathDamage,4);Fold(h,bits);memcpy(&bits,&bloodOathSpeed,4);Fold(h,bits);memcpy(&bits,&roomDamageBonus,4);Fold(h,bits);memcpy(&bits,&roomSpeedBonus,4);Fold(h,bits);}
+    {unsigned int bits=0;memcpy(&bits,&permDamageBonus,4);Fold(h,bits);memcpy(&bits,&permFireRateBonus,4);Fold(h,bits);
+     memcpy(&bits,&permRangeBonus,4);Fold(h,bits);memcpy(&bits,&permShotSpeedBonus,4);Fold(h,bits);
+     memcpy(&bits,&permSpeedBonus,4);Fold(h,bits);memcpy(&bits,&permLuckBonus,4);Fold(h,bits);}
+    Fold(h,purityAura);Fold(h,purityActive);
     Fold(h,healthItemSlots);Fold(h,healthItemRemainder);Fold(h,changingHealthItems);Fold(h,temporaryCollectible);
     for(int i=0;i<4;++i)Fold(h,activeItems[i]);for(std::map<int,int>::const_iterator p=collectibleOverrides.begin();p!=collectibleOverrides.end();++p){Fold(h,p->first);Fold(h,p->second);}
     Fold(h,transformationFlags);for(int i=0;i<15;++i)Fold(h,formCounts[i]);Fold(h,(unsigned int)pillEffectCounts.size());for(unsigned int i=0;i<pillEffectCounts.size();++i)Fold(h,pillEffectCounts[i]);

@@ -2,6 +2,7 @@
 #include "native_sprite.h"
 #include "native_player_resource_data.h"
 #include "native_item_resource_data.h"
+#include "native_item_pools.h"
 #include "native_item_pool_data.h"
 #include <algorithm>
 
@@ -65,6 +66,11 @@ bool NativePlayerState::GrantCollectible(int id){
     //00716840's numeric cache operator: recompute from the character baseline
     //and the complete owned inventory instead of accumulating order-dependent
     //mutations. Conditional/triggered items stay outside the numeric table.
+    if(id==240){
+        const unsigned int sample=0x9e3779b9U*(unsigned int)id+
+            (unsigned int)collectibleCounts[id]*0x85ebca6bU+(unsigned int)playerType;
+        ApplyExperimentalTreatment(sample);
+    }
     if(stats.ready)stats.RecomputeCache(*this);
     return true;
 }
@@ -168,4 +174,62 @@ bool NativePlayerState::InitializeStartingResources(const NativeRunStart& start,
     //Starting collectibles/cards/pills/pocket items require their native grant
     //and stat-effect branches; numeric character resources start here.
     ui.Changed();resourcesReady=true;return true;
+}
+
+namespace {
+unsigned int Mix(unsigned int& state){state=state*1664525U+1013904223U;return state;}
+float Unit(unsigned int& state){return (float)((Mix(state)>>8)&0x00ffffffU)*(1.0f/16777216.0f);}
+}
+void NativePlayerState::ApplyExperimentalTreatment(unsigned int sample){
+    //Four random stats up and two down, using the original Repentance deltas.
+    //Health is not part of the maintained numeric cache yet; the six stat
+    //owners below are the ones this port can apply exactly.
+    static const float delta[6]={1.0f,0.5f,2.5f,0.2f,0.2f,1.0f};
+    int order[6]={0,1,2,3,4,5};unsigned int state=sample?sample:1U;
+    for(int i=5;i>0;--i){const int j=(int)(Mix(state)%(unsigned int)(i+1));const int t=order[i];order[i]=order[j];order[j]=t;}
+    for(int i=0;i<6;++i){
+        const float amount=(i<4?delta[order[i]]:-delta[order[i]]);
+        switch(order[i]){
+        case 0:permDamageBonus+=amount;break;
+        case 1:permFireRateBonus+=amount;break;
+        case 2:permRangeBonus+=amount;break;
+        case 3:permShotSpeedBonus+=amount;break;
+        case 4:permSpeedBonus+=amount;break;
+        case 5:permLuckBonus+=amount;break;
+        }
+    }
+    if(stats.ready)stats.RecomputeCache(*this);
+}
+void NativePlayerState::RerollStats(unsigned int sample){
+    //D8-style reroll of the four primary stats plus shot speed/luck. Existing
+    //permanent trigger bonuses are replaced, mirroring a stat reroll.
+    permDamageBonus=permFireRateBonus=permRangeBonus=permShotSpeedBonus=permSpeedBonus=permLuckBonus=0;
+    unsigned int state=sample?sample:1U;
+    permDamageBonus=-1.0f+2.0f*Unit(state);
+    permFireRateBonus=-1.5f+3.0f*Unit(state);
+    permRangeBonus=-5.0f+10.0f*Unit(state);
+    permShotSpeedBonus=-0.2f+0.4f*Unit(state);
+    permSpeedBonus=-0.2f+0.4f*Unit(state);
+    permLuckBonus=-1.0f+2.0f*Unit(state);
+    if(stats.ready)stats.RecomputeCache(*this);
+}
+bool NativePlayerState::ApplyMissingNo(NativeItemPools& pools,unsigned int sample){
+    if(!ready)return false;
+    //Missing No keeps active items and itself; rerolls the remaining passive
+    //inventory through the prepared pools, then rerolls permanent stats.
+    std::vector<int> removed;
+    for(unsigned int id=1;id<collectibleCounts.size();++id)
+        if(collectibleCounts[id]>0&&(int)id!=258&&!NativePoolIsActive((int)id))removed.push_back((int)id);
+    for(unsigned int i=0;i<removed.size();++i)collectibleCounts[removed[i]]=0;
+    unsigned int state=sample?sample:1U;
+    for(unsigned int i=0;i<removed.size();++i){
+        int replacement=0;
+        for(int attempt=0;attempt<31&&replacement<=0;++attempt){
+            const int id=pools.SelectCollectible((int)(Mix(state)%31U));
+            if(id>0&&!NativePoolIsActive(id))replacement=id;
+        }
+        if(replacement>0)GrantCollectible(replacement);
+    }
+    RerollStats(sample);
+    return true;
 }

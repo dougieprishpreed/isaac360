@@ -6,6 +6,7 @@
 #include "native_player_effects.h"
 #include "native_player_stats.h"
 #include <map>
+class NativeItemPools;
 struct NativePlayerResourceUi {
     unsigned int dirty,state;
     NativePlayerResourceUi():dirty(0),state(0){}
@@ -29,6 +30,10 @@ public:
     float bloodOathDamage,bloodOathSpeed;
     //Current-room active-item buffs (Book of Belial, The Nail, Razor Blade).
     float roomDamageBonus,roomSpeedBonus;
+    //Permanent stat changes from Experimental Treatment/D8/Missing No, plus
+    //Purity's per-room aura (1 damage,2 fire rate,3 speed,4 range).
+    float permDamageBonus,permFireRateBonus,permRangeBonus,permShotSpeedBonus,permSpeedBonus,permLuckBonus;
+    int purityAura;bool purityActive;
     int boneHearts,boneMask,brokenHearts,rottenHearts,storedHearts,bombReserve;
     short healthItemSlots,healthItemRemainder;bool changingHealthItems;
     int activeItems[4],temporaryCollectible;
@@ -67,10 +72,14 @@ public:
     bool HeartLimit(bool ignoreBroken,int* result) const;
     bool BeginFresh(const NativeRunStart&,NativePlayerStartup&,NativeEntityBody&);
     bool FullHealth() const; //Per ordinary player in00908b40 /0078bb50.
+    //Trigger/reroll cache owners.
+    void ApplyExperimentalTreatment(unsigned int sample);
+    void RerollStats(unsigned int sample); //D8-style permanent stat reroll.
+    bool ApplyMissingNo(NativeItemPools&,unsigned int sample); //Passive reroll + stats.
     //Conditional cache room/floor boundaries. The rage counter is per floor;
-    //Crown of Light's deactivation is per room.
-    void ResetRoomConditionalCache();
-    void ResetFloorConditionalCache();
+    //Crown of Light's deactivation and Purity's aura are per room.
+    void ResetRoomConditionalCache(unsigned int sample=0);
+    void ResetFloorConditionalCache(unsigned int sample=0);
     bool AddHeartContainers(int halfHearts){if(!AddMaxHearts(halfHearts))return false;redHearts+=halfHearts;if(redHearts>maxRedHearts)redHearts=maxRedHearts;return true;}
     bool LowHealth() const;
     void Swap(NativePlayerState&);

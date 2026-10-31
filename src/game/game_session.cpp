@@ -4,7 +4,7 @@
 #include "native_save_reader.h"
 #include <string.h>
 #include <stdio.h>
-PortNormalRuntime::PortNormalRuntime():initialSaveFileWritten(false),phase(PNR_IDLE),missingNativePrerequisite(0),completePlayerInitializations(0),completePlayerTicks(0),completeWholeGameplayTicks(0),enemyKills(0),doorsOpened(0),roomTransitions(0),playerHits(0),playerDeathTicks(0),doorsUnlocked(0),gameOverCount(0),pickupsCollected(0),collectiblesCollected(0),playerInvulnerable(0),lastCollectible(0),playerDead(false),bossDefeated(false),descendRequested(false),startingItemsGranted(false),greedMode(false),greedComplete(false),greedWave(0),greedWaveCount(0),greedBossWave(0),greedConfigStage(0),doorTransitionGrace(0),tickFrame(0),nativeSaveCaptureAddress(0),playerTailTrailSegments(0),playerTailRenderCallbacks(0),playerTailTicks(0),roomEntryPrefixPrepared(false) {
+PortNormalRuntime::PortNormalRuntime():initialSaveFileWritten(false),phase(PNR_IDLE),missingNativePrerequisite(0),completePlayerInitializations(0),completePlayerTicks(0),completeWholeGameplayTicks(0),enemyKills(0),doorsOpened(0),roomTransitions(0),playerHits(0),playerDeathTicks(0),doorsUnlocked(0),gameOverCount(0),pickupsCollected(0),collectiblesCollected(0),playerInvulnerable(0),lastCollectible(0),playerDead(false),bossDefeated(false),descendRequested(false),startingItemsGranted(false),greedMode(false),greedComplete(false),greedWave(0),greedWaveCount(0),greedBossWave(0),greedConfigStage(0),bossAwardIdentity(0),bossAwardAchievement(0),doorTransitionGrace(0),tickFrame(0),nativeSaveCaptureAddress(0),playerTailTrailSegments(0),playerTailRenderCallbacks(0),playerTailTicks(0),roomEntryPrefixPrepared(false) {
     memset(&run,0,sizeof(run));memset(&entryIssue,0,sizeof(entryIssue));
     gameRandom.Default();
 }
@@ -53,7 +53,7 @@ PortSessionStart PortGameSession::StartNormalCharacter(unsigned int seed,PortNor
         //Virtual Init, the reached resource/callback services and manager
         //registration have returned before006b4b5e generation begins.
         runtime.missingNativePrerequisite=0;runtime.phase=PNR_GENERATING;runtime.tickFrame=0;
-        runtime.completePlayerInitializations=runtime.completePlayerTicks=0;runtime.completeWholeGameplayTicks=0;runtime.enemyKills=runtime.doorsOpened=runtime.roomTransitions=0;runtime.playerHits=runtime.playerDeathTicks=runtime.doorsUnlocked=runtime.gameOverCount=runtime.pickupsCollected=runtime.collectiblesCollected=0;runtime.lastCollectible=0;runtime.playerInvulnerable=0;runtime.playerDead=false;runtime.bossDefeated=false;runtime.descendRequested=false;runtime.startingItemsGranted=false;runtime.greedMode=false;runtime.greedComplete=false;runtime.greedWave=0;runtime.greedWaveCount=0;runtime.greedBossWave=0;runtime.greedConfigStage=0;runtime.doorTransitionGrace=0;
+        runtime.completePlayerInitializations=runtime.completePlayerTicks=0;runtime.completeWholeGameplayTicks=0;runtime.enemyKills=runtime.doorsOpened=runtime.roomTransitions=0;runtime.playerHits=runtime.playerDeathTicks=runtime.doorsUnlocked=runtime.gameOverCount=runtime.pickupsCollected=runtime.collectiblesCollected=0;runtime.lastCollectible=0;runtime.playerInvulnerable=0;runtime.playerDead=false;runtime.bossDefeated=false;runtime.descendRequested=false;runtime.startingItemsGranted=false;runtime.greedMode=false;runtime.greedComplete=false;runtime.greedWave=0;runtime.greedWaveCount=0;runtime.greedBossWave=0;runtime.greedConfigStage=0;runtime.bossAwardIdentity=0;runtime.bossAwardAchievement=0;runtime.doorTransitionGrace=0;
         runtime.playerTailTrailSegments=0;runtime.playerTailRenderCallbacks=0;runtime.playerTailTicks=0;}
     if(start.result==NPS_WORLD_PENDING)runtime.roomEntryPrefixPrepared=false;
     delete next;
@@ -175,7 +175,7 @@ bool PortGameSession::AdvanceGreedWave(PortNormalRuntime& runtime,const NativeSc
         runtime.playerBody.velocity.x=runtime.playerBody.velocity.y=0;runtime.playerBody.removed=false;
     }
     runtime.projectiles.Reset();runtime.enemyShots.Clear();runtime.bombs.Clear();runtime.familiars.Clear();
-    runtime.playerState.ResetRoomConditionalCache();
+    {unsigned int sample=0;if(!runtime.gameRandom.Next(&sample))sample=1;runtime.playerState.ResetRoomConditionalCache(sample);}
     runtime.doorTransitionGrace=0;
     return true;
 }
@@ -234,7 +234,12 @@ bool PortGameSession::DescendNormal(PortNormalRuntime& runtime,NativeSceneFiles&
     runtime.playerBody.removed=false;
     runtime.playerInvulnerable=0;runtime.doorTransitionGrace=0;
     runtime.projectiles.Reset();runtime.enemyShots.Clear();runtime.bombs.Clear();runtime.familiars.Clear();
-    runtime.playerState.ResetFloorConditionalCache();
+    {unsigned int sample=0;if(!runtime.gameRandom.Next(&sample))sample=1;runtime.playerState.ResetFloorConditionalCache(sample);}
+    bool missingNo=false;
+    if(runtime.playerState.HasCollectible(258,&missingNo)&&missingNo){
+        unsigned int sample=0;if(!runtime.gameRandom.Next(&sample))sample=1;
+        runtime.playerState.ApplyMissingNo(runtime.itemPools,sample);
+    }
     runtime.descendRequested=false;runtime.bossDefeated=false;
     runtime.roomTransitions=0;runtime.missingNativePrerequisite=0;
     runtime.phase=PNR_READY;
@@ -316,6 +321,27 @@ NormalRunResult PortGameSession::AdvanceNormalSetup(PortNormalRuntime& runtime,c
     }
     frontend.CharacterStarted();return r==NWR_OK||r==NWR_CONSTRUCTION_GAP?NFR_PENDING:r==NWR_SOURCE_ERROR?NFR_MISSING_DATA:NFR_BAD_REQUEST;
 }
+void PortGameSession::AwardBossProgress(PortNormalRuntime& runtime){
+    if(!runtime.bossDefeated||runtime.bossAwardAchievement)return;
+    const NativePlacedRoom* descriptor=runtime.world.CurrentDescriptor();
+    if(!descriptor)return;
+    const NativeRoomDef* room=NativeRoom(descriptor->definition);
+    if(!room||room->type!=5)return;
+    const int identity=(int)room->subtype;
+    if(identity<0||identity>=kNativeBossIds)return;
+    int achievement=-1;
+    for(int i=0;i<runtime.run.bosses.entryCount;++i)
+        if((int)runtime.run.bosses.entries[i].id==identity){achievement=runtime.run.bosses.entries[i].achievement;break;}
+    if(achievement<=0||achievement>=kNativeAwardCount)return;
+    const bool changed=!frontend.profile.awards[achievement];
+    frontend.profile.awards[achievement]=true;
+    runtime.bossAwardIdentity=identity;runtime.bossAwardAchievement=achievement;
+    if(changed){
+        unsigned int checksum=0;runtime.initialSave.fields.Get(0x1fb48,4,&checksum);
+        unsigned int next=0;
+        frontend.profileStorage.SaveAfterNewRun(frontend.profile,checksum,frontend.saveDirectory,frontend.selectedSlot,&next);
+    }
+}
 NormalRunResult PortGameSession::TickNormal(PortNormalRuntime& runtime,const NativeSceneFiles& files,NativeActionSource* actions){
     if(runtime.phase==PNR_GAME_OVER)return NFR_PENDING;
     if(runtime.phase==PNR_DYING){
@@ -338,6 +364,7 @@ NormalRunResult PortGameSession::TickNormal(PortNormalRuntime& runtime,const Nat
     if(!live.update||!runtime.playerBody.ready)return NFR_BAD_REQUEST;
     ++runtime.tickFrame;runtime.history.fields.Put(0x1a2e1c,runtime.tickFrame);
     if(!live.update->TickActors(runtime,actions,&files,&globalRandom,&runtime.missingNativePrerequisite))return NFR_PENDING;
+    AwardBossProgress(runtime);
     if(runtime.greedMode&&!runtime.greedComplete&&live.room&&live.room->clear){
         if(!AdvanceGreedWave(runtime,files))return NFR_PENDING;
     }
@@ -630,6 +657,17 @@ bool PortGameSession::ContinueNativeSave(const char* path,PortNormalRuntime& run
         const NativeEffectDef* def=NativePreparedEffect(e.type,e.id);
         if(!def||runtime.playerState.effects.Add(def,e.count,false,0)!=NEF_OK)return false;
         if(!runtime.playerState.effects.SetTimer(e.type,e.id,e.timer))return false;
+    }
+    if(summary.hasTriggerCache){
+        NativePlayerState& s=runtime.playerState;
+        s.permDamageBonus=summary.permDamageBonus;s.permFireRateBonus=summary.permFireRateBonus;
+        s.permRangeBonus=summary.permRangeBonus;s.permShotSpeedBonus=summary.permShotSpeedBonus;
+        s.permSpeedBonus=summary.permSpeedBonus;s.permLuckBonus=summary.permLuckBonus;
+        s.damageTakenThisFloor=summary.damageTakenThisFloor;
+        s.bloodOathDamage=summary.bloodOathDamage;s.bloodOathSpeed=summary.bloodOathSpeed;
+        s.roomDamageBonus=summary.roomDamageBonus;s.roomSpeedBonus=summary.roomSpeedBonus;
+        s.purityAura=summary.purityAura;s.purityActive=summary.purityActive;
+        s.crownOfLightDisabled=summary.crownOfLightDisabled;
     }
     runtime.playerState.maxRedHearts=summary.maxRedHearts;runtime.playerState.redHearts=summary.redHearts;
     runtime.playerState.soulHearts=summary.soulHearts;runtime.playerState.blackHeartMask=summary.blackHeartMask;

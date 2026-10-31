@@ -17,8 +17,11 @@ struct NativeSaveSummary {
     std::vector<unsigned char> trinkets;
     std::vector<Effect> effects;
     int activeItems[4],heldTrinkets[2],heldCard,heldPill;
-    bool hasExtras;
+    bool hasExtras,hasTriggerCache;
     float positionX,positionY,fireDelay,damage,moveSpeed,luck;
+    float permDamageBonus,permFireRateBonus,permRangeBonus,permShotSpeedBonus,permSpeedBonus,permLuckBonus;
+    float bloodOathDamage,bloodOathSpeed,roomDamageBonus,roomSpeedBonus;
+    int damageTakenThisFloor,purityAura;bool purityActive,crownOfLightDisabled;
     NativeItemPoolSnapshot pools;
     NativeSaveSummary();
 };

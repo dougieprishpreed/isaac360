@@ -184,6 +184,18 @@ bool NativePlayerStats::RecomputeCache(const NativePlayerState& state){
  }
  damageAdd=Add(damageAdd,state.bloodOathDamage);speedAdd=Add(speedAdd,state.bloodOathSpeed);
  damageAdd=Add(damageAdd,state.roomDamageBonus);speedAdd=Add(speedAdd,state.roomSpeedBonus);
+ damageAdd=Add(damageAdd,state.permDamageBonus);fireAdd=Add(fireAdd,state.permFireRateBonus);
+ rangeAdd=Add(rangeAdd,state.permRangeBonus);shotAdd=Add(shotAdd,state.permShotSpeedBonus);
+ speedAdd=Add(speedAdd,state.permSpeedBonus);luckAdd=Add(luckAdd,state.permLuckBonus);
+ if(407<state.collectibleCounts.size()&&state.collectibleCounts[407]>0&&state.purityActive){
+  switch(state.purityAura){
+  case 1:damageAdd=Add(damageAdd,4.0f);break; //Red
+  case 2:fireAdd=Add(fireAdd,2.0f);break;      //Blue
+  case 3:speedAdd=Add(speedAdd,0.5f);break;    //Yellow
+  case 4:rangeAdd=Add(rangeAdd,3.0f);break;    //Orange
+  default:break;
+  }
+ }
  //Temporary pill/card/active layer is added after the collectible cache.
  tears=Add(tears,bonusTears);fireAdd=Add(fireAdd,bonusFireRate);
  damage=Mul(Add(Add(baseDamage,damageAdd),bonusDamage),damageMul);

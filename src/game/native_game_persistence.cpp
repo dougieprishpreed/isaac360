@@ -7,6 +7,7 @@
 #include <string.h>
 
 namespace {
+unsigned int FloatBits(float value){unsigned int bits=0;memcpy(&bits,&value,4);return bits;}
 void Copy(NativePersistentFields& target,unsigned int to,const NativePersistentFields& source,unsigned int from,unsigned int count){
     for(unsigned int i=0;i<count;++i){unsigned int value;if(source.Get(from+i,1,&value))target.Put(to+i,value,1);else target.Unwritten(to+i,1);}
 }
@@ -166,11 +167,23 @@ bool NativeGamePersistent::CaptureState(const NormalRunFlow& run,NativeWorld& wo
     if(next)*next=0x907350;
     players.clear();players.resize(manager.members.size());
     if(allowCurrent){if(!players[0].CaptureCurrent(player,startup,creation,body,next))return false;
+        std::vector<unsigned int> metadata;
         if(run.context.nativeMode>=2&&world.layout.count>1&&world.layout.count<=30){
-            std::vector<unsigned int> metadata;metadata.push_back(0x47524431U);metadata.push_back((unsigned int)(world.currentGrid/2));
+            metadata.push_back(0x47524431U);metadata.push_back((unsigned int)(world.currentGrid/2));
             metadata.push_back((unsigned int)(world.layout.count-1));metadata.push_back((unsigned int)(world.layout.count-1));
-            players[0].words[0x4f4]=metadata;
         }
+        //Trigger/reroll cache owners that are not part of the native player
+        //payload. The marker keeps older saves and the empty-vector case apart.
+        metadata.push_back(0x54524947U);
+        metadata.push_back(FloatBits(player.permDamageBonus));metadata.push_back(FloatBits(player.permFireRateBonus));
+        metadata.push_back(FloatBits(player.permRangeBonus));metadata.push_back(FloatBits(player.permShotSpeedBonus));
+        metadata.push_back(FloatBits(player.permSpeedBonus));metadata.push_back(FloatBits(player.permLuckBonus));
+        metadata.push_back((unsigned int)player.damageTakenThisFloor);
+        metadata.push_back(FloatBits(player.bloodOathDamage));metadata.push_back(FloatBits(player.bloodOathSpeed));
+        metadata.push_back(FloatBits(player.roomDamageBonus));metadata.push_back(FloatBits(player.roomSpeedBonus));
+        metadata.push_back((unsigned int)player.purityAura);metadata.push_back(player.purityActive?1U:0U);
+        metadata.push_back(player.crownOfLightDisabled?1U:0U);
+        players[0].words[0x4f4]=metadata;
     }
     else if(checkpoint){if(!players[0].CaptureInitial(player,startup,creation,body,next))return false;}
     else{

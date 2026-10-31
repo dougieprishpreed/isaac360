@@ -110,6 +110,20 @@ bool ReadPlayer(Cursor& c,NativeSaveSummary& out){
     std::vector<unsigned int> metadata;
     for(unsigned int i=0;i<metadataCount;++i){unsigned int value=0;if(!c.Read(4,&value))return false;metadata.push_back(value);}
     if(metadata.size()>=4&&metadata[0]==0x47524431U){out.greed=true;out.greedWave=(int)metadata[1];out.greedWaveCount=(int)metadata[2];out.greedBossWave=(int)metadata[3];}
+    {
+        const size_t at=(out.greed?4U:0U);
+        if(metadata.size()>=at+15&&metadata[at]==0x54524947U){
+            out.hasTriggerCache=true;
+            memcpy(&out.permDamageBonus,&metadata[at+1],4);memcpy(&out.permFireRateBonus,&metadata[at+2],4);
+            memcpy(&out.permRangeBonus,&metadata[at+3],4);memcpy(&out.permShotSpeedBonus,&metadata[at+4],4);
+            memcpy(&out.permSpeedBonus,&metadata[at+5],4);memcpy(&out.permLuckBonus,&metadata[at+6],4);
+            out.damageTakenThisFloor=(int)metadata[at+7];
+            memcpy(&out.bloodOathDamage,&metadata[at+8],4);memcpy(&out.bloodOathSpeed,&metadata[at+9],4);
+            memcpy(&out.roomDamageBonus,&metadata[at+10],4);memcpy(&out.roomSpeedBonus,&metadata[at+11],4);
+            out.purityAura=(int)metadata[at+12];out.purityActive=metadata[at+13]!=0;
+            out.crownOfLightDisabled=metadata[at+14]!=0;
+        }
+    }
     if(!c.Skip(8)){return false;}
     unsigned int special=0;if(!c.Read(1,&special))return false;
     if(special!=255&&!c.Skip(8)){return false;}
@@ -154,8 +168,10 @@ bool ReadPools(Cursor& c,NativeSaveSummary& out){
 }
 }
 NativeSaveSummary::NativeSaveSummary():valid(false),hasPlayer(false),hasPools(false),greed(false),seed(0),playerId(-1),stage(0),stageType(0),currentGrid(-1),dimension(-1),roomDefinition(-1),roomCount(0),greedWave(0),greedWaveCount(0),greedBossWave(0),
-    redHearts(0),maxRedHearts(0),soulHearts(0),blackHeartMask(0),keys(0),bombs(0),coins(0),heldCard(0),heldPill(-1),hasExtras(false),
-    positionX(0.0f),positionY(0.0f),fireDelay(0.0f),damage(0.0f),moveSpeed(0.0f),luck(0.0f){
+    redHearts(0),maxRedHearts(0),soulHearts(0),blackHeartMask(0),keys(0),bombs(0),coins(0),heldCard(0),heldPill(-1),hasExtras(false),hasTriggerCache(false),
+    positionX(0.0f),positionY(0.0f),fireDelay(0.0f),damage(0.0f),moveSpeed(0.0f),luck(0.0f),
+    permDamageBonus(0.0f),permFireRateBonus(0.0f),permRangeBonus(0.0f),permShotSpeedBonus(0.0f),permSpeedBonus(0.0f),permLuckBonus(0.0f),
+    bloodOathDamage(0.0f),bloodOathSpeed(0.0f),roomDamageBonus(0.0f),roomSpeedBonus(0.0f),damageTakenThisFloor(0),purityAura(0),purityActive(false),crownOfLightDisabled(false){
     activeItems[0]=activeItems[1]=activeItems[2]=activeItems[3]=0;heldTrinkets[0]=heldTrinkets[1]=0;
 }
 bool NativeReadSaveSummary(const char* path,NativeSaveSummary& output){
