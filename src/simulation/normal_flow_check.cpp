@@ -1195,7 +1195,7 @@ void OwnedSession() {
         Check(runtime->phase==PNR_GENERATING&&runtime->run.phase==NRF_TOPOLOGY&&runtime->run.steps==0&&
             runtime->world.entrySerial==0&&runtime->world.residentCount==0&&runtime->missingNativePrerequisite==0,
             "owned-session-start-commits-generation-before-world-entry");
-        NativeSceneFiles files={indexPath,objectRoot,runtime->run.context.stage,mode,0};
+        NativeSceneFiles files={indexPath,objectRoot,NativeStageBackdrop(runtime->run.context.stage),mode,0};
         NormalRunResult advanced=NFR_PENDING;
         for(int step=0;step<1000&&(runtime->phase==PNR_GENERATING||runtime->phase==PNR_ROOM_COMPONENTS);++step){
             NativeActionFrame frame;frame.Clear(runtime->playerCreation.native153c,runtime->playerBody.entityToken,(unsigned int)step);
@@ -1204,7 +1204,7 @@ void OwnedSession() {
             for(int action=0;action<8;++action)frame.SupplyValue(action,0);
             NativeFrameActions frameActions(frame);
             advanced=session.AdvanceNormalSetup(*runtime,files,&frameActions);
-            files.backdrop=runtime->run.context.stage;
+            files.backdrop=NativeStageBackdrop(runtime->run.context.stage);
         }
         const bool d6=runtime->run.player.isaacD6;
         unsigned int headTimerX=0,headTimerY=0,headCalls=0;

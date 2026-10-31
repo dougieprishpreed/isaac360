@@ -9,7 +9,7 @@ namespace {
 unsigned int RunMovementTicks(PortGameSession& session,PortNormalRuntime& runtime,float x,float y,unsigned int count){
     unsigned int done=0;
     for(unsigned int i=0;i<count;++i){
-        NativeSceneFiles files={"runtime/game/file_index.bin","runtime/game/",runtime.run.context.stage,runtime.run.context.nativeMode,0};
+        NativeSceneFiles files={"runtime/game/file_index.bin","runtime/game/",NativeStageBackdrop(runtime.run.context.stage),runtime.run.context.nativeMode,0};
         NativeActionFrame frame;frame.Clear(runtime.playerCreation.native153c,runtime.playerBody.entityToken,files.frame+i);
         frame.SupplyConnection(true);frame.SupplyDrop(false);
         for(int action=0;action<12;++action){frame.SupplyHeld(action,false);frame.SupplyPressed(action,false);}
@@ -25,7 +25,7 @@ unsigned int RunMovementTicks(PortGameSession& session,PortNormalRuntime& runtim
 unsigned int RunProjectileTicks(PortGameSession& session,PortNormalRuntime& runtime,int shootA,int shootB,unsigned int count){
     unsigned int done=0;
     for(unsigned int i=0;i<count;++i){
-        NativeSceneFiles files={"runtime/game/file_index.bin","runtime/game/",runtime.run.context.stage,runtime.run.context.nativeMode,0};
+        NativeSceneFiles files={"runtime/game/file_index.bin","runtime/game/",NativeStageBackdrop(runtime.run.context.stage),runtime.run.context.nativeMode,0};
         NativeActionFrame frame;frame.Clear(runtime.playerCreation.native153c,runtime.playerBody.entityToken,files.frame+i);
         frame.SupplyConnection(true);frame.SupplyDrop(false);
         for(int action=0;action<12;++action){frame.SupplyHeld(action,false);frame.SupplyPressed(action,false);}
@@ -41,7 +41,7 @@ unsigned int RunProjectileTicks(PortGameSession& session,PortNormalRuntime& runt
 unsigned int AdvanceToBoundary(PortGameSession& session,PortNormalRuntime& runtime){
     unsigned int steps=0;
     while(runtime.phase==PNR_GENERATING||runtime.phase==PNR_ROOM_COMPONENTS){
-        NativeSceneFiles files={"runtime/game/file_index.bin","runtime/game/",runtime.run.context.stage,runtime.run.context.nativeMode,0};
+        NativeSceneFiles files={"runtime/game/file_index.bin","runtime/game/",NativeStageBackdrop(runtime.run.context.stage),runtime.run.context.nativeMode,0};
         //An explicit connected virtual device with released buttons. This
         //supplies only external input; initialized gameplay state is owned
         //and produced by the shared New Run, not by the host adapter.
@@ -90,7 +90,7 @@ int RunDeathProbe(NativeMt& random,PortFrontend& ui){
     const NativePlacedRoom* target=0;
     for(int i=0;i<runtime->world.layout.count;++i)if(runtime->world.layout.rooms[i].definition==268500997){target=&runtime->world.layout.rooms[i];break;}
     if(!target)return 42;
-    NativeSceneFiles files={"runtime/game/file_index.bin","runtime/game/",runtime->run.context.stage,runtime->run.context.nativeMode,0};
+    NativeSceneFiles files={"runtime/game/file_index.bin","runtime/game/",NativeStageBackdrop(runtime->run.context.stage),runtime->run.context.nativeMode,0};
     NativeRoomSetupContext setup={files.backdrop,runtime->run.floor.plan.configStage,false,0};NativeWorldIssue issue;
     if(runtime->world.Enter(target->gridIndex,target->dimension,files,&issue,&setup)!=NWR_OK)return 43;
     NativeWorldResident& live=runtime->world.resident[runtime->world.currentList];
@@ -156,7 +156,7 @@ int RunEncounterProbe(NativeMt& random,PortFrontend& ui){
     const NativePlacedRoom* target=0;
     for(int i=0;i<runtime->world.layout.count;++i)if(runtime->world.layout.rooms[i].definition==268500997){target=&runtime->world.layout.rooms[i];break;}
     if(!target)return 23;
-    NativeSceneFiles files={"runtime/game/file_index.bin","runtime/game/",runtime->run.context.stage,runtime->run.context.nativeMode,0};
+    NativeSceneFiles files={"runtime/game/file_index.bin","runtime/game/",NativeStageBackdrop(runtime->run.context.stage),runtime->run.context.nativeMode,0};
     NativeRoomSetupContext setup={files.backdrop,runtime->run.floor.plan.configStage,false,0};NativeWorldIssue issue;
     if(runtime->world.Enter(target->gridIndex,target->dimension,files,&issue,&setup)!=NWR_OK)return 24;
     if(runtime->world.PrepareDoorActors(random,files.frame)!=NDR_OK)return 30;
@@ -195,7 +195,7 @@ int RunDescendProbe(NativeMt& random,PortFrontend& ui){
     for(int i=0;i<runtime->world.layout.count;++i){const NativePlacedRoom& p=runtime->world.layout.rooms[i];
         const NativeRoomDef* d=NativeRoom(p.definition);if(d&&d->type==5){grid=p.gridIndex;dimension=p.dimension;break;}}
     if(grid<0){delete runtime;return 62;}
-    NativeSceneFiles files={"runtime/game/file_index.bin","runtime/game/",runtime->run.context.stage,runtime->run.context.nativeMode,0};
+    NativeSceneFiles files={"runtime/game/file_index.bin","runtime/game/",NativeStageBackdrop(runtime->run.context.stage),runtime->run.context.nativeMode,0};
     NativeWorldIssue issue;
     if(runtime->world.Enter(grid,dimension,files,&issue,0)!=NWR_OK){delete runtime;return 63;}
     NativeRoomState* room=runtime->world.Current();if(!room){delete runtime;return 64;}
@@ -278,7 +278,7 @@ int main(int argc,char** argv){
             (unsigned int)live.persistent->entities.size(),(unsigned int)c.state.descriptors.size());
         const NativeRoomState* room=runtime->world.Current();NativeMt before=random;
         unsigned int callbackCount=runtime->playerManager.roomInitCallbacks;
-        NativeSceneFiles files={"runtime/game/file_index.bin","runtime/game/",runtime->run.context.stage,runtime->run.context.nativeMode,0};
+        NativeSceneFiles files={"runtime/game/file_index.bin","runtime/game/",NativeStageBackdrop(runtime->run.context.stage),runtime->run.context.nativeMode,0};
         if(session.AdvanceNormalSetup(*runtime,files)!=NFR_PENDING||room!=runtime->world.Current()||
            memcmp(&before,&random,sizeof(random))||callbackCount!=runtime->playerManager.roomInitCallbacks||!runtime->checkpoints[0].valid){delete runtime;return 12;}
         printf("RESUME residentRetained=1 RNGretained=1 roomCallbacks=%u next=%08x\n",callbackCount,runtime->missingNativePrerequisite);

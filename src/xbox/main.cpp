@@ -163,6 +163,10 @@ static bool GameplayVisible(){return gNormalRuntime.phase==PNR_READY||gNormalRun
 static bool BackdropAtlasRect(int id,int* ox,int* oy){
     if(id==1){*ox=kGameplayBackdrop1X;*oy=kGameplayBackdrop1Y;return true;}
     if(id==2){*ox=kGameplayBackdrop2X;*oy=kGameplayBackdrop2Y;return true;}
+    if(id==4){*ox=kGameplayBackdrop4X;*oy=kGameplayBackdrop4Y;return true;}
+    if(id==5){*ox=kGameplayBackdrop5X;*oy=kGameplayBackdrop5Y;return true;}
+    if(id==7){*ox=kGameplayBackdrop7X;*oy=kGameplayBackdrop7Y;return true;}
+    if(id==8){*ox=kGameplayBackdrop8X;*oy=kGameplayBackdrop8Y;return true;}
     return false;
 }
 static void DrawBackground(){
@@ -278,7 +282,7 @@ static void DrawRocks(){
     const float cellW=40.0f*roomW/worldW,cellH=40.0f*roomH/worldH;
     for(int i=0;i<live.room->staticGridCount;++i){
         const NativeStaticGrid& g=live.room->staticGrids[i];
-        if(g.type!=1000&&g.type!=1002&&g.type!=1500&&g.type!=1400)continue;
+        if(g.type!=1000&&g.type!=1001&&g.type!=1002&&g.type!=1500&&g.type!=1400)continue;
         float wx,wy;if(!live.room->geometry.Position(g.grid,&wx,&wy))continue;
         const float px=background.left+(wx-space.left)*roomW/worldW;
         const float py=background.top+(wy-space.top)*roomH/worldH;
@@ -292,31 +296,11 @@ static void DrawRocks(){
     }
 }
 static bool EnemyWalkRect(int type,int variant,int* sx,int* sy,int* frames,int* fw,int* fh){
-    *fw=*fh=64;
-    if(type==10){*sx=kGameplayGaperwalkX;*sy=kGameplayGaperwalkY;*frames=kGameplayGaperwalkFrames;return true;}
-    if(type==13){*sx=kGameplayFlywalkX;*sy=kGameplayFlywalkY;*frames=kGameplayFlywalkFrames;return true;}
-    if(type==14){*sx=kGameplayPooterwalkX;*sy=kGameplayPooterwalkY;*frames=kGameplayPooterwalkFrames;return true;}
-    if(type==208){*sx=kGameplayFattywalkX;*sy=kGameplayFattywalkY;*frames=kGameplayFattywalkFrames;return true;}
-    if(type==226&&variant==0){*sx=kGameplaySkinnywalkX;*sy=kGameplaySkinnywalkY;*frames=kGameplaySkinnywalkFrames;return true;}
-    if(type==226&&variant==1){*sx=kGameplayRottywalkX;*sy=kGameplayRottywalkY;*frames=kGameplayRottywalkFrames;return true;}
-    if(type==284){*sx=kGameplayCyclopiawalkX;*sy=kGameplayCyclopiawalkY;*frames=kGameplayCyclopiawalkFrames;return true;}
-    if(type==217&&variant==1){*sx=kGameplayCornwalkX;*sy=kGameplayCornwalkY;*frames=kGameplayCornwalkFrames;return true;}
-    if(type==217&&variant==2){*sx=kGameplayBrowniecornwalkX;*sy=kGameplayBrowniecornwalkY;*frames=kGameplayBrowniecornwalkFrames;return true;}
-    if(type==217&&variant==3){*sx=kGameplayBigcornwalkX;*sy=kGameplayBigcornwalkY;*frames=kGameplayBigcornwalkFrames;return true;}
-    if(type==217){*sx=kGameplayDipwalkX;*sy=kGameplayDipwalkY;*frames=kGameplayDipwalkFrames;return true;}
-    if(type==256){*sx=kGameplayDartflywalkX;*sy=kGameplayDartflywalkY;*frames=kGameplayDartflywalkFrames;return true;}
-    if(type==261&&variant==1){*sx=kGameplayDanglewalkX;*sy=kGameplayDanglewalkY;*frames=kGameplayDanglewalkFrames;return true;}
-    if(type==261){*sx=kGameplayDinglewalkX;*sy=kGameplayDinglewalkY;*frames=kGameplayDinglewalkFrames;return true;}
-    if(type==18){*sx=kGameplayAttackflywalkX;*sy=kGameplayAttackflywalkY;*frames=kGameplayAttackflywalkFrames;return true;}
-    if(type==79){*sx=kGameplayGeminiwalkX;*sy=kGameplayGeminiwalkY;*frames=kGameplayGeminiwalkFrames;return true;}
-    if(type==237&&variant==2){*sx=kGameplayTurdlingwalkX;*sy=kGameplayTurdlingwalkY;*frames=kGameplayTurdlingwalkFrames;return true;}
-    if(type==237){*sx=kGameplayGurglingwalkX;*sy=kGameplayGurglingwalkY;*frames=kGameplayGurglingwalkFrames;return true;}
-    if(type==239){*sx=kGameplayGrubwalkX;*sy=kGameplayGrubwalkY;*frames=kGameplayGrubwalkFrames;return true;}
-    if(type==908){*sx=kGameplayPlumidleX;*sy=kGameplayPlumidleY;*frames=kGameplayPlumidleFrames;return true;}
-    if(type==19){*sx=kGameplayLarrywalkX;*sy=kGameplayLarrywalkY;*frames=kGameplayLarrywalkFrames;return true;}
-    if(type==20){*sx=kGameplayMonstrowalkX;*sy=kGameplayMonstrowalkY;*frames=kGameplayMonstrowalkFrames;*fw=*fh=128;return true;}
-    if(type==67){*sx=kGameplayDukewalkX;*sy=kGameplayDukewalkY;*frames=kGameplayDukewalkFrames;*fw=*fh=128;return true;}
-    if(type==260){*sx=kGameplayHauntidleX;*sy=kGameplayHauntidleY;*frames=kGameplayHauntidleFrames;*fw=*fh=128;return true;}
+    for(unsigned int i=0;i<sizeof(kGameplayEnemySprites)/sizeof(kGameplayEnemySprites[0]);++i){
+        const GameplayEnemySprite& s=kGameplayEnemySprites[i];
+        if(s.type!=type||s.variant!=variant)continue;
+        *sx=s.x;*sy=s.y;*frames=s.frames;*fw=s.frameW;*fh=s.frameH;return true;
+    }
     return false;
 }
 static void DrawTrapdoor(){
@@ -556,7 +540,7 @@ VOID __cdecl main() {
                 if(!runSeed)runSeed=GetTickCount();if(!runSeed)runSeed=1;
                 PortSessionStart start=PortGameSession(gMenuRandom,gUi).StartNormalCharacter(runSeed,gNormalRuntime);Log("PORT normal setup result=%d seed=%u player=%d",start.result,runSeed,start.player);}
             if(gUi.characterPending){const NormalRunFlow& run=gNormalRuntime.run;
-                NativeSceneFiles files={"game:\\game\\file_index.bin","game:\\game\\",run.context.stage,run.context.nativeMode,0};
+                NativeSceneFiles files={"game:\\game\\file_index.bin","game:\\game\\",NativeStageBackdrop(run.context.stage),run.context.nativeMode,0};
                 NormalRunResult result=PortGameSession(gMenuRandom,gUi).AdvanceNormalSetup(gNormalRuntime,files,&frameActions);
                 if(!gUi.characterPending){Log("PORT normal setup boundary phase=%d generation=%d result=%d resident=%d source=%d prerequisite=%08x",gNormalRuntime.phase,run.phase,result,gNormalRuntime.world.residentCount,gNormalRuntime.entryIssue.source,gNormalRuntime.missingNativePrerequisite);
                     if(gNormalRuntime.missingNativePrerequisite==0x6c8140&&gNormalRuntime.world.currentList>=0){NativeWorldResident& live=gNormalRuntime.world.resident[gNormalRuntime.world.currentList];
@@ -576,7 +560,7 @@ VOID __cdecl main() {
                             door.targetType,target?target->definition:-1,door.state);}
                     readyLogged=true;}
                 const NormalRunFlow& run=gNormalRuntime.run;
-                NativeSceneFiles files={"game:\\game\\file_index.bin","game:\\game\\",run.context.stage,run.context.nativeMode,0};
+                NativeSceneFiles files={"game:\\game\\file_index.bin","game:\\game\\",NativeStageBackdrop(run.context.stage),run.context.nativeMode,0};
                 NormalRunResult tick=PortGameSession(gMenuRandom,gUi).TickNormal(gNormalRuntime,files,&frameActions);
                 if(gNormalRuntime.descendRequested&&gNormalRuntime.phase==PNR_READY){
                     if(PortGameSession(gMenuRandom,gUi).DescendNormal(gNormalRuntime,files,&frameActions))
@@ -605,7 +589,7 @@ VOID __cdecl main() {
                 static bool dyingLogged=false;
                 if(!dyingLogged){Log("PORT normal death phase=%d hits=%u hp=%d/%d",gNormalRuntime.phase,gNormalRuntime.playerHits,gNormalRuntime.playerState.redHearts,gNormalRuntime.playerState.maxRedHearts);dyingLogged=true;}
                 const NormalRunFlow& run=gNormalRuntime.run;
-                NativeSceneFiles files={"game:\\game\\file_index.bin","game:\\game\\",run.context.stage,run.context.nativeMode,0};
+                NativeSceneFiles files={"game:\\game\\file_index.bin","game:\\game\\",NativeStageBackdrop(run.context.stage),run.context.nativeMode,0};
                 PortGameSession(gMenuRandom,gUi).TickNormal(gNormalRuntime,files,&frameActions);
             }
             if(action!=UI_NONE&&action!=UI_SELECT_SLOT&&action!=UI_DELETE_SLOT&&action!=UI_START_CHARACTER)Log("PORT pending native frontend destination=%d",action);

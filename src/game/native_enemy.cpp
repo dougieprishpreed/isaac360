@@ -37,7 +37,7 @@ void NativeEnemy::Update(const NativeRoomState& room,const NativeEntityBody& pla
     const int phase=(int)body.time;
     const unsigned int salt=seed&63U;
     float vx=0.0f,vy=0.0f;
-    if(type==13||type==18){
+    if(type==13||type==18||type==25||type==61||type==240||type==242||type==248){
         //Fly: fast erratic drift with a per-entity phase offset.
         const float wobble=sinf(phase*0.45f+(float)salt*0.19f);
         const float sway=cosf(phase*0.37f+(float)salt*0.11f);
@@ -59,12 +59,12 @@ void NativeEnemy::Update(const NativeRoomState& room,const NativeEntityBody& pla
         if(cycle==0&&distance>0.0f){vx=dx*2.4f;vy=dy*2.4f;}
         else if(cycle<18){vx=body.velocity.x*0.92f;vy=body.velocity.y*0.92f;}
         else{vx=dx*0.30f;vy=dy*0.30f;}
-    }else if(type==226||type==237){
+    }else if(type==226||type==237||type==21||type==23){
         //Skinny/Rotty: charge windows separated by short recovery.
         const int cycle=phase%70;const float speed=body.variant==1?1.55f:1.10f;
         if(cycle>=16&&cycle<46){vx=dx*speed;vy=dy*speed;}
         else{vx=dx*0.22f;vy=dy*0.22f;}
-    }else if(type==217){
+    }else if(type==217||type==29){
         //Dip: short hop then a slow approach.
         const int cycle=phase%90;
         if(cycle<12){vx=dx*1.6f;vy=dy*1.6f;}
@@ -92,7 +92,7 @@ void NativeEnemy::Update(const NativeRoomState& room,const NativeEntityBody& pla
         else{vx=dx*0.25f;vy=dy*0.25f;}
         if(shots&&distance<520.0f&&cycle==62)
             shots->Fire(body.position,dx*3.2f,dy*3.2f,1.0f,8.0f,240,body.entityToken);
-    }else if(type==67||type==260||type==79||type==908){
+    }else if(type==67||type==260||type==79||type==908||type==28||type==36||type==62||type==68||type==71||type==99||type==262||type==264||type==916){
         //Duke/Haunt: floating boss with a periodic spread volley.
         const int cycle=phase%150;
         vx=dx*0.32f;vy=dy*0.32f;
@@ -122,6 +122,9 @@ void NativeEnemy::Update(const NativeRoomState& room,const NativeEntityBody& pla
         if(cycle>=20&&cycle<58){vx=dx*1.05f;vy=dy*1.05f;}
         else if(cycle<20){vx=0.0f;vy=0.0f;}
         else{vx=dx*0.30f;vy=dy*0.30f;}
+    }else if(type==33){
+        //Fireplace: stationary environmental hazard.
+        vx=0.0f;vy=0.0f;
     }else{
         //Gaper family walk with a short periodic pause.
         const int cycle=phase%80;

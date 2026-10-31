@@ -13,6 +13,16 @@ const char* NativeRoomSource(int source){const NativeRoomSourceDef* s=NativeRoom
 unsigned int NativeCatalogFingerprint(int catalog){return catalog==NC_NORMAL?kNormalCatalogFingerprint:0;}
 const NativeRoomDef* NativeFindRoom(const char* resource,int ordinal,int catalog){if(!resource||ordinal<0)return 0;for(int i=0;i<NativeRoomCount(catalog);++i){const NativeRoomDef* r=NativeRoom(NativeRoomId(catalog,i));if(r->ordinal==ordinal&&!strcmp(NativeRoomSource(r->source),resource))return r;}return 0;}
 int NativeStageSource(int stage,int catalog){return catalog==NC_NORMAL&&stage>=0&&stage<256?kNormalStageRanges[stage].source:-1;}
+//Standard-floor backdrop ids from the inherited backdrops.xml ordering.
+//Alternate stage types retain their own unsupported-context boundary.
+int NativeStageBackdrop(int stage){
+    switch(stage){
+    case 1:return 1;case 2:return 2;case 3:return 4;case 4:return 5;
+    case 5:return 7;case 6:return 8;case 7:return 10;case 8:return 11;
+    case 9:return 14;case 10:return 15;case 11:return 17;case 12:return 16;
+    case 13:return 13;default:return 0;
+    }
+}
 NativeRoomResult NativeFindRoomVariant(int stage,int type,unsigned int variant,int* selected,int catalog) {
     if(!selected || NativeStageSource(stage,catalog)<0) return NR_BAD_REQUEST;
     for(int i=0;i<NativeRoomCount(catalog);++i) {int id=NativeRoomId(catalog,i);const NativeRoomDef* r=NativeRoom(id);if(r->stage==stage&&r->type==type&&r->variant==variant) {

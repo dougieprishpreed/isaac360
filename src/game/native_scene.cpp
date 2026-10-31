@@ -11,10 +11,11 @@ Factory SelectedFactory(const RoomRecord& record,const NativeSpawnChoice& choice
     //Inherited ordinary actor records with maintained physical factories.
     if(e.subtype==0&&NativePreparedEnemyBody(e.type,e.variant))return FACTORY_ENEMY;
     //Ordinary rock/block grids: solid static obstacles without destruction yet.
-    if((e.type==1000||e.type==1002)&&e.variant==0&&e.subtype==0)return FACTORY_ROCK;
-    //1490/1495/3000 are room pit grids. Construction is accepted; pit art
-    //and fall collision remain separate services.
-    if((e.type==1490||e.type==1495||e.type==3000)&&e.subtype==0)return FACTORY_PIT;
+    if((e.type==1000||e.type==1001||e.type==1002)&&e.variant==0&&e.subtype==0)return FACTORY_ROCK;
+    //Room grid markers 1490/1495/3000 and the later stage grid families
+    //1300/1900/1930/1931/1940 are accepted as construction records. Their
+    //original pit/block/poop art and collision rules remain separate services.
+    if((e.type==1490||e.type==1495||e.type==3000||e.type==1300||e.type==1900||e.type==1930||e.type==1931||e.type==1940||e.type==1410||e.type==4500)&&e.subtype==0)return FACTORY_PIT;
     //1500 poop and1400 fireplace are static grids, not entity actors.
     if(e.type==1500||e.type==1400)return FACTORY_ROCK;
     //0079c1b3 maps1999 to grid15. Ordinary wall Init has no asset/MT calls;

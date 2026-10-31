@@ -73,7 +73,7 @@ bool PortGameSession::DescendNormal(PortNormalRuntime& runtime,NativeSceneFiles&
     const int nextStage=(int)runtime.run.context.stage+1;
     //Basement and Cellar are the prepared graphics; later stages keep their
     //explicit unsupported-context boundary instead of substituting art.
-    if(nextStage<2||nextStage>2)return false;
+    if(nextStage<2||nextStage>6)return false;
     NativeFloorContext context=runtime.run.context;
     context.stage=nextStage;context.stageType=0;context.effectiveCurses=0;
     context.challenge=false;context.gameFlags=0;context.runCounter=0;
@@ -92,7 +92,7 @@ bool PortGameSession::DescendNormal(PortNormalRuntime& runtime,NativeSceneFiles&
         if(next.phase==NRF_BLOCKED){runtime.missingNativePrerequisite=0x6402U|((unsigned int)next.lastCode<<16);return false;}
     }
     if(next.phase!=NRF_NEED_ROOM_ENTRY){runtime.missingNativePrerequisite=0x6403;return false;}
-    files.backdrop=nextStage;
+    files.backdrop=NativeStageBackdrop(nextStage);
     runtime.world.Reset();runtime.roomEntryPrefixPrepared=false;memset(&runtime.entryIssue,0,sizeof(runtime.entryIssue));
     NativeWorldResult wr=PrepareNormalWorld(next,runtime.world,files,&runtime.entryIssue);
     if(wr!=NWR_OK){runtime.missingNativePrerequisite=0x6404;return false;}
@@ -100,6 +100,11 @@ bool PortGameSession::DescendNormal(PortNormalRuntime& runtime,NativeSceneFiles&
     NativeWorldResident& live=runtime.world.resident[runtime.world.currentList];
     if(!live.doors&&runtime.world.PrepareDoorActors(globalRandom,files.frame)!=NDR_OK){runtime.missingNativePrerequisite=0x6405;return false;}
     if(!live.perimeterReady&&runtime.world.PreparePerimeter(globalRandom,files.frame)!=NWR_OK){runtime.missingNativePrerequisite=0x6406;return false;}
+    //Bind the linked door types/variants so clear-state opening and passage
+    //rules see the actual targets on the first tick (the initial-room flow
+    //performs the same binding inside ContinueInitialRoom).
+    runtime.world.PrepareDoorVisuals(runtime.run.context.stage,runtime.run.context.stageType,
+        runtime.run.context.nativeMode,runtime.run.context.challenge,runtime.playerState);
     NativeRoomState* room=runtime.world.Current();if(!room){runtime.missingNativePrerequisite=0x6407;return false;}
     runtime.playerBody.position.x=(room->space.left+room->space.right)*0.5f;
     runtime.playerBody.position.y=(room->space.top+room->space.bottom)*0.5f;
@@ -235,7 +240,7 @@ NativeWorldResult PortGameSession::PrepareNormalWorld(const NormalRunFlow& flow,
     //Backdrop6's option and alternate-stage flags require their actual inputs.
     //The first two standard floor graphics are prepared (basement, cellar).
     //Later stages retain their explicit unsupported-context boundary.
-    if(flow.context.stage<1||flow.context.stage>2||flow.context.stageType<0||flow.context.stageType>2||files.backdrop!=flow.context.stage)return NWR_BAD_REQUEST;
+    if(flow.context.stage<1||flow.context.stage>6||flow.context.stageType<0||flow.context.stageType>2||files.backdrop!=NativeStageBackdrop(flow.context.stage))return NWR_BAD_REQUEST;
     NativeRoomSetupContext setup={files.backdrop,flow.floor.plan.configStage,false,0};
     return world.Start(flow.layout,flow.currentGrid,flow.placement.dimension,files,issue,&setup);
 }

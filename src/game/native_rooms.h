@@ -33,6 +33,7 @@ const char* NativeRoomSource(int source);
 const NativeRoomSourceDef* NativeRoomSourceBinding(int source);
 unsigned int NativeCatalogFingerprint(int catalog);
 int NativeStageSource(int stage,int catalog=NC_NORMAL);
+int NativeStageBackdrop(int stage);
 //007d4960 ordinary loaded-pool lookup: first type/variant match, no RNG or
 // depletion. Prepared order is retained; native loader order remains a gate.
 NativeRoomResult NativeFindRoomVariant(int stage,int type,unsigned int variant,int* selected,int catalog=NC_NORMAL);

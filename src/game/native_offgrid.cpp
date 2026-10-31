@@ -20,7 +20,9 @@ NativeOffgridResult Prepare(NativeRoomPool& pool,NativeRng& owner,NativeLevelLay
 NativeOffgridResult NativePrepareOffgridRooms(NativeRoomPool& pool,NativeRng& stream,NativeLevelLayout& layout,
         const NativeOffgridContext& c,NativeOffgridReport* out) {
     if(!out||!stream.state||stream.index!=35||layout.count<1||layout.count>507)return NOG_BAD_REQUEST;
-    if(c.stage<1||c.stage>2||c.stageType<0||c.stageType>2||c.nativeMode<0||c.nativeMode>1||c.configStage!=c.stageType+1)return NOG_UNSUPPORTED_CONTEXT;
+    int expectedConfig;
+    if(!NativeRoomConfigStage(c.stage,c.stageType,-1,c.nativeMode,&expectedConfig))return NOG_UNSUPPORTED_CONTEXT;
+    if(c.stage<1||c.stage>6||c.stageType<0||c.stageType>2||c.nativeMode<0||c.nativeMode>1||c.configStage!=expectedConfig)return NOG_UNSUPPORTED_CONTEXT;
     NativeOffgridReport r;memset(&r,0,sizeof(r));r.entrySeed=stream.state;
     //006f2e47/006f2ec4: branch bodies require stage>4/>3. Do not omit draws.
     stream.Float(r.bossRolls);stream.Float(r.bossRolls+1);r.layoutDraws=2;

@@ -120,6 +120,7 @@ NativeDoorResult NativeWorld::PrepareDoorVisuals(int stage,int stageType,int nat
     NativeRoomState* room=Current();const NativePlacedRoom* p=CurrentDescriptor();
     if(!room||!p||currentList<0||currentList>=kNativeWorldRoomLimit||!resident[currentList].doors)return NDR_BAD_REQUEST;
     NativeWorldResident& live=resident[currentList];
+    live.doorFailureSlot=-1;live.doorFailureKind=0;
     if(!live.doorVisuals)live.doorVisuals=new NativeDoorVisual[8];
     for(int slot=0;slot<8;++slot)if(live.doors->attached&(1U<<slot)){
         NativeDoorVisual& v=live.doorVisuals[slot];if(v.ready)continue;
@@ -130,12 +131,20 @@ NativeDoorResult NativeWorld::PrepareDoorVisuals(int stage,int stageType,int nat
         c.stage=stage;c.stageType=stageType;c.nativeMode=nativeMode;
         c.currentGrid=currentGrid;c.targetGrid=p->doorTargets[slot];c.dimension=layout.currentDimension;
         c.treasureGrid=-1;c.generatedRoomCount=layout.count;c.challenge=challenge;c.sourceData=c.targetData=true;
-        if(SelectDoorVariant(slot,c)!=NDR_OK)return NDR_BAD_REQUEST;
+        NativeDoorResult selected=SelectDoorVariant(slot,c);
+        if(selected!=NDR_OK){
+            live.doorFailureSlot=slot;live.doorFailureKind=selected;
+            live.doorFailureVariant=live.doors->actors[slot].variant;
+            live.doorFailureAux=live.doors->actors[slot].auxiliary;
+            ++live.doorVisualGaps;continue;
+        }
         if(!v.BindFresh(live.doors->actors[slot],live.backdrop,p->flags,target->flags,player)){
             live.doorFailureSlot=slot;live.doorFailureKind=live.doors->actors[slot].targetType;
             live.doorFailureVariant=live.doors->actors[slot].variant;live.doorFailureAux=live.doors->actors[slot].auxiliary;
-            if(v.unsupportedTarget){++live.doorVisualGaps;continue;}
-            return NDR_BAD_REQUEST;
+            //The selected target rules remain owned by the actor. Missing
+            //presentation art is an explicit visual gap, not a reason to
+            //leave every later door unselected.
+            ++live.doorVisualGaps;continue;
         }
     }
     return NDR_OK;
