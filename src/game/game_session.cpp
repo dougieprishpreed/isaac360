@@ -414,9 +414,18 @@ bool NativeSaveSeed(const char* path,unsigned int* seed){
     return false;
 }
 }
+namespace { bool NativeSavePlayerId(const char*,int*); }
 bool PortGameSession::ContinueNativeSave(const char* path,PortNormalRuntime& runtime,NativeSceneFiles& files,NativeActionSource* actions){
     unsigned int seed=0;
     if(!NativeSaveSeed(path,&seed))return false;
+    int savedPlayer=-1;
+    if(NativeSavePlayerId(path,&savedPlayer)){
+        bool found=false;
+        for(int page=0;page<2&&!found;++page)for(int choice=0;choice<kNativeCharacterCount;++choice){
+            const NativeCharacterDef* c=NativeCharacter(page,choice);
+            if(c&&c->player==savedPlayer){frontend.characterPage=page;frontend.characterChoice=choice;found=true;break;}
+        }
+    }
     files.backdrop=NativeStageBackdrop(1);
     PortSessionStart start=StartNormalCharacter(seed,runtime);
     if(start.result!=NPS_WORLD_PENDING)return false;
@@ -429,4 +438,56 @@ bool PortGameSession::ContinueNativeSave(const char* path,PortNormalRuntime& run
         if(r==NFR_BAD_REQUEST)return false;
     }
     return runtime.phase==PNR_READY;
+}
+
+namespace {
+class NativeSaveCursor {
+public:
+    const unsigned char* data;size_t size,pos;bool ok;
+    NativeSaveCursor(const unsigned char* d,size_t n):data(d),size(n),pos(16),ok(true){}
+    bool Skip(unsigned int count){
+        if(!ok||pos+count>size-4){ok=false;return false;}
+        pos+=count;return true;
+    }
+    bool Read(unsigned int count,unsigned int* value){
+        if(!ok||!value||count>4||pos+count>size-4){ok=false;return false;}
+        unsigned int n=0;for(unsigned int i=0;i<count;++i)n|=(unsigned int)data[pos+i]<<(8*i);
+        pos+=count;*value=n;return true;
+    }
+};
+bool SkipRoom(NativeSaveCursor& c){
+    if(!c.Skip(12+2+2+2+1+4+32+12+2+2+4+20))return false;
+    for(int i=0;i<448;++i){
+        unsigned int type=0;if(!c.Read(2,&type))return false;
+        if(type&&!c.Skip(2+2+4+4+4))return false;
+    }
+    unsigned int entities=0;if(!c.Read(4,&entities))return false;
+    if(entities>4096)return false;
+    if(!c.Skip(entities*(24+1+8+1+32+1+8+2+4+1)))return false;
+    return c.Skip(4)&&c.Skip(2+2+16+8+4+2);
+}
+bool NativeSavePlayerId(const char* path,int* playerId){
+    if(!path||!playerId)return false;
+    FILE* f=fopen(path,"rb");if(!f)return false;
+    if(fseek(f,0,SEEK_END)!=0){fclose(f);return false;}long size=ftell(f);
+    if(size<64||fseek(f,0,SEEK_SET)!=0){fclose(f);return false;}
+    std::vector<unsigned char> bytes((unsigned int)size);
+    size_t got=fread(&bytes[0],1,(size_t)size,f);fclose(f);
+    if(got!=(size_t)size||memcmp(&bytes[0],"ISAACNG_GSR0142",15))return false;
+    NativeSaveCursor c(&bytes[0],(size_t)size);
+    if(!c.Skip(4+1+1+1+4))return false;
+    unsigned int flags=0;if(!c.Read(2,&flags)||flags>49)return false;
+    if(!c.Skip(flags+14*4+4+4+1+4+6*4+30*4+30*4+4+4+8*4+4))return false;
+    unsigned int levelFlags=0;if(!c.Read(2,&levelFlags)||levelFlags>24)return false;
+    if(!c.Skip(levelFlags+4+12*4+3*4+14*4))return false;
+    unsigned int configs=0,rooms=0;if(!c.Read(4,&configs)||!c.Skip(configs*4))return false;
+    if(!c.Read(4,&rooms)||rooms>507)return false;
+    for(unsigned int i=0;i<rooms+18;++i)if(!SkipRoom(c))return false;
+    unsigned int ownerWords=0;if(!c.Read(2,&ownerWords)||!c.Skip(ownerWords*2))return false;
+    static const unsigned int sizes[]={4,1,1,4,4,4,4,4,4,4,1,1,4,4,4,4,4,1,1,4,4,1};
+    int id=-1;
+    for(unsigned int i=0;i<22;++i){unsigned int value=0;if(!c.Read(sizes[i],&value))return false;if(i==20)id=(int)value;}
+    if(id<0||id>255)return false;
+    *playerId=id;return true;
+}
 }

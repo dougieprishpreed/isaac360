@@ -381,7 +381,7 @@ int RunBombProbe(NativeMt& random,PortFrontend& ui){
     PortNormalRuntime* runtime=new PortNormalRuntime;NativeMt local;local.Seed(9100);PortGameSession session(local,ui);
     NativeSceneFiles files={"runtime/game/file_index.bin","runtime/game/",1,0,0};
     if(!session.ContinueNativeSave("build/gameplay/profile/gamestate1.dat",*runtime,files)){delete runtime;return 144;}
-    if(runtime->phase!=PNR_READY||runtime->run.seeds.start!=1||runtime->run.context.stage!=1){delete runtime;return 145;}
+    if(runtime->phase!=PNR_READY||runtime->run.seeds.start!=1||runtime->run.context.stage!=1||runtime->run.player.player!=0){delete runtime;return 145;}
     if(!RunProjectileTicks(session,*runtime,-1,-1,2)){delete runtime;return 146;}
     printf("NATIVE_CONTINUE seed=%u stage=%d hp=%d/%d\n",runtime->run.seeds.start,runtime->run.context.stage,
         runtime->playerState.redHearts,runtime->playerState.maxRedHearts);
