@@ -372,7 +372,7 @@ void DamageAllEnemies(PortNormalRuntime& runtime,float amount){
         if(enemy->dead)++runtime.enemyKills;
     }
     for(int e=0;e<live.enemies.count;){NativeEnemy* enemy=live.enemies.entries[e];
-        if(enemy&&enemy->dead){delete enemy;for(int j=e+1;j<live.enemies.count;++j)live.enemies.entries[j-1]=live.enemies.entries[j];--live.enemies.count;live.enemies.entries[live.enemies.count]=0;continue;}
+        if(enemy&&enemy->dead){runtime.deathFx.Spawn(*enemy);delete enemy;for(int j=e+1;j<live.enemies.count;++j)live.enemies.entries[j-1]=live.enemies.entries[j];--live.enemies.count;live.enemies.entries[live.enemies.count]=0;continue;}
         ++e;}
     if(live.enemies.count==0)room->clear=true;
 }

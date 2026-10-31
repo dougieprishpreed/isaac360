@@ -264,7 +264,7 @@ bool NativeRoomUpdate::TickSimulationTail(PortNormalRuntime& runtime,NativeActio
                     runtime.playerBody.previousPosition=runtime.playerBody.position;runtime.playerBody.velocity.x=runtime.playerBody.velocity.y=0;
                 }}
             }
-            runtime.projectiles.Reset();runtime.enemyShots.Clear();runtime.bombs.Clear();runtime.familiars.Clear();runtime.doorTransitionGrace=30;++runtime.roomTransitions;
+            runtime.projectiles.Reset();runtime.enemyShots.Clear();runtime.bombs.Clear();runtime.familiars.Clear();runtime.deathFx.Clear();runtime.doorTransitionGrace=30;++runtime.roomTransitions;
             {unsigned int sample=0;if(global)sample=global->Next();runtime.playerState.ResetRoomConditionalCache(sample);}
             return true;
         }
@@ -275,6 +275,7 @@ bool NativeRoomUpdate::TickActors(PortNormalRuntime& runtime,NativeActionSource*
     if(!next)return false;*next=0;
     NativeWorld& world=runtime.world;NativeRoomState* room=world.Current();
     if(!room||!runtime.playerBody.ready||runtime.playerBody.type!=1||!runtime.playerState.runInitializing)return false;
+    runtime.deathFx.Step();
     NativeEntityBody& body=runtime.playerBody;
     if(!body.native16a||body.removed||body.flagsLow&8U)return false;
     body.PreUpdate();

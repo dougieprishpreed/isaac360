@@ -374,6 +374,29 @@ static void DrawFamiliars(){
             (float)kGameplayAtlasWidth,(float)kGameplayAtlasHeight);
     }
 }
+static void DrawDeathFx(){
+    if(!gGameplayAtlas||gNormalRuntime.world.currentList<0||gNormalRuntime.world.currentList>=kNativeWorldRoomLimit)return;
+    NativeWorldResident& live=gNormalRuntime.world.resident[gNormalRuntime.world.currentList];
+    if(!live.room||!live.view||!live.view->background.ready)return;
+    const NativeRoomBackground& background=live.view->background;
+    const NativeRoomSpace& space=live.room->space;
+    const float roomW=background.right-background.left,worldW=space.right-space.left;
+    const float roomH=background.bottom-background.top,worldH=space.bottom-space.top;
+    if(worldW<=0||worldH<=0)return;
+    for(unsigned int i=0;i<gNormalRuntime.deathFx.active.size();++i){
+        const NativeDeathFx& fx=gNormalRuntime.deathFx.active[i];
+        int sx=0,sy=0,frames=0,fw=64,fh=64;
+        if(!EnemyWalkRect(fx.type,fx.variant,&sx,&sy,&frames,&fw,&fh)||frames<=0)continue;
+        float scale=1.0f-fx.time/30.0f;if(scale<0.15f)scale=0.15f;
+        const int frame=((int)(fx.time/3))%frames;
+        const float px=background.left+(fx.position.x-space.left)*roomW/worldW;
+        const float py=background.top+(fx.position.y-space.top)*roomH/worldH;
+        const DWORD alpha=((DWORD)(255.0f*scale)&255U)<<24;
+        TexRect(gGameplayAtlas,px-fw*scale*0.5f,py-fh*scale*0.75f,fw*scale,fh*scale,
+            (float)(sx+frame*fw),(float)sy,(float)fw,(float)fh,
+            (float)kGameplayAtlasWidth,(float)kGameplayAtlasHeight,alpha|0x00ffffffU);
+    }
+}
 static void DrawPickups(){
     if(!gGameplayAtlas||gNormalRuntime.world.currentList<0||gNormalRuntime.world.currentList>=kNativeWorldRoomLimit)return;
     NativeWorldResident& live=gNormalRuntime.world.resident[gNormalRuntime.world.currentList];
@@ -443,7 +466,7 @@ static void DrawHud(){
         (float)kGameplayAtlasWidth,(float)kGameplayAtlasHeight);
 }
 static void Gameplay(){
-    DrawBackground();DrawDoors();DrawRocks();DrawPickups();DrawTrapdoor();DrawEnemies();DrawFamiliars();DrawPlayer();DrawProjectiles();DrawHud();
+    DrawBackground();DrawDoors();DrawRocks();DrawPickups();DrawTrapdoor();DrawEnemies();DrawDeathFx();DrawFamiliars();DrawPlayer();DrawProjectiles();DrawHud();
     gDevice->SetTexture(0,gAtlas);
 }
 static void Anim(int id,int frame,float x,float y,float scale=kFrontendScale,float angle=0,const int* itemIcon=0,DWORD tint=0xffffffff,bool flipX=false,const float* extraAdd=0) {

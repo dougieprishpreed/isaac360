@@ -47,7 +47,7 @@ PortSessionStart PortGameSession::StartNormalCharacter(unsigned int seed,PortNor
         runtime.playerState.Swap(state);
         runtime.playerCreation.Swap(creation);
         runtime.playerManager.Swap(manager);
-        runtime.playerUpdate=NativePlayerUpdate();runtime.projectiles.Reset();runtime.enemyShots.Clear();runtime.bombs.Clear();runtime.familiars.Clear();
+        runtime.playerUpdate=NativePlayerUpdate();runtime.projectiles.Reset();runtime.enemyShots.Clear();runtime.bombs.Clear();runtime.familiars.Clear();runtime.deathFx.Clear();
         runtime.roomFx.Swap(roomFx);
         runtime.minimaps.Reset();
         //Virtual Init, the reached resource/callback services and manager
@@ -148,7 +148,7 @@ PortSessionStart PortGameSession::StartGreedCharacter(unsigned int seed,PortNorm
     runtime.playerBody.position.y=(room->space.top+room->space.bottom)*0.5f;
     runtime.playerBody.previousPosition=runtime.playerBody.position;
     runtime.playerBody.velocity.x=runtime.playerBody.velocity.y=0;runtime.playerBody.removed=false;
-    runtime.playerInvulnerable=0;runtime.projectiles.Reset();runtime.enemyShots.Clear();runtime.bombs.Clear();runtime.familiars.Clear();
+    runtime.playerInvulnerable=0;runtime.projectiles.Reset();runtime.enemyShots.Clear();runtime.bombs.Clear();runtime.familiars.Clear();runtime.deathFx.Clear();
     runtime.greedMode=true;runtime.greedComplete=false;runtime.greedWave=0;runtime.greedWaveCount=(int)definitions.size();
     runtime.greedBossWave=(int)definitions.size();runtime.greedConfigStage=configStage;
     runtime.startingItemsGranted=false;runtime.phase=PNR_READY;runtime.missingNativePrerequisite=0;
@@ -174,7 +174,7 @@ bool PortGameSession::AdvanceGreedWave(PortNormalRuntime& runtime,const NativeSc
         runtime.playerBody.position=at;runtime.playerBody.previousPosition=at;
         runtime.playerBody.velocity.x=runtime.playerBody.velocity.y=0;runtime.playerBody.removed=false;
     }
-    runtime.projectiles.Reset();runtime.enemyShots.Clear();runtime.bombs.Clear();runtime.familiars.Clear();
+    runtime.projectiles.Reset();runtime.enemyShots.Clear();runtime.bombs.Clear();runtime.familiars.Clear();runtime.deathFx.Clear();
     {unsigned int sample=0;if(!runtime.gameRandom.Next(&sample))sample=1;runtime.playerState.ResetRoomConditionalCache(sample);}
     runtime.doorTransitionGrace=0;
     return true;
@@ -233,7 +233,7 @@ bool PortGameSession::DescendNormal(PortNormalRuntime& runtime,NativeSceneFiles&
     runtime.playerBody.velocity.x=runtime.playerBody.velocity.y=0;
     runtime.playerBody.removed=false;
     runtime.playerInvulnerable=0;runtime.doorTransitionGrace=0;
-    runtime.projectiles.Reset();runtime.enemyShots.Clear();runtime.bombs.Clear();runtime.familiars.Clear();
+    runtime.projectiles.Reset();runtime.enemyShots.Clear();runtime.bombs.Clear();runtime.familiars.Clear();runtime.deathFx.Clear();
     {unsigned int sample=0;if(!runtime.gameRandom.Next(&sample))sample=1;runtime.playerState.ResetFloorConditionalCache(sample);}
     bool missingNo=false;
     if(runtime.playerState.HasCollectible(258,&missingNo)&&missingNo){
@@ -545,7 +545,7 @@ bool PortGameSession::ContinueSavedRun(const char* path,PortNormalRuntime& runti
         runtime.playerBody.velocity.x=runtime.playerBody.velocity.y=0;
     }
     runtime.phase=PNR_READY;runtime.doorTransitionGrace=0;
-    runtime.projectiles.Reset();runtime.enemyShots.Clear();runtime.bombs.Clear();runtime.familiars.Clear();
+    runtime.projectiles.Reset();runtime.enemyShots.Clear();runtime.bombs.Clear();runtime.familiars.Clear();runtime.deathFx.Clear();
     return true;
 }
 
@@ -694,7 +694,7 @@ bool PortGameSession::ContinueNativeSave(const char* path,PortNormalRuntime& run
         runtime.playerBody.velocity.x=runtime.playerBody.velocity.y=0;runtime.playerBody.removed=false;
     }
     runtime.phase=PNR_READY;runtime.doorTransitionGrace=0;runtime.descendRequested=false;
-    runtime.projectiles.Reset();runtime.enemyShots.Clear();runtime.bombs.Clear();runtime.familiars.Clear();
+    runtime.projectiles.Reset();runtime.enemyShots.Clear();runtime.bombs.Clear();runtime.familiars.Clear();runtime.deathFx.Clear();
     return true;
 }
 bool PortGameSession::SaveNativeContinue(const char* path,PortNormalRuntime& runtime){

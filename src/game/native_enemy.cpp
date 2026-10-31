@@ -92,6 +92,81 @@ void NativeEnemy::Update(const NativeRoomState& room,const NativeEntityBody& pla
         else{vx=dx*0.25f;vy=dy*0.25f;}
         if(shots&&distance<520.0f&&cycle==62)
             shots->Fire(body.position,dx*3.2f,dy*3.2f,1.0f,8.0f,240,body.entityToken);
+    }else if(type==36){
+        //Gurdy: stationary, with a five-shot blood spread and a radial burst.
+        vx=0.0f;vy=0.0f;
+        const int cycle=phase%180;
+        if(shots&&distance<600.0f){
+            if(cycle==55){
+                const float px=-dy,py=dx;
+                for(int k=-2;k<=2;++k){
+                    NativePoint origin={body.position.x+dx*30.0f,body.position.y+dy*30.0f};
+                    shots->Fire(origin,dx*3.0f+px*(float)k*0.65f,dy*3.0f+py*(float)k*0.65f,1.0f,8.0f,300,body.entityToken);
+                }
+            }else if(cycle==135){
+                for(int k=0;k<8;++k){
+                    const float angle=(float)(6.283185307179586*(double)k/8.0);
+                    shots->Fire(body.position,(float)cos((double)angle)*2.6f,(float)sin((double)angle)*2.6f,1.0f,8.0f,300,body.entityToken);
+                }
+            }
+        }
+    }else if(type==62&&body.variant==0){
+        //Pin: stationary wind-up, committed dash, then a three-shot spread.
+        const int cycle=phase%130;
+        if(cycle<50){vx=dx*0.12f;vy=dy*0.12f;}
+        else if(cycle<88){vx=dx*2.15f;vy=dy*2.15f;}
+        else{vx=0.0f;vy=0.0f;}
+        if(shots&&distance<560.0f&&cycle==100){
+            const float px=-dy,py=dx;
+            for(int k=-1;k<=1;++k){
+                NativePoint origin={body.position.x+dx*26.0f,body.position.y+dy*26.0f};
+                shots->Fire(origin,dx*3.2f+px*(float)k*0.8f,dy*3.2f+py*(float)k*0.8f,1.0f,8.0f,300,body.entityToken);
+            }
+        }
+    }else if(type==68){
+        //Peep: short hops, a four-shot spread and a periodic ring.
+        const int cycle=phase%160;
+        const float hop=cycle<16?1.55f:0.20f;
+        vx=dx*hop;vy=dy*hop;
+        if(shots&&distance<580.0f){
+            const float px=-dy,py=dx;
+            if(cycle==60){
+                for(int k=-2;k<=2;k+=2){
+                    NativePoint origin={body.position.x+dx*30.0f,body.position.y+dy*30.0f};
+                    shots->Fire(origin,dx*3.0f+px*(float)k*0.6f,dy*3.0f+py*(float)k*0.6f,1.0f,8.0f,300,body.entityToken);
+                }
+            }else if(cycle==132){
+                for(int k=0;k<6;++k){
+                    const float angle=(float)(6.283185307179586*(double)k/6.0);
+                    shots->Fire(body.position,(float)cos((double)angle)*2.7f,(float)sin((double)angle)*2.7f,1.0f,8.0f,300,body.entityToken);
+                }
+            }
+        }
+    }else if(type==71){
+        //Fistula: slow elastic bounce with a three-shot spread.
+        const int cycle=phase%140;
+        vx=dx*0.48f+sinf(phase*0.18f+(float)salt*0.07f)*0.55f;
+        vy=dy*0.48f+cosf(phase*0.21f+(float)salt*0.09f)*0.55f;
+        if(shots&&distance<560.0f&&cycle==82){
+            const float px=-dy,py=dx;
+            for(int k=-1;k<=1;++k){
+                NativePoint origin={body.position.x+dx*28.0f,body.position.y+dy*28.0f};
+                shots->Fire(origin,dx*2.9f+px*(float)k*0.85f,dy*2.9f+py*(float)k*0.85f,1.0f,8.0f,300,body.entityToken);
+            }
+        }
+    }else if(type==262){
+        //Mega Maw: charge window followed by a five-shot spread.
+        const int cycle=phase%200;
+        if(cycle<70){vx=dx*0.25f;vy=dy*0.25f;}
+        else if(cycle<112){vx=dx*1.85f;vy=dy*1.85f;}
+        else{vx=0.0f;vy=0.0f;}
+        if(shots&&distance<600.0f&&cycle==145){
+            const float px=-dy,py=dx;
+            for(int k=-2;k<=2;++k){
+                NativePoint origin={body.position.x+dx*32.0f,body.position.y+dy*32.0f};
+                shots->Fire(origin,dx*3.1f+px*(float)k*0.7f,dy*3.1f+py*(float)k*0.7f,1.0f,8.0f,300,body.entityToken);
+            }
+        }
     }else if(type==406){
         //Ultra Greed: slow chase, committed dash, radial coin burst and an
         //aimed spread. The prepared coin actor is not spawned yet, so these
@@ -165,3 +240,22 @@ void NativeEnemy::Damage(float amount){
 }
 void NativeEnemy::Swap(NativeEnemy& b){body.Swap(b.body);bool r=ready;ready=b.ready;b.ready=r;r=dead;dead=b.dead;b.dead=r;unsigned int s=seed;seed=b.seed;b.seed=s;}
 void NativeEnemyList::Clear(){for(int i=0;i<count;++i)delete entries[i];for(int i=0;i<64;++i)entries[i]=0;count=0;}
+
+NativeDeathFxSystem::NativeDeathFxSystem():spawned(0){}
+void NativeDeathFxSystem::Clear(){active.clear();spawned=0;}
+void NativeDeathFxSystem::Spawn(const NativeEnemy& enemy){
+    if(!enemy.ready)return;
+    NativeDeathFx fx;fx.type=enemy.type;fx.variant=enemy.body.variant;
+    fx.position=enemy.body.position;fx.time=0;
+    active.push_back(fx);++spawned;
+}
+void NativeDeathFxSystem::Step(){
+    for(unsigned int i=0;i<active.size();){
+        active[i].time+=1.0f;
+        if(active[i].time>30.0f){active.erase(active.begin()+i);continue;}
+        ++i;
+    }
+}
+void NativeDeathFxSystem::Swap(NativeDeathFxSystem& b){
+    active.swap(b.active);unsigned int n=spawned;spawned=b.spawned;b.spawned=n;
+}

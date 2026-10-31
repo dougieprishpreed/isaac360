@@ -92,10 +92,10 @@ static void TexQuad(const float* xy,const float* uv,float texW,float texH,DWORD 
         v[i].u=uv[j*2]/texW;v[i].v=uv[j*2+1]/texH;v[i].color=color;}
     gDevice->DrawPrimitiveUP(D3DPT_TRIANGLELIST,2,v,sizeof(Vertex));
 }
-static void TexRect(float x,float y,float w,float h,float sx,float sy,float sw,float sh){
+static void TexRect(float x,float y,float w,float h,float sx,float sy,float sw,float sh,DWORD color=0xffffffff){
     const float xy[8]={x,y,x+w,y,x,y+h,x+w,y+h};
     const float uv[8]={sx,sy,sx+sw,sy,sx,sy+sh,sx+sw,sy+sh};
-    TexQuad(xy,uv,(float)kGameplayAtlasWidth,(float)kGameplayAtlasHeight,0xffffffff);
+    TexQuad(xy,uv,(float)kGameplayAtlasWidth,(float)kGameplayAtlasHeight,color);
 }
 static bool BackdropAtlasRect(int id,int* ox,int* oy){
     if(id==1){*ox=kGameplayBackdrop1X;*oy=kGameplayBackdrop1Y;return true;}
@@ -217,6 +217,23 @@ static void DrawFamiliars(){
         float px=bg.left+(e->body.position.x-space.left)*rw/ww,py=bg.top+(e->body.position.y-space.top)*rh/wh;
         TexRect(px-fw*0.5f,py-fh*0.75f,(float)fw,(float)fh,(float)(sx+frame*fw),(float)sy,(float)fw,(float)fh);}
 }
+static void DrawDeathFx(){
+    NativeWorldResident& live=gRuntime->world.resident[gRuntime->world.currentList];
+    if(!live.room||!live.view||!live.view->background.ready)return;
+    const NativeRoomBackground& bg=live.view->background;const NativeRoomSpace& space=live.room->space;
+    float rw=bg.right-bg.left,rh=bg.bottom-bg.top,ww=space.right-space.left,wh=space.bottom-space.top;if(ww<=0||wh<=0)return;
+    for(unsigned int i=0;i<gRuntime->deathFx.active.size();++i){
+        const NativeDeathFx& fx=gRuntime->deathFx.active[i];
+        int sx=0,sy=0,frames=0,fw=64,fh=64;if(!EnemyWalkRect(fx.type,fx.variant,&sx,&sy,&frames,&fw,&fh)||frames<=0)continue;
+        float scale=1.0f-fx.time/30.0f;if(scale<0.15f)scale=0.15f;
+        const int frame=((int)(fx.time/3))%frames;
+        const float px=bg.left+(fx.position.x-space.left)*rw/ww;
+        const float py=bg.top+(fx.position.y-space.top)*rh/wh;
+        const unsigned int alpha=(unsigned int)(255.0f*scale)&255U;
+        TexRect(px-fw*scale*0.5f,py-fh*scale*0.75f,fw*scale,fh*scale,
+            (float)(sx+frame*fw),(float)sy,(float)fw,(float)fh,(alpha<<24)|0x00ffffffU);
+    }
+}
 static void DrawPlayer(){
     if(gRuntime->playerBody.removed||!gRuntime->playerSprites.bodyReady)return;
     NativeWorldResident& live=gRuntime->world.resident[gRuntime->world.currentList];if(!live.room||!live.view||!live.view->background.ready)return;
@@ -261,7 +278,7 @@ static void Render(){
     gDevice->SetTextureStageState(0,D3DTSS_COLOROP,D3DTOP_SELECTARG1);gDevice->SetTextureStageState(0,D3DTSS_COLORARG1,D3DTA_TEXTURE);
     gDevice->SetTextureStageState(0,D3DTSS_ALPHAOP,D3DTOP_SELECTARG1);gDevice->SetTextureStageState(0,D3DTSS_ALPHAARG1,D3DTA_TEXTURE);
     gDevice->SetTexture(0,gAtlas);
-    DrawBackground();DrawDoors();DrawRocks();DrawPickups();DrawTrapdoor();DrawEnemies();DrawFamiliars();DrawPlayer();DrawProjectiles();DrawHud();
+    DrawBackground();DrawDoors();DrawRocks();DrawPickups();DrawTrapdoor();DrawEnemies();DrawDeathFx();DrawFamiliars();DrawPlayer();DrawProjectiles();DrawHud();
     gDevice->EndScene();
 }
 static bool SaveBMP(const char* path){

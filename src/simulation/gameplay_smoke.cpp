@@ -414,6 +414,38 @@ int RunBombProbe(NativeMt& random,PortFrontend& ui){
     printf("REROLL purity=%d treatment=%d d8=1 missing=1 damage=%.3f range=%.3f\n",
         state.purityAura?1:0,1,state.stats.damage,state.stats.range);
     delete runtime;return 0;
+}int RunBossAttackProbe(NativeMt& random,PortFrontend& ui){
+    ui.characterPage=0;ui.characterChoice=1;ui.characterMode=0;
+    PortNormalRuntime* runtime=new PortNormalRuntime;PortGameSession session(random,ui);
+    PortSessionStart start=session.StartNormalCharacter(1,*runtime);
+    if(start.result!=NPS_WORLD_PENDING||!AdvanceToBoundary(session,*runtime)||runtime->phase!=PNR_READY){delete runtime;return 194;}
+    NativeWorldResident& live=runtime->world.resident[runtime->world.currentList];
+    const int types[5]={36,62,68,71,262};
+    for(int t=0;t<5;++t){
+        for(int i=0;i<live.enemies.count;++i)delete live.enemies.entries[i];
+        live.enemies.count=0;if(live.room){live.room->clear=false;}
+        runtime->enemyShots.Clear();runtime->playerInvulnerable=1000;
+        NativePoint at=runtime->playerBody.position;at.x+=140.0f;at.y+=40.0f;
+        NativeEnemy* enemy=new NativeEnemy;
+        if(!enemy->Begin(types[t],0,700U+(unsigned int)t*37U,at,0,1)){delete enemy;delete runtime;return 195;}
+        live.enemies.entries[live.enemies.count++]=enemy;
+        if(!RunProjectileTicks(session,*runtime,-1,-1,200)){delete runtime;return 196;}
+        if(runtime->enemyShots.spawned==0){delete runtime;return 197;}
+    }
+    for(int i=0;i<live.enemies.count;++i)delete live.enemies.entries[i];
+    live.enemies.count=0;if(live.room)live.room->clear=false;
+    NativePoint at=runtime->playerBody.position;at.x+=60.0f;
+    NativeEnemy* victim=new NativeEnemy;
+    if(!victim->Begin(10,0,999U,at,0,1)){delete victim;delete runtime;return 198;}
+    live.enemies.entries[live.enemies.count++]=victim;
+    const unsigned int fx0=runtime->deathFx.spawned;
+    victim->Damage(1000.0f);
+    if(!RunProjectileTicks(session,*runtime,-1,-1,1)){delete runtime;return 199;}
+    if(runtime->deathFx.spawned<=fx0){delete runtime;return 200;}
+    if(!RunProjectileTicks(session,*runtime,-1,-1,35)){delete runtime;return 201;}
+    if(!runtime->deathFx.active.empty()){delete runtime;return 202;}
+    printf("BOSS_ATTACKS gurdy=1 pin=1 peep=1 fistula=1 megamaw=1 deathfx=1\n");
+    delete runtime;return 0;
 }int RunFamiliarProbe(NativeMt& random,PortFrontend& ui){
     PortNormalRuntime* runtime=new PortNormalRuntime;PortGameSession session(random,ui);
     PortSessionStart start=session.StartNormalCharacter(1,*runtime);
@@ -880,6 +912,7 @@ int main(int argc,char** argv){
     if(!failed){int activeBatch=RunActiveBatchProbe(random,ui);if(activeBatch){printf("ACTIVE_BATCH_RESULT failed=%d\n",activeBatch);failed=true;}}
     if(!failed){int bossAward=RunBossAwardProbe(random,ui);if(bossAward){printf("BOSS_AWARD_RESULT failed=%d\n",bossAward);failed=true;}}
     if(!failed){int reroll=RunRerollCacheProbe(random,ui);if(reroll){printf("REROLL_RESULT failed=%d\n",reroll);failed=true;}}
+    if(!failed){int bossAttacks=RunBossAttackProbe(random,ui);if(bossAttacks){printf("BOSS_ATTACKS_RESULT failed=%d\n",bossAttacks);failed=true;}}
     if(!failed){int familiar=RunFamiliarProbe(random,ui);if(familiar){printf("FAMILIAR_RESULT failed=%d\n",familiar);failed=true;}}
     if(!failed){int cont=RunContinueProbe(random,ui);if(cont){printf("CONTINUE_RESULT failed=%d\n",cont);failed=true;}}
     if(!failed){int nativeCont=RunNativeContinueProbe(random,ui);if(nativeCont){printf("NATIVE_CONTINUE_RESULT failed=%d\n",nativeCont);failed=true;}}

@@ -30,6 +30,7 @@ def main():
     reroll=re.search(r'^REROLL purity=(\d+) treatment=(\d+) d8=(\d+) missing=(\d+) damage=(-?[0-9.]+) range=(-?[0-9.]+)',log,re.M)
     bossAward=re.search(r'^BOSS_AWARD identity=(\d+) achievement=(\d+) persisted=(\d+)',log,re.M)
     trigger=re.search(r'^NATIVE_CURRENT_TRIGGER perm_damage=(-?[0-9.]+) perm_range=(-?[0-9.]+) purity=(\d+) active=(\d+) stacks=(\d+) crown_disabled=(\d+)',log,re.M)
+    bossAttacks=re.search(r'^BOSS_ATTACKS gurdy=(\d+) pin=(\d+) peep=(\d+) fistula=(\d+) megamaw=(\d+) deathfx=(\d+)',log,re.M)
     pocket=re.search(r'^POCKET hp=(-?\d+)/(-?\d+) bombs=(-?\d+) keys=(-?\d+) coins=(-?\d+)',log,re.M)
     active=re.search(r'^ACTIVE id=(\d+) hp=(-?\d+)/(-?\d+)',log,re.M)
     familiar=re.search(r'^FAMILIAR spawned=(\d+) shots=(\d+) hits=(\d+) enemies=(\d+)',log,re.M)
@@ -141,6 +142,12 @@ def main():
             'native_trigger_active':int(trigger.group(4)) if trigger else 0,
             'native_trigger_stacks':int(trigger.group(5)) if trigger else 0,
             'native_trigger_crown_disabled':int(trigger.group(6)) if trigger else 0,
+            'boss_attack_gurdy':int(bossAttacks.group(1)) if bossAttacks else 0,
+            'boss_attack_pin':int(bossAttacks.group(2)) if bossAttacks else 0,
+            'boss_attack_peep':int(bossAttacks.group(3)) if bossAttacks else 0,
+            'boss_attack_fistula':int(bossAttacks.group(4)) if bossAttacks else 0,
+            'boss_attack_megamaw':int(bossAttacks.group(5)) if bossAttacks else 0,
+            'death_fx':int(bossAttacks.group(6)) if bossAttacks else 0,
             'pocket_hp':int(pocket.group(1)) if pocket else -1,
             'pocket_max_hp':int(pocket.group(2)) if pocket else -1,
             'pocket_bombs':int(pocket.group(3)) if pocket else -1,

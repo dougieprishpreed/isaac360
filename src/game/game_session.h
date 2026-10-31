@@ -47,6 +47,7 @@ struct PortNormalRuntime {
     NativeEnemyShotSystem enemyShots;
     NativeBombSystem bombs;
     NativeFamiliarSystem familiars;
+    NativeDeathFxSystem deathFx;
     NativeRoomFx roomFx;
     NativeMinimaps minimaps;
     NativePauseUi pauseUi;

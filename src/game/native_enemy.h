@@ -1,6 +1,7 @@
 #ifndef GENERIC_NATIVE_ENEMY_H
 #define GENERIC_NATIVE_ENEMY_H
 #include "native_entity_body.h"
+#include <vector>
 struct NativeRoomState;
 class NativeEnemyShotSystem;
 //Prepared enemy bodies for the room actors reached so far. Movement follows
@@ -17,6 +18,15 @@ public:
     void Update(const NativeRoomState&,const NativeEntityBody& player,NativeEnemyShotSystem* shots=0);
     void Damage(float amount);
     void Swap(NativeEnemy&);
+};
+struct NativeDeathFx {int type,variant;NativePoint position;float time;};
+class NativeDeathFxSystem {
+public:
+    std::vector<NativeDeathFx> active;unsigned int spawned;
+    NativeDeathFxSystem();void Clear();void Spawn(const NativeEnemy&);void Step();void Swap(NativeDeathFxSystem&);
+private:
+    NativeDeathFxSystem(const NativeDeathFxSystem&);
+    NativeDeathFxSystem& operator=(const NativeDeathFxSystem&);
 };
 struct NativeEnemyList {
     NativeEnemy* entries[64];

@@ -64,7 +64,7 @@ bool NativeProjectileSystem::Step(PortNormalRuntime& runtime,NativeActionSource*
     //Remove dead actors from the resident list, then expose the clear owner.
     for(int e=0;e<live.enemies.count;){
         NativeEnemy* enemy=live.enemies.entries[e];
-        if(enemy&&enemy->dead){delete enemy;for(int j=e+1;j<live.enemies.count;++j)live.enemies.entries[j-1]=live.enemies.entries[j];--live.enemies.count;live.enemies.entries[live.enemies.count]=0;continue;}
+        if(enemy&&enemy->dead){runtime.deathFx.Spawn(*enemy);delete enemy;for(int j=e+1;j<live.enemies.count;++j)live.enemies.entries[j-1]=live.enemies.entries[j];--live.enemies.count;live.enemies.entries[live.enemies.count]=0;continue;}
         ++e;
     }
     if(live.enemies.count==0)room->clear=true;
@@ -178,7 +178,7 @@ bool NativeBombSystem::Step(PortNormalRuntime& runtime){
         for(int e=0;e<live.enemies.count;){
             NativeEnemy* enemy=live.enemies.entries[e];
             if(enemy&&enemy->dead){
-                delete enemy;
+                runtime.deathFx.Spawn(*enemy);delete enemy;
                 for(int j=e+1;j<live.enemies.count;++j)live.enemies.entries[j-1]=live.enemies.entries[j];
                 --live.enemies.count;live.enemies.entries[live.enemies.count]=0;continue;
             }
@@ -284,7 +284,7 @@ bool NativeFamiliarSystem::Step(PortNormalRuntime& runtime){
         NativePoint clamped;if(room->space.Clamp(f.position,4,4,4,4,&clamped))f.position=clamped;
     }
     for(int e=0;e<live.enemies.count;){NativeEnemy* enemy=live.enemies.entries[e];
-        if(enemy&&enemy->dead){delete enemy;for(int j=e+1;j<live.enemies.count;++j)live.enemies.entries[j-1]=live.enemies.entries[j];--live.enemies.count;live.enemies.entries[live.enemies.count]=0;continue;}
+        if(enemy&&enemy->dead){runtime.deathFx.Spawn(*enemy);delete enemy;for(int j=e+1;j<live.enemies.count;++j)live.enemies.entries[j-1]=live.enemies.entries[j];--live.enemies.count;live.enemies.entries[live.enemies.count]=0;continue;}
         ++e;}
     if(live.enemies.count==0)room->clear=true;
     return true;
