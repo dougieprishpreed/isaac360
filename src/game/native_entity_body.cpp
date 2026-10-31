@@ -238,7 +238,11 @@ const NativeEntityBodyProperties kEnemyBodies[]={
     {412,0,0,40,0.0f,1.0f,40.0f,1.0f,1.0f,1.0f,100.0f,10000.0f,0.0f,"gfx/412.000_Delirium.anm2"},
     {267,0,0,12,0.22f,1.0f,20.0f,1.0f,1.0f,1.0f,75.0f,400.0f,0.0f,"gfx/267.000_Dark One.anm2"},
     {268,0,0,12,0.22f,1.0f,20.0f,1.0f,1.0f,1.0f,75.0f,520.0f,0.0f,"gfx/268.000_Dark One 2.anm2"},
-    {269,0,0,12,0.0f,1.0f,20.0f,1.0f,1.0f,1.0f,75.0f,200.0f,0.0f,"gfx/269.000_Polycephalus.anm2"}
+    {269,0,0,12,0.0f,1.0f,20.0f,1.0f,1.0f,1.0f,75.0f,200.0f,0.0f,"gfx/269.000_Polycephalus.anm2"},
+    {406,0,0,40,60.0f,1.0f,25.0f,1.0f,1.0f,2.0f,50.0f,3500.0f,0.0f,"gfx/406.000_UltraGreed.anm2"},
+    {406,1,0,40,60.0f,1.0f,25.0f,1.0f,1.0f,2.0f,70.0f,2500.0f,0.0f,"gfx/406.001_UltraGreedier.anm2"},
+    {17,0,0,0,24.0f,1.0f,1.0f,1.0f,1.0f,0.0f,100.0f,5.0f,0.0f,"gfx/017.001_Shopkeeper.anm2"},
+    {17,1,0,0,24.0f,1.0f,1.0f,1.0f,1.0f,0.0f,100.0f,5.0f,0.0f,"gfx/017.002_Secret Room Keeper.anm2"}
 };
 }
 const NativeEntityBodyProperties* NativePreparedEnemyBody(int type,int variant){
@@ -266,6 +270,7 @@ bool NativeBossEntityType(int type,int variant){
     if(type==262)return variant==0;
     if(type==264)return variant==0;
     if(type==916)return variant==0;
+    if(type==406)return variant==0||variant==1;
     if(type==72)return variant==0||variant==1;
     if(type==43)return variant==0;
     if(type==45)return variant==0;

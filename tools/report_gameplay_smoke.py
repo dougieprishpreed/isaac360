@@ -33,6 +33,8 @@ def main():
     nativeEffect=re.search(r'^NATIVE_CURRENT_EFFECT count=(\d+) timer=(-?\d+)',log,re.M)
     greed=re.search(r'^GREED start wave=(\d+)/(\d+) room=(\d+) type=(\d+) variant=(\d+) enemies=(\d+)',log,re.M)
     greedDone=re.search(r'^GREED complete waves=(\d+) next=(\d+) room=(\d+)',log,re.M)
+    greedBoss=re.search(r'^GREED boss room=(\d+) type=(\d+) variant=(\d+) enemies=(\d+) ultraGreed=(\d+)',log,re.M)
+    greedContinue=re.search(r'^GREED continue wave=(\d+) room=(\d+) count=(\d+)',log,re.M)
     deathflow=re.search(r'^DEATH_FLOW dyingTicks=(\d+) gameOver=(\d+) restartResult=(\d+) restartPhase=(\d+) restartHP=(-?\d+)/(-?\d+)',log,re.M)
     lock=re.search(r'^LOCK treasureSlot=(\d+) noKeyClosed=(\d+) keyOpened=(\d+) keysLeft=(-?\d+) doorsUnlocked=(\d+) bossOpenWithoutDefeat=(\d+) bossDefeated=(\d+)',log,re.M)
     paths=set()
@@ -132,6 +134,10 @@ def main():
             'greed_room_type':int(greed.group(4)) if greed else -1,
             'greed_enemies':int(greed.group(6)) if greed else 0,
             'greed_complete':bool(greedDone),
+            'greed_boss_room':int(greedBoss.group(1)) if greedBoss else -1,
+            'greed_boss_ultra':int(greedBoss.group(5)) if greedBoss else 0,
+            'greed_continue_wave':int(greedContinue.group(1)) if greedContinue else -1,
+            'greed_continue_room':int(greedContinue.group(2)) if greedContinue else -1,
             'dying_ticks':int(deathflow.group(1)) if deathflow else 0,
             'game_over':bool(int(deathflow.group(2))) if deathflow else False,
             'restart_ready':bool(deathflow and int(deathflow.group(4))==5) if deathflow else False,

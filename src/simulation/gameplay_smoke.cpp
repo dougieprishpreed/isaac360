@@ -454,6 +454,13 @@ int RunBombProbe(NativeMt& random,PortFrontend& ui){
     live.enemies.count=0;live.room->clear=true;
     if(!RunProjectileTicks(session,*runtime,-1,-1,1)){delete runtime;return 173;}
     printf("GREED tick advanced=%d room=%d\n",runtime->greedWave,runtime->world.currentGrid);
+    if(!session.SaveContinue("build/gameplay/greed_continue.dat",*runtime)){delete runtime;return 183;}
+    PortNormalRuntime* resumedGreed=new PortNormalRuntime;NativeMt greedRandom;greedRandom.Seed(777);
+    PortGameSession resumedSession(greedRandom,ui);NativeSceneFiles resumedFiles={"runtime/game/file_index.bin","runtime/game/",1,0,0};
+    if(!resumedSession.ContinueSavedRun("build/gameplay/greed_continue.dat",*resumedGreed,resumedFiles)){delete resumedGreed;delete runtime;return 184;}
+    if(!resumedGreed->greedMode||resumedGreed->greedWave!=1||resumedGreed->world.currentGrid!=2){delete resumedGreed;delete runtime;return 185;}
+    printf("GREED continue wave=%d room=%d count=%d\n",resumedGreed->greedWave,resumedGreed->world.currentGrid,resumedGreed->greedWaveCount);
+    delete resumedGreed;
     for(int wave=runtime->greedWave+1;wave<runtime->greedWaveCount;++wave){
         NativeRoomState* room=runtime->world.Current();if(!room){delete runtime;return 174;}
         room->clear=true;
@@ -463,7 +470,15 @@ int RunBombProbe(NativeMt& random,PortFrontend& ui){
     }
     NativeRoomState* last=runtime->world.Current();if(!last){delete runtime;return 178;}
     last->clear=true;
-    if(!session.AdvanceGreedWave(*runtime,files)||!runtime->greedComplete){delete runtime;return 179;}
+    if(!session.AdvanceGreedWave(*runtime,files)){printf("GREED_BOSS fail=%08x\n",runtime->missingNativePrerequisite);delete runtime;return 179;}
+    if(runtime->greedWave!=runtime->greedWaveCount){delete runtime;return 180;}
+    NativeWorldResident& bossLive=runtime->world.resident[runtime->world.currentList];
+    int bossCount=0;for(int i=0;i<bossLive.enemies.count;++i)if(bossLive.enemies.entries[i]&&bossLive.enemies.entries[i]->type==406)++bossCount;
+    if(!runtime->world.Current()||bossCount!=1){delete runtime;return 181;}
+    printf("GREED boss room=%d type=%d variant=%d enemies=%d ultraGreed=%d\n",runtime->world.currentGrid,
+        runtime->world.Current()->type,runtime->world.Current()->variant,bossLive.enemies.count,bossCount);
+    runtime->world.Current()->clear=true;
+    if(!session.AdvanceGreedWave(*runtime,files)||!runtime->greedComplete){delete runtime;return 182;}
     printf("GREED complete waves=%d next=%d room=%d\n",runtime->greedWaveCount,runtime->greedWave+1,runtime->world.currentGrid);
     ui.characterMode=0;delete runtime;return 0;
 }int RunStatProbe(NativeMt& random,PortFrontend& ui){
