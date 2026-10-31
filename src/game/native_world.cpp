@@ -24,7 +24,7 @@ bool NativeWorld::Bind(const NativeLevelLayout& selected) {
     int owners[3][169];for(int d=0;d<3;++d)for(int i=0;i<169;++i)owners[d][i]=-1;
     for(int i=0;i<selected.count;++i) {
         const NativePlacedRoom& p=selected.rooms[i];const NativeRoomDef* d=NativeRoom(p.definition);
-        if(!d||NativeRoomCatalog(p.definition)!=NC_NORMAL||p.listIndex!=i||p.dimension<0||p.dimension>2||p.gridIndex<0||p.gridIndex>=169||!p.placementSeed)return false;
+        if(!d||(NativeRoomCatalog(p.definition)!=NC_NORMAL&&NativeRoomCatalog(p.definition)!=NC_GREED)||p.listIndex!=i||p.dimension<0||p.dimension>2||p.gridIndex<0||p.gridIndex>=169||!p.placementSeed)return false;
         NativeCell offsets[4];int n=NativeShapeFootprint(d->shape,offsets);if(!n)return false;
         for(int k=0;k<n;++k){NativeCell at={p.gridIndex%13+offsets[k].x,p.gridIndex/13+offsets[k].y};int cell=NativeCellIndex(at);
             if(cell<0||owners[p.dimension][cell]>=0||selected.owners[p.dimension][cell]!=i)return false;owners[p.dimension][cell]=i;}
@@ -32,7 +32,7 @@ bool NativeWorld::Bind(const NativeLevelLayout& selected) {
     for(int d=0;d<3;++d)for(int cell=0;cell<169;++cell){int owner=selected.owners[d][cell];
         if(owner!=owners[d][cell])return false;}
     for(int i=0;i<18;++i){const NativePlacedRoom& p=selected.offGrid[i];if(p.gridIndex!=-i-1||
-        (p.definition>=0&&(NativeRoomCatalog(p.definition)!=NC_NORMAL||!NativeRoom(p.definition))))return false;}
+        (p.definition>=0&&((NativeRoomCatalog(p.definition)!=NC_NORMAL&&NativeRoomCatalog(p.definition)!=NC_GREED)||!NativeRoom(p.definition))))return false;}
     NativeLevelLayout* copy=new NativeLevelLayout(selected);Reset();layout=*copy;delete copy;return true;
 }
 void NativeWorld::Swap(NativeWorld& other) {
@@ -49,7 +49,7 @@ NativeWorldResult NativeWorld::Start(const NativeLevelLayout& selected,int grid,
 }
 NativeWorldResult NativeWorld::Enter(int cell,int dimension,const NativeSceneFiles& files,NativeWorldIssue* issue,const NativeRoomSetupContext* setup) {
     if(issue){memset(issue,0,sizeof(*issue));issue->listIndex=issue->gridIndex=issue->dimension=issue->definition=-1;}
-    if(dimension<0||dimension>2||files.nativeMode<0||files.nativeMode>1)return Result(issue,NWR_BAD_REQUEST);
+    if(dimension<0||dimension>2||files.nativeMode<0||files.nativeMode>3)return Result(issue,NWR_BAD_REQUEST);
     int waterMode;if(setup&&(setup->backdrop!=files.backdrop||setup->configStage<0||!NativeBackdropWaterPitsMode(setup->backdrop,&waterMode)))return Result(issue,NWR_BAD_REQUEST);
     const NativePlacedRoom* p=layout.ByCell(cell,dimension);if(!p||p->definition<0)return Result(issue,NWR_NO_ROOM);
     int id=p->gridIndex<0?507-p->gridIndex-1:p->listIndex;

@@ -86,7 +86,7 @@ int RunLockProbe(NativeMt& random,PortFrontend& ui){
 int RunDeathProbe(NativeMt& random,PortFrontend& ui){
     PortNormalRuntime* runtime=new PortNormalRuntime;PortGameSession session(random,ui);
     PortSessionStart start=session.StartNormalCharacter(1035486403,*runtime);
-    if(start.result!=NPS_WORLD_PENDING)return 40;
+    if(start.result!=NPS_WORLD_PENDING){printf("DEATH_START result=%d mode=%d page=%d choice=%d\\n",start.result,ui.characterMode,ui.characterPage,ui.characterChoice);return 40;}
     if(!AdvanceToBoundary(session,*runtime)||runtime->phase!=PNR_READY)return 41;
     const NativePlacedRoom* target=0;
     for(int i=0;i<runtime->world.layout.count;++i)if(runtime->world.layout.rooms[i].definition==268500997){target=&runtime->world.layout.rooms[i];break;}
@@ -439,6 +439,33 @@ int RunBombProbe(NativeMt& random,PortFrontend& ui){
     if(!RunProjectileTicks(resumed,*second,-1,-1,2)){delete second;return 158;}
     printf("NATIVE_CURRENT_TICK pos=(%.1f,%.1f) ticks=2\n",second->playerBody.position.x,second->playerBody.position.y);
     delete second;return 0;
+}int RunGreedProbe(NativeMt& random,PortFrontend& ui){
+    (void)random;ui.characterPage=0;ui.characterChoice=1;ui.characterMode=2;
+    PortNormalRuntime* runtime=new PortNormalRuntime;PortGameSession session(random,ui);
+    NativeSceneFiles files={"runtime/game/file_index.bin","runtime/game/",1,0,0};
+    PortSessionStart start=session.StartGreedCharacter(1,*runtime,files);
+    if(start.result!=NPS_WORLD_PENDING||runtime->phase!=PNR_READY){printf("GREED_START fail=%d phase=%d prereq=%08x\n",start.result,runtime->phase,runtime->missingNativePrerequisite);delete runtime;return 170;}
+    if(!runtime->greedMode||runtime->greedWaveCount<11){delete runtime;return 171;}
+    NativeWorldResident& live=runtime->world.resident[runtime->world.currentList];
+    if(!live.room||live.enemies.count<=0){delete runtime;return 172;}
+    printf("GREED start wave=%d/%d room=%d type=%d variant=%d enemies=%d\n",runtime->greedWave+1,runtime->greedWaveCount,
+        runtime->world.currentGrid,live.room->type,live.room->variant,live.enemies.count);
+    for(int i=0;i<live.enemies.count;++i)delete live.enemies.entries[i];
+    live.enemies.count=0;live.room->clear=true;
+    if(!RunProjectileTicks(session,*runtime,-1,-1,1)){delete runtime;return 173;}
+    printf("GREED tick advanced=%d room=%d\n",runtime->greedWave,runtime->world.currentGrid);
+    for(int wave=runtime->greedWave+1;wave<runtime->greedWaveCount;++wave){
+        NativeRoomState* room=runtime->world.Current();if(!room){delete runtime;return 174;}
+        room->clear=true;
+        if(!session.AdvanceGreedWave(*runtime,files)){printf("GREED_ADVANCE fail wave=%d prereq=%08x\n",wave,runtime->missingNativePrerequisite);delete runtime;return 175;}
+        if(runtime->greedWave!=wave){delete runtime;return 176;}
+        NativeRoomState* next=runtime->world.Current();if(!next){delete runtime;return 177;}
+    }
+    NativeRoomState* last=runtime->world.Current();if(!last){delete runtime;return 178;}
+    last->clear=true;
+    if(!session.AdvanceGreedWave(*runtime,files)||!runtime->greedComplete){delete runtime;return 179;}
+    printf("GREED complete waves=%d next=%d room=%d\n",runtime->greedWaveCount,runtime->greedWave+1,runtime->world.currentGrid);
+    ui.characterMode=0;delete runtime;return 0;
 }int RunStatProbe(NativeMt& random,PortFrontend& ui){
     PortNormalRuntime* runtime=new PortNormalRuntime;PortGameSession session(random,ui);
     PortSessionStart start=session.StartNormalCharacter(1,*runtime);
@@ -686,6 +713,7 @@ int main(int argc,char** argv){
     if(!failed){int cont=RunContinueProbe(random,ui);if(cont){printf("CONTINUE_RESULT failed=%d\n",cont);failed=true;}}
     if(!failed){int nativeCont=RunNativeContinueProbe(random,ui);if(nativeCont){printf("NATIVE_CONTINUE_RESULT failed=%d\n",nativeCont);failed=true;}}
     if(!failed){int nativeCurrent=RunNativeCurrentProbe(random,ui);if(nativeCurrent){printf("NATIVE_CURRENT_RESULT failed=%d\n",nativeCurrent);failed=true;}}
+    if(!failed){int greed=RunGreedProbe(random,ui);if(greed){printf("GREED_RESULT failed=%d\n",greed);failed=true;}}
     if(!failed){int chars=RunCharacterMatrixProbe(random,ui);if(chars){printf("CHARACTER_RESULT failed=%d\n",chars);failed=true;}}
     if(!failed){int death=RunDeathProbe(random,ui);if(death){printf("DEATH_RESULT failed=%d\n",death);failed=true;}}
     delete runtime;return failed?5:0;

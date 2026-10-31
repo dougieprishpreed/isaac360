@@ -316,14 +316,14 @@ static void BuildActions(const bool* held,unsigned int frame,NativeActionFrame* 
     for(int i=0;i<12;++i)gPrev[i]=held[i];
 }
 int main(int argc,char** argv){
-    unsigned int seed=1;int frames=0,shotFrame=-1,descendTimes=0;bool hidden=false,fast=false,interactive=true,teleport=false,rewardTest=false,windowShot=false,layoutDump=false,bossEnter=false,invulnerable=false,continueRun=false,saveOnExit=false;const char* scriptText=0;const char* shotFile="build/windows/frame.bmp";const char* continueFile="build/windows/continue.dat";const char* nativeContinueFile="build/windows/profile/gamestate1.dat";
+    unsigned int seed=1;int frames=0,shotFrame=-1,descendTimes=0;bool hidden=false,fast=false,interactive=true,teleport=false,rewardTest=false,windowShot=false,layoutDump=false,bossEnter=false,invulnerable=false,continueRun=false,saveOnExit=false,greed=false;const char* scriptText=0;const char* shotFile="build/windows/frame.bmp";const char* continueFile="build/windows/continue.dat";const char* nativeContinueFile="build/windows/profile/gamestate1.dat";
     for(int i=1;i<argc;++i){if(!strcmp(argv[i],"--seed")&&i+1<argc)seed=(unsigned int)strtoul(argv[++i],0,10);
         else if(!strcmp(argv[i],"--frames")&&i+1<argc)frames=atoi(argv[++i]);else if(!strcmp(argv[i],"--hidden"))hidden=true;
         else if(!strcmp(argv[i],"--fast"))fast=true;else if(!strcmp(argv[i],"--script")&&i+1<argc){scriptText=argv[++i];interactive=false;}
         else if(!strcmp(argv[i],"--shot-frame")&&i+1<argc)shotFrame=atoi(argv[++i]);else if(!strcmp(argv[i],"--shot-file")&&i+1<argc)shotFile=argv[++i];
         else if(!strcmp(argv[i],"--teleport-pickups"))teleport=true;else if(!strcmp(argv[i],"--reward-test"))rewardTest=true;
         else if(!strcmp(argv[i],"--window-shot"))windowShot=true;else if(!strcmp(argv[i],"--layout"))layoutDump=true;else if(!strcmp(argv[i],"--boss"))bossEnter=true;
-        else if(!strcmp(argv[i],"--invulnerable"))invulnerable=true;else if(!strcmp(argv[i],"--continue"))continueRun=true;else if(!strcmp(argv[i],"--save"))saveOnExit=true;
+        else if(!strcmp(argv[i],"--invulnerable"))invulnerable=true;else if(!strcmp(argv[i],"--greed"))greed=true;else if(!strcmp(argv[i],"--continue"))continueRun=true;else if(!strcmp(argv[i],"--save"))saveOnExit=true;
         else if(!strcmp(argv[i],"--continue-file")&&i+1<argc)continueFile=argv[++i];
         else if(!strcmp(argv[i],"--descend")&&i+1<argc)descendTimes=atoi(argv[++i]);}
     CreateDirectoryA("build\\windows",0);CreateDirectoryA("build\\windows\\profile",0);gLog=fopen("build/windows/port.log","wt");
@@ -332,8 +332,11 @@ int main(int argc,char** argv){
     LoadAtlas();gUi.Init(false);gUi.BindSaveDirectory("build/windows/profile/");memset(&gUi.profile,0,sizeof(gUi.profile));gUi.characterPage=0;gUi.characterChoice=1;gUi.characterMode=0;
     gRandom.Seed(seed?seed:1);PortNormalRuntime runtime;gRuntime=&runtime;PortGameSession session(gRandom,gUi);
     if(!gUi.music.StartCharacter(gUi.characterPage)){Log("WIN character music stinger failed");return 5;}
-    PortSessionStart start=session.StartNormalCharacter(seed?seed:1,runtime);
-    Log("WIN start result=%d seed=%u player=%d",start.result,seed,start.player);if(start.result!=NPS_WORLD_PENDING)return 3;
+    PortSessionStart start;
+    NativeSceneFiles startFiles={"runtime/game/file_index.bin","runtime/game/",1,2,0};
+    if(greed){gUi.characterMode=2;start=session.StartGreedCharacter(seed?seed:1,runtime,startFiles);}
+    else start=session.StartNormalCharacter(seed?seed:1,runtime);
+    Log("WIN start result=%d seed=%u player=%d greed=%d",start.result,seed,start.player,greed?1:0);if(start.result!=NPS_WORLD_PENDING)return 3;
     NativeSceneFiles files={"runtime/game/file_index.bin","runtime/game/",NativeStageBackdrop(runtime.run.context.stage),runtime.run.context.nativeMode,0};
     int setup=0;bool held[12];NativeActionFrame af;NativeFrameActions fa(af);
     for(int i=0;i<12;++i)held[i]=false;

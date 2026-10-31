@@ -328,7 +328,7 @@ bool RunReachedPlayerTail(NativePlayerUpdate& call,PortNormalRuntime& runtime,Li
     //73ca1b: the separate1a3c timer is zero on this owner.
     if(!Reached(f,0x1a3c,&n))return false;if(n>0){*next=0x73ca25;return false;}
     //73ca5f..73cb0f: greed/seed-effect queries are false for normal mode0.
-    if(runtime.run.context.nativeMode>1){*next=0x73ca5f;return false;}
+    if(runtime.run.context.nativeMode>3){*next=0x73ca5f;return false;}
     //73cb10..73d1d9: seed effect2/0x25/0xe/0x35/0x18/0x1a/0x7/0xa/... gates
     //all false for the ordinary no-seed-effect run; no player cache is written.
     //73d1da/73d2f6/73d3a4: clear flags four-byte owner, element type0x16 and

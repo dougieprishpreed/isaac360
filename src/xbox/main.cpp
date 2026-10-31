@@ -580,7 +580,11 @@ VOID __cdecl main() {
                 FILE* seedFile=fopen("game:\\port\\target_seed.txt","rb");
                 if(seedFile){if(fscanf(seedFile,"%u",&runSeed)!=1)runSeed=0;fclose(seedFile);}
                 if(!runSeed)runSeed=GetTickCount();if(!runSeed)runSeed=1;
-                PortSessionStart start=PortGameSession(gMenuRandom,gUi).StartNormalCharacter(runSeed,gNormalRuntime);Log("PORT normal setup result=%d seed=%u player=%d",start.result,runSeed,start.player);}
+                NativeSceneFiles startFiles={"game:\\game\\file_index.bin","game:\\game\\",1,2,0};
+                PortSessionStart start;
+                if(gUi.characterMode>=2)start=PortGameSession(gMenuRandom,gUi).StartGreedCharacter(runSeed,gNormalRuntime,startFiles);
+                else start=PortGameSession(gMenuRandom,gUi).StartNormalCharacter(runSeed,gNormalRuntime);
+                Log("PORT normal setup result=%d seed=%u player=%d greed=%d",start.result,runSeed,start.player,gUi.characterMode>=2?1:0);}
             if(gUi.characterPending){const NormalRunFlow& run=gNormalRuntime.run;
                 NativeSceneFiles files={"game:\\game\\file_index.bin","game:\\game\\",NativeStageBackdrop(run.context.stage),run.context.nativeMode,0};
                 NormalRunResult result=PortGameSession(gMenuRandom,gUi).AdvanceNormalSetup(gNormalRuntime,files,&frameActions);

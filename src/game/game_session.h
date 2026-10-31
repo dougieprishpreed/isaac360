@@ -61,6 +61,8 @@ struct PortNormalRuntime {
     unsigned int enemyKills,doorsOpened,roomTransitions;
     unsigned int playerHits,playerDeathTicks,doorsUnlocked,gameOverCount,pickupsCollected,collectiblesCollected;int playerInvulnerable,lastCollectible;
     bool playerDead,bossDefeated,descendRequested,startingItemsGranted;
+    bool greedMode,greedComplete;
+    int greedWave,greedWaveCount,greedBossWave,greedConfigStage;
     int doorTransitionGrace;
     unsigned int tickFrame,nativeSaveCaptureAddress;
     //736d70's reached post-755870 presentation/effect state. The trail count
@@ -82,6 +84,10 @@ struct PortGameSession {
     PortSessionStart StartNormalCharacter(unsigned int seed,NormalRunFlow&);
     NormalRunResult AdvanceNormalSetup(NormalRunFlow&);
     PortSessionStart StartNormalCharacter(unsigned int seed,PortNormalRuntime&);
+    //Greed-mode lifecycle: a prepared greed wave room is entered after the
+    //shared player/run setup; room-clear advances the wave sequence.
+    PortSessionStart StartGreedCharacter(unsigned int seed,PortNormalRuntime&,const NativeSceneFiles& files);
+    bool AdvanceGreedWave(PortNormalRuntime&,const NativeSceneFiles&);
     //Game-over restart: rebuild the owned normal session and advance the new
     //run to its ready boundary. It does not replay the dead player's rng.
     PortSessionStart RestartNormal(unsigned int seed,PortNormalRuntime&,const NativeSceneFiles&,NativeActionSource* actions);

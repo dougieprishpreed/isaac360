@@ -1,18 +1,27 @@
 #include "native_rooms.h"
 #include "native_rng.h"
 #include "normal_room_data.h"
+#include "greed_room_data.h"
 #include <string.h>
 typedef char NormalRoomCapacityCheck[(sizeof(kNormalRoomDefs)/sizeof(kNormalRoomDefs[0])<=kNativeRoomCapacity)?1:-1];
-int NativeRoomCount(int catalog){return catalog==NC_NORMAL?sizeof(kNormalRoomDefs)/sizeof(kNormalRoomDefs[0]):0;}
-int NativeRoomId(int catalog,int ordinal){return ordinal>=0&&ordinal<NativeRoomCount(catalog)?kNormalDefinitionBase+kNormalRoomDefs[ordinal].stage*65536+kNormalRoomDefs[ordinal].ordinal:-1;}
-int NativeRoomCatalog(int id){return id>=kNormalDefinitionBase&&id<kNormalDefinitionBase+0x1000000?NC_NORMAL:-1;}
-int NativeRoomPoolIndex(int id){if(NativeRoomCatalog(id)!=NC_NORMAL)return -1;int value=id-kNormalDefinitionBase,stage=value/65536,ordinal=value&65535;const NormalStageRange& r=kNormalStageRanges[stage];return r.source>=0&&ordinal<r.count?r.first+ordinal:-1;}
-const NativeRoomDef* NativeRoom(int id){int i=NativeRoomPoolIndex(id);return i<0?0:&kNormalRoomDefs[i];}
-const NativeRoomSourceDef* NativeRoomSourceBinding(int source){int n=source-kNormalSourceBase;return n>=0&&n<(int)(sizeof(kNormalRoomSources)/sizeof(kNormalRoomSources[0]))?&kNormalRoomSources[n]:0;}
+typedef char GreedRoomCapacityCheck[(sizeof(kGreedRoomDefs)/sizeof(kGreedRoomDefs[0])<=kNativeRoomCapacity)?1:-1];
+namespace {
+const NativeRoomDef* RoomDefs(int catalog){return catalog==NC_GREED?kGreedRoomDefs:(catalog==NC_NORMAL?kNormalRoomDefs:0);}
+int RoomDefCount(int catalog){return catalog==NC_GREED?(int)(sizeof(kGreedRoomDefs)/sizeof(kGreedRoomDefs[0])):(catalog==NC_NORMAL?(int)(sizeof(kNormalRoomDefs)/sizeof(kNormalRoomDefs[0])):0);}
+const NormalStageRange* StageRanges(int catalog){return catalog==NC_GREED?kGreedStageRanges:(catalog==NC_NORMAL?kNormalStageRanges:0);}
+int DefinitionBase(int catalog){return catalog==NC_GREED?kGreedDefinitionBase:(catalog==NC_NORMAL?kNormalDefinitionBase:0);}
+int SourceBase(int catalog){return catalog==NC_GREED?kGreedSourceBase:(catalog==NC_NORMAL?kNormalSourceBase:0);}
+}
+int NativeRoomCount(int catalog){return RoomDefCount(catalog);}
+int NativeRoomId(int catalog,int ordinal){const NativeRoomDef* d=RoomDefs(catalog);return d&&ordinal>=0&&ordinal<RoomDefCount(catalog)?DefinitionBase(catalog)+d[ordinal].stage*65536+d[ordinal].ordinal:-1;}
+int NativeRoomCatalog(int id){if(id>=kNormalDefinitionBase&&id<kNormalDefinitionBase+0x1000000)return NC_NORMAL;if(id>=kGreedDefinitionBase&&id<kGreedDefinitionBase+0x1000000)return NC_GREED;return -1;}
+int NativeRoomPoolIndex(int id){int catalog=NativeRoomCatalog(id);if(catalog<0)return -1;int value=id-DefinitionBase(catalog),stage=value/65536,ordinal=value&65535;const NormalStageRange& r=StageRanges(catalog)[stage];return r.source>=0&&ordinal<r.count?r.first+ordinal:-1;}
+const NativeRoomDef* NativeRoom(int id){int catalog=NativeRoomCatalog(id);int i=NativeRoomPoolIndex(id);return i<0?0:&RoomDefs(catalog)[i];}
+const NativeRoomSourceDef* NativeRoomSourceBinding(int source){if(source>=kGreedSourceBase){int n=source-kGreedSourceBase;return n>=0&&n<(int)(sizeof(kGreedRoomSources)/sizeof(kGreedRoomSources[0]))?&kGreedRoomSources[n]:0;}int n=source-kNormalSourceBase;return n>=0&&n<(int)(sizeof(kNormalRoomSources)/sizeof(kNormalRoomSources[0]))?&kNormalRoomSources[n]:0;}
 const char* NativeRoomSource(int source){const NativeRoomSourceDef* s=NativeRoomSourceBinding(source);return s?s->resource:0;}
-unsigned int NativeCatalogFingerprint(int catalog){return catalog==NC_NORMAL?kNormalCatalogFingerprint:0;}
+unsigned int NativeCatalogFingerprint(int catalog){return catalog==NC_GREED?kGreedCatalogFingerprint:(catalog==NC_NORMAL?kNormalCatalogFingerprint:0);}
 const NativeRoomDef* NativeFindRoom(const char* resource,int ordinal,int catalog){if(!resource||ordinal<0)return 0;for(int i=0;i<NativeRoomCount(catalog);++i){const NativeRoomDef* r=NativeRoom(NativeRoomId(catalog,i));if(r->ordinal==ordinal&&!strcmp(NativeRoomSource(r->source),resource))return r;}return 0;}
-int NativeStageSource(int stage,int catalog){return catalog==NC_NORMAL&&stage>=0&&stage<256?kNormalStageRanges[stage].source:-1;}
+int NativeStageSource(int stage,int catalog){return stage>=0&&stage<256?StageRanges(catalog)[stage].source:-1;}
 //Standard-floor backdrop ids from the inherited backdrops.xml ordering.
 //Alternate stage types retain their own unsupported-context boundary.
 int NativeStageBackdrop(int stage){

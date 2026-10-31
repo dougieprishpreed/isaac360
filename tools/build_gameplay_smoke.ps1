@@ -20,6 +20,8 @@ try {
     if($LASTEXITCODE -ne 0){throw 'Player runtime source preparation failed.'}
     & python tools/prepare_room_runtime.py
     if($LASTEXITCODE -ne 0){throw 'Room runtime source preparation failed.'}
+    & python tools/prepare_greed_catalog.py
+    if($LASTEXITCODE -ne 0){throw 'Greed catalogue preparation failed.'}
     $sources=@(Get-ChildItem -LiteralPath src/game -Filter '*.cpp' | Sort-Object Name | ForEach-Object {$_.FullName})
     $sources+=@('src/content/game_content.cpp','src/content/resource_index.cpp','src/content/room_record.cpp') | ForEach-Object {(Join-Path $projectRoot $_)}
     $sources | ForEach-Object {'"'+$_+'"'} | Set-Content -Encoding ASCII build/gameplay/sources.rsp

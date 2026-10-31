@@ -10,6 +10,8 @@ $portWorkers=Get-Process -Name 'MSBuild','cl' -ErrorAction SilentlyContinue | Wh
 }
 if ($portWorkers) { throw 'Another port build worker is active.' }
 New-Item -ItemType Directory -Force -Path 'build/generated','build/xbox','logs' | Out-Null
+& python tools/prepare_greed_catalog.py
+if($LASTEXITCODE -ne 0){throw 'Greed catalogue preparation failed.'}
 $buildProcess = [Diagnostics.Process]::GetCurrentProcess()
 $oldAffinity = $buildProcess.ProcessorAffinity
 $selectedMask = 0L

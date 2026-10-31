@@ -15,7 +15,7 @@ try {
         @{path=$_.FullName.Substring($projectRoot.Length+1).Replace('\','/');sha256=(Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()}
     })
     ConvertTo-Json -InputObject $targetBefore -Depth 4 | Set-Content -Encoding UTF8 build/normal_flow/target_before.json
-    foreach($script in @('prepare_native_data.py','prepare_boss_data.py','prepare_player_setup.py','prepare_mid_special_reference.py','prepare_floor_tail_reference.py','prepare_normal_flow.py')) {
+    foreach($script in @('prepare_native_data.py','prepare_boss_data.py','prepare_player_setup.py','prepare_mid_special_reference.py','prepare_floor_tail_reference.py','prepare_normal_flow.py','prepare_greed_catalog.py')) {
         & python "tools/$script"
         if($LASTEXITCODE -ne 0) {throw "Preparation failed: $script"}
     }

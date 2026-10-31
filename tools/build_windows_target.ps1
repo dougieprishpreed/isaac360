@@ -15,6 +15,7 @@ try {
     New-Item -ItemType Directory -Force -Path build/windows | Out-Null
     & python tools/prepare_player_runtime.py; if($LASTEXITCODE -ne 0){throw 'Player runtime preparation failed.'}
     & python tools/prepare_room_runtime.py; if($LASTEXITCODE -ne 0){throw 'Room runtime preparation failed.'}
+    & python tools/prepare_greed_catalog.py; if($LASTEXITCODE -ne 0){throw 'Greed catalogue preparation failed.'}
     & python tools/prepare_gameplay_atlas.py; if($LASTEXITCODE -ne 0){throw 'Gameplay atlas preparation failed.'}
     $sources=@(Get-ChildItem -LiteralPath src/game -Filter '*.cpp' | Sort-Object Name | ForEach-Object {$_.FullName})
     $sources+=@('src/content/game_content.cpp','src/content/resource_index.cpp','src/content/room_record.cpp','src/win/main.cpp') | ForEach-Object {(Join-Path $projectRoot $_)}

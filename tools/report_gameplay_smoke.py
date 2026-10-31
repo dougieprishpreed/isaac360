@@ -31,16 +31,18 @@ def main():
     nativeCont=re.search(r'^NATIVE_CONTINUE seed=(\d+) stage=(\d+) hp=(-?\d+)/(-?\d+)',log,re.M)
     nativeCurrent=re.search(r'^NATIVE_CURRENT stage=(\d+) hp=(-?\d+)/(-?\d+) soul=(-?\d+) keys=(-?\d+) bombs=(-?\d+) coins=(-?\d+) active=(-?\d+) card=(-?\d+) pill=(-?\d+) poolCounter=(\d+)(?: pos=\((-?[0-9.]+),(-?[0-9.]+)\) fd=(-?[0-9.]+) dmg=(-?[0-9.]+) spd=(-?[0-9.]+) luck=(-?[0-9.]+)(?: effects=(-?\d+))?)?',log,re.M)
     nativeEffect=re.search(r'^NATIVE_CURRENT_EFFECT count=(\d+) timer=(-?\d+)',log,re.M)
+    greed=re.search(r'^GREED start wave=(\d+)/(\d+) room=(\d+) type=(\d+) variant=(\d+) enemies=(\d+)',log,re.M)
+    greedDone=re.search(r'^GREED complete waves=(\d+) next=(\d+) room=(\d+)',log,re.M)
     deathflow=re.search(r'^DEATH_FLOW dyingTicks=(\d+) gameOver=(\d+) restartResult=(\d+) restartPhase=(\d+) restartHP=(-?\d+)/(-?\d+)',log,re.M)
     lock=re.search(r'^LOCK treasureSlot=(\d+) noKeyClosed=(\d+) keyOpened=(\d+) keysLeft=(-?\d+) doorsUnlocked=(\d+) bossOpenWithoutDefeat=(\d+) bossDefeated=(\d+)',log,re.M)
     paths=set()
     for folder in ('src/game','src/content','build/generated'):
         paths.update(f for f in (ROOT/folder).rglob('*') if f.suffix in ('.cpp','.h','.inc'))
     paths.update(ROOT/f for f in ('src/simulation/gameplay_smoke.cpp','tools/build_gameplay_smoke.ps1','tools/build_gameplay_smoke.cmd',
-        'tools/prepare_player_runtime.py','tools/prepare_native_persistence.py','tools/prepare_room_runtime.py','tools/report_gameplay_smoke.py',
+        'tools/prepare_player_runtime.py','tools/prepare_native_persistence.py','tools/prepare_room_runtime.py','tools/prepare_greed_catalog.py','tools/report_gameplay_smoke.py',
         'build/gameplay/gameplay_smoke.exe','build/gameplay/build.log','build/gameplay/smoke.log'))
     reports=('source_data_check.json','original_configuration.json','normal_player_creation_reference.json','native_player_runtime_reference.json',
-        'native_item_pool_reference.json','native_nightmare_reference.json','native_persistence_reference.json')
+        'native_item_pool_reference.json','native_nightmare_reference.json','native_persistence_reference.json','greed_catalog.json')
     paths.update(ROOT/'runtime/port'/f for f in reports)
     packet={'format':'focused-gameplay-host-v2','recorded_utc':datetime.datetime.now(datetime.timezone.utc).isoformat(),
         'command':f'powershell -NoProfile -ExecutionPolicy Bypass -File tools/build_gameplay_smoke.ps1 -Seed {a.seed}'+(' -Restart' if a.restart else ''),
@@ -125,6 +127,11 @@ def main():
             'native_current_damage':float(nativeCurrent.group(15)) if nativeCurrent and nativeCurrent.group(15) else 0.0,
             'native_current_effects':int(nativeCurrent.group(18)) if nativeCurrent and nativeCurrent.group(18) else 0,
             'native_current_effect_timer':int(nativeEffect.group(2)) if nativeEffect else 0,
+            'greed_wave':int(greed.group(1)) if greed else 0,
+            'greed_waves':int(greed.group(2)) if greed else 0,
+            'greed_room_type':int(greed.group(4)) if greed else -1,
+            'greed_enemies':int(greed.group(6)) if greed else 0,
+            'greed_complete':bool(greedDone),
             'dying_ticks':int(deathflow.group(1)) if deathflow else 0,
             'game_over':bool(int(deathflow.group(2))) if deathflow else False,
             'restart_ready':bool(deathflow and int(deathflow.group(4))==5) if deathflow else False,

@@ -29,7 +29,7 @@ Factory SelectedFactory(const RoomRecord& record,const NativeSpawnChoice& choice
 }
 }
 NativeSceneResult NativeSceneInspectPlan(const RoomRecord& record,const NativeSpawnPlan& plan,int backdrop,int mode,NativeSceneDependencies* output) {
-    if(!output||record.format!=RRF_STB1||plan.count<0||plan.count>kNativeRoomGridLimit||plan.count!=(int)record.stackCount||backdrop<0||mode<0||mode>1)return NSC_BAD_REQUEST;
+    if(!output||record.format!=RRF_STB1||plan.count<0||plan.count>kNativeRoomGridLimit||plan.count!=(int)record.stackCount||backdrop<0||mode<0||mode>3)return NSC_BAD_REQUEST;
     NativeSceneDependencies next;memset(&next,0,sizeof(next));
     for(int i=0;i<plan.count;++i){const NativeSpawnChoice& c=plan.choices[i];if(!c.present)continue;
         if(c.grid<0||c.grid>=kNativeRoomGridLimit||!c.seed)return NSC_BAD_REQUEST;
@@ -63,7 +63,7 @@ NativeSceneResult NativeSceneReadRecord(const NativeSceneFiles& files,int defini
 NativeSceneResult NativeSceneBuildRoom(const RoomRecord& record,const NativeRoomSeeds& seeds,int backdrop,int nativeMode,int configStage,
     NativeRoomState* output,NativeConstructionIssue* issue,NativeRoomMarkers* markers,unsigned int frame,NativeEnemyList* enemies,NativePickupList* pickups) {
     NativeConstructionIssue detail={NCS_HEADER,-1,0,0,0,NRS_BAD_DATA};if(issue)*issue=detail;
-    if(!output||backdrop<0||nativeMode<0||nativeMode>1||configStage<0||!seeds.spawn||!seeds.award)return NSC_BAD_REQUEST;
+    if(!output||backdrop<0||nativeMode<0||nativeMode>3||configStage<0||!seeds.spawn||!seeds.award)return NSC_BAD_REQUEST;
     if(record.format!=RRF_STB1){detail.stage=NCS_FORMAT;if(issue)*issue=detail;return NSC_UNSUPPORTED_CONTENT;}
     NativeRoomState room;memset(&room,0,sizeof(room));room.type=record.type;room.variant=record.variant;room.shape=record.shape;
     if(!room.geometry.Init(record.shape,record.width,record.height))return NSC_UNSUPPORTED_SHAPE;

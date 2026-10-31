@@ -1,8 +1,9 @@
 #ifndef GENERIC_NATIVE_ROOMS_H
 #define GENERIC_NATIVE_ROOMS_H
 static const int kNativeRoomCapacity=32768;
-enum NativeCatalog { NC_NORMAL=1 };
+enum NativeCatalog { NC_NORMAL=1,NC_GREED=2 };
 static const int kNormalDefinitionBase=0x10000000,kNormalSourceBase=0x10000;
+static const int kGreedDefinitionBase=0x20000000,kGreedSourceBase=0x20000;
 struct NativeRoomDef {
     int source,stage,ordinal,type; unsigned int variant,subtype; int difficulty,shape;
     unsigned int doors; int width,height; float weight; unsigned int offset,bytes;

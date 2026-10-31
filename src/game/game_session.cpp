@@ -4,7 +4,7 @@
 #include "native_save_reader.h"
 #include <string.h>
 #include <stdio.h>
-PortNormalRuntime::PortNormalRuntime():initialSaveFileWritten(false),phase(PNR_IDLE),missingNativePrerequisite(0),completePlayerInitializations(0),completePlayerTicks(0),completeWholeGameplayTicks(0),enemyKills(0),doorsOpened(0),roomTransitions(0),playerHits(0),playerDeathTicks(0),doorsUnlocked(0),gameOverCount(0),pickupsCollected(0),collectiblesCollected(0),playerInvulnerable(0),lastCollectible(0),playerDead(false),bossDefeated(false),descendRequested(false),startingItemsGranted(false),doorTransitionGrace(0),tickFrame(0),nativeSaveCaptureAddress(0),playerTailTrailSegments(0),playerTailRenderCallbacks(0),playerTailTicks(0),roomEntryPrefixPrepared(false) {
+PortNormalRuntime::PortNormalRuntime():initialSaveFileWritten(false),phase(PNR_IDLE),missingNativePrerequisite(0),completePlayerInitializations(0),completePlayerTicks(0),completeWholeGameplayTicks(0),enemyKills(0),doorsOpened(0),roomTransitions(0),playerHits(0),playerDeathTicks(0),doorsUnlocked(0),gameOverCount(0),pickupsCollected(0),collectiblesCollected(0),playerInvulnerable(0),lastCollectible(0),playerDead(false),bossDefeated(false),descendRequested(false),startingItemsGranted(false),greedMode(false),greedComplete(false),greedWave(0),greedWaveCount(0),greedBossWave(0),greedConfigStage(0),doorTransitionGrace(0),tickFrame(0),nativeSaveCaptureAddress(0),playerTailTrailSegments(0),playerTailRenderCallbacks(0),playerTailTicks(0),roomEntryPrefixPrepared(false) {
     memset(&run,0,sizeof(run));memset(&entryIssue,0,sizeof(entryIssue));
     gameRandom.Default();
 }
@@ -53,13 +53,124 @@ PortSessionStart PortGameSession::StartNormalCharacter(unsigned int seed,PortNor
         //Virtual Init, the reached resource/callback services and manager
         //registration have returned before006b4b5e generation begins.
         runtime.missingNativePrerequisite=0;runtime.phase=PNR_GENERATING;runtime.tickFrame=0;
-        runtime.completePlayerInitializations=runtime.completePlayerTicks=0;runtime.completeWholeGameplayTicks=0;runtime.enemyKills=runtime.doorsOpened=runtime.roomTransitions=0;runtime.playerHits=runtime.playerDeathTicks=runtime.doorsUnlocked=runtime.gameOverCount=runtime.pickupsCollected=runtime.collectiblesCollected=0;runtime.lastCollectible=0;runtime.playerInvulnerable=0;runtime.playerDead=false;runtime.bossDefeated=false;runtime.descendRequested=false;runtime.startingItemsGranted=false;runtime.doorTransitionGrace=0;
+        runtime.completePlayerInitializations=runtime.completePlayerTicks=0;runtime.completeWholeGameplayTicks=0;runtime.enemyKills=runtime.doorsOpened=runtime.roomTransitions=0;runtime.playerHits=runtime.playerDeathTicks=runtime.doorsUnlocked=runtime.gameOverCount=runtime.pickupsCollected=runtime.collectiblesCollected=0;runtime.lastCollectible=0;runtime.playerInvulnerable=0;runtime.playerDead=false;runtime.bossDefeated=false;runtime.descendRequested=false;runtime.startingItemsGranted=false;runtime.greedMode=false;runtime.greedComplete=false;runtime.greedWave=0;runtime.greedWaveCount=0;runtime.greedBossWave=0;runtime.greedConfigStage=0;runtime.doorTransitionGrace=0;
         runtime.playerTailTrailSegments=0;runtime.playerTailRenderCallbacks=0;runtime.playerTailTicks=0;}
     if(start.result==NPS_WORLD_PENDING)runtime.roomEntryPrefixPrepared=false;
     delete next;
     frontend.CharacterStarted();
     if(start.result==NPS_WORLD_PENDING&&runtime.phase==PNR_GENERATING)frontend.characterPending=true;
     return start;
+}
+namespace {
+bool GreedWaveDefinitions(int stage,unsigned int seed,const NativeSceneFiles& files,unsigned int wanted,std::vector<int>& output){
+    output.clear();
+    for(unsigned int variant=0;variant<2048&&output.size()<wanted;++variant){
+        int definition=-1;if(NativeFindRoomVariant(stage,11,variant,&definition,NC_GREED)!=NR_OK)continue;
+        unsigned char* raw=0;unsigned int length=0,hash=0;
+        if(NativeSceneReadRecord(files,definition,&raw,&length,&hash)!=NSC_OK){delete[] raw;continue;}
+        RoomRecord record;bool opened=record.Open(raw,length,RRF_STB1)==RRR_OK;
+        bool use=false;
+        if(opened){
+            NativeRoomSeeds seeds;if(NativeInitRoomSeeds(seed+variant*0x9e3779b9U,&seeds)){
+                NativeSpawnPlan plan;
+                if(NativePlanRoomSpawns(record,seeds,&plan)==NRS_OK){
+                    NativeSceneDependencies dependencies;
+                    if(NativeSceneInspectPlan(record,plan,files.backdrop,2,&dependencies)==NSC_OK&&dependencies.count==0){
+                        for(int i=0;i<plan.count&&!use;++i){
+                            const NativeSpawnChoice& choice=plan.choices[i];
+                            if(choice.present&&choice.entry.type!=5&&NativePreparedEnemyBody(choice.entry.type,choice.entry.variant))use=true;
+                        }
+                    }
+                }
+            }
+        }
+        delete[] raw;
+        if(use)output.push_back(definition);
+    }
+    return output.size()==wanted;
+}
+}
+PortSessionStart PortGameSession::StartGreedCharacter(unsigned int seed,PortNormalRuntime& runtime,const NativeSceneFiles& files){
+    const int requestedMode=frontend.characterMode;
+    frontend.characterMode=0;
+    NativeSceneFiles normalFiles=files;normalFiles.backdrop=NativeStageBackdrop(1);normalFiles.nativeMode=0;
+    PortSessionStart start=StartNormalCharacter(seed,runtime);
+    if(start.result!=NPS_WORLD_PENDING){frontend.characterMode=requestedMode;return start;}
+    for(int step=0;step<2000&&(runtime.phase==PNR_GENERATING||runtime.phase==PNR_ROOM_COMPONENTS);++step){
+        NativeActionFrame frame;frame.Clear(runtime.playerCreation.native153c,runtime.playerBody.entityToken,normalFiles.frame+step);
+        frame.SupplyConnection(true);frame.SupplyDrop(false);
+        for(int a=0;a<12;++a){frame.SupplyHeld(a,false);frame.SupplyPressed(a,false);if(a<8)frame.SupplyValue(a,0);}
+        NativeFrameActions generated(frame);
+        if(AdvanceNormalSetup(runtime,normalFiles,&generated)==NFR_BAD_REQUEST)break;
+    }
+    if(runtime.phase!=PNR_READY){frontend.characterMode=requestedMode;start.result=NPS_BAD_REQUEST;return start;}
+    NativeSceneFiles greedFiles=files;greedFiles.backdrop=NativeStageBackdrop(1);greedFiles.nativeMode=2;
+    int configStage=2;if(!NativeRoomConfigStage(1,11,-1,2,&configStage))configStage=2;
+    const unsigned int waveCount=11+(requestedMode==3?1:0);
+    std::vector<int> definitions;
+    if(!GreedWaveDefinitions(1,seed,greedFiles,waveCount,definitions)){
+        frontend.characterMode=requestedMode;start.result=NPS_BAD_REQUEST;return start;
+    }
+    NativeLevelLayout layout;layout.Reset();layout.currentDimension=0;layout.count=(int)definitions.size();
+    for(unsigned int i=0;i<definitions.size();++i){
+        NativePlacedRoom& room=layout.rooms[i];
+        const int origin=(int)i*2;
+        room.gridIndex=origin;room.safeGridIndex=origin;room.listIndex=(int)i;room.dimension=0;
+        room.definition=definitions[i];room.doors=0;room.flags=1;room.visitedCount=0;room.nativeB4=0xffffffffU;
+        room.placementSeed=seed+i*0x9e3779b9U+(i?1:0);
+        if(!NativeInitRoomSeeds(room.placementSeed,&room.seeds)){frontend.characterMode=requestedMode;start.result=NPS_BAD_REQUEST;return start;}
+        NativeCell offsets[4];int footprint=NativeShapeFootprint(NativeRoom(room.definition)->shape,offsets);
+        if(!footprint){frontend.characterMode=requestedMode;start.result=NPS_BAD_REQUEST;return start;}
+        for(int k=0;k<footprint;++k){
+            NativeCell cell={origin%13+offsets[k].x,origin/13+offsets[k].y};int index=NativeCellIndex(cell);
+            if(index<0){frontend.characterMode=requestedMode;start.result=NPS_BAD_REQUEST;return start;}
+            layout.owners[0][index]=(int)i;
+        }
+    }
+    NativeWorldIssue issue;
+    if(runtime.world.Start(layout,0,0,greedFiles,&issue,0)!=NWR_OK){
+        runtime.missingNativePrerequisite=0x670001U|((unsigned int)issue.source<<16);frontend.characterMode=requestedMode;start.result=NPS_BAD_REQUEST;return start;
+    }
+    runtime.run.layout=layout;runtime.run.currentGrid=0;runtime.run.previousGrid=0;runtime.run.placement.dimension=0;
+    runtime.run.context.stage=1;runtime.run.context.stageType=0;runtime.run.context.nativeMode=requestedMode;
+    runtime.run.context.challenge=false;runtime.run.context.effectiveCurses=0;runtime.run.context.gameFlags=0;
+    runtime.run.context.runCounter=0;runtime.run.context.held599=false;runtime.run.context.reservationProfileGate=false;
+    runtime.run.floor.phase=NF_COMPLETE;runtime.run.floor.plan.configStage=configStage;runtime.run.phase=NRF_NEED_ROOM_ENTRY;
+    runtime.run.player.mode=requestedMode;
+    NativeRoomState* room=runtime.world.Current();
+    if(!room){frontend.characterMode=requestedMode;start.result=NPS_BAD_REQUEST;return start;}
+    runtime.playerBody.position.x=(room->space.left+room->space.right)*0.5f;
+    runtime.playerBody.position.y=(room->space.top+room->space.bottom)*0.5f;
+    runtime.playerBody.previousPosition=runtime.playerBody.position;
+    runtime.playerBody.velocity.x=runtime.playerBody.velocity.y=0;runtime.playerBody.removed=false;
+    runtime.playerInvulnerable=0;runtime.projectiles.Reset();runtime.enemyShots.Clear();runtime.bombs.Clear();runtime.familiars.Clear();
+    runtime.greedMode=true;runtime.greedComplete=false;runtime.greedWave=0;runtime.greedWaveCount=(int)definitions.size();
+    runtime.greedBossWave=9+(requestedMode==3?1:0);runtime.greedConfigStage=configStage;
+    runtime.startingItemsGranted=false;runtime.phase=PNR_READY;runtime.missingNativePrerequisite=0;
+    frontend.characterMode=requestedMode;
+    return start;
+}
+bool PortGameSession::AdvanceGreedWave(PortNormalRuntime& runtime,const NativeSceneFiles& files){
+    if(!runtime.greedMode||runtime.greedComplete)return true;
+    if(runtime.world.Current()&&!runtime.world.Current()->clear)return true;
+    const int next=runtime.greedWave+1;
+    if(next>=runtime.greedWaveCount){runtime.greedComplete=true;return true;}
+    NativeSceneFiles greedFiles=files;greedFiles.backdrop=NativeStageBackdrop(1);greedFiles.nativeMode=2;
+    NativeWorldIssue issue;
+    int grid=runtime.run.layout.rooms[next].gridIndex;
+    if(runtime.world.Enter(grid,0,greedFiles,&issue,0)!=NWR_OK){
+        runtime.missingNativePrerequisite=0x670002U|((unsigned int)issue.source<<16);return false;
+    }
+    runtime.greedWave=next;runtime.run.currentGrid=grid;runtime.run.previousGrid=grid;
+    NativeRoomState* room=runtime.world.Current();
+    if(room){
+        NativePoint at={(room->space.left+room->space.right)*0.5f,(room->space.top+room->space.bottom)*0.5f};
+        runtime.playerBody.position=at;runtime.playerBody.previousPosition=at;
+        runtime.playerBody.velocity.x=runtime.playerBody.velocity.y=0;runtime.playerBody.removed=false;
+    }
+    runtime.projectiles.Reset();runtime.enemyShots.Clear();runtime.bombs.Clear();runtime.familiars.Clear();
+    runtime.doorTransitionGrace=0;
+    return true;
 }
 PortSessionStart PortGameSession::RestartNormal(unsigned int seed,PortNormalRuntime& runtime,const NativeSceneFiles& files,NativeActionSource* actions){
     PortSessionStart start=StartNormalCharacter(seed,runtime);
@@ -219,6 +330,9 @@ NormalRunResult PortGameSession::TickNormal(PortNormalRuntime& runtime,const Nat
     if(!live.update||!runtime.playerBody.ready)return NFR_BAD_REQUEST;
     ++runtime.tickFrame;runtime.history.fields.Put(0x1a2e1c,runtime.tickFrame);
     if(!live.update->TickActors(runtime,actions,&files,&globalRandom,&runtime.missingNativePrerequisite))return NFR_PENDING;
+    if(runtime.greedMode&&!runtime.greedComplete&&live.room&&live.room->clear){
+        if(!AdvanceGreedWave(runtime,files))return NFR_PENDING;
+    }
     runtime.missingNativePrerequisite=0;return NFR_OK;
 }
 PortSessionStart PortGameSession::StartNormalCharacter(unsigned int seed,NormalRunFlow& flow) {
