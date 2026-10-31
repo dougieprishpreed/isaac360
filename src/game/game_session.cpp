@@ -73,7 +73,7 @@ bool PortGameSession::DescendNormal(PortNormalRuntime& runtime,NativeSceneFiles&
     const int nextStage=(int)runtime.run.context.stage+1;
     //Basement and Cellar are the prepared graphics; later stages keep their
     //explicit unsupported-context boundary instead of substituting art.
-    if(nextStage<2||nextStage>6)return false;
+    if(nextStage<2||nextStage>8)return false;
     NativeFloorContext context=runtime.run.context;
     context.stage=nextStage;context.stageType=0;context.effectiveCurses=0;
     context.challenge=false;context.gameFlags=0;context.runCounter=0;
@@ -240,7 +240,7 @@ NativeWorldResult PortGameSession::PrepareNormalWorld(const NormalRunFlow& flow,
     //Backdrop6's option and alternate-stage flags require their actual inputs.
     //The first two standard floor graphics are prepared (basement, cellar).
     //Later stages retain their explicit unsupported-context boundary.
-    if(flow.context.stage<1||flow.context.stage>6||flow.context.stageType<0||flow.context.stageType>2||files.backdrop!=NativeStageBackdrop(flow.context.stage))return NWR_BAD_REQUEST;
+    if(flow.context.stage<1||flow.context.stage>8||flow.context.stageType<0||flow.context.stageType>2||files.backdrop!=NativeStageBackdrop(flow.context.stage))return NWR_BAD_REQUEST;
     NativeRoomSetupContext setup={files.backdrop,flow.floor.plan.configStage,false,0};
     return world.Start(flow.layout,flow.currentGrid,flow.placement.dimension,files,issue,&setup);
 }

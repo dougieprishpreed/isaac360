@@ -162,7 +162,41 @@ const NativeEntityBodyProperties kEnemyBodies[]={
     {303,0,0,12,0.14f,1.0f,13.0f,1.0f,1.0f,1.0f,5.0f,16.0f,0.0f,"gfx/303.000_Blister.anm2"},
     {304,0,0,12,0.0f,1.0f,13.0f,1.0f,1.0f,1.0f,5.0f,15.0f,0.0f,"gfx/304.000_TheThing.anm2"},
     {305,0,0,12,0.20f,1.0f,13.0f,1.0f,1.0f,1.0f,5.0f,9.0f,0.0f,"gfx/305.000_Ministro.anm2"},
-    {306,0,0,0,0.24f,1.0f,13.0f,1.0f,1.0f,0.0f,100.0f,9.0f,0.0f,"gfx/306.000_Portal.anm2"}
+    {306,0,0,0,0.24f,1.0f,13.0f,1.0f,1.0f,0.0f,100.0f,9.0f,0.0f,"gfx/306.000_Portal.anm2"},
+    {15,0,0,12,0.28f,1.0f,13.0f,1.0f,1.0f,1.0f,10.0f,15.0f,0.0f,"gfx/015.000_Clotty.anm2"},
+    {15,1,0,12,0.28f,1.0f,13.0f,1.0f,1.0f,1.0f,10.0f,15.0f,0.0f,"gfx/015.001_Clot.anm2"},
+    {15,3,0,12,0.28f,1.0f,13.0f,1.0f,1.0f,1.0f,10.0f,20.0f,0.0f,"gfx/015.003_grilled clotty.anm2"},
+    {53,0,0,12,0.14f,1.0f,13.0f,1.0f,1.0f,0.0f,10.0f,20.0f,0.0f,"gfx/053.000_Dople.anm2"},
+    {56,0,0,12,0.0f,1.0f,13.0f,1.0f,1.0f,1.0f,30.0f,30.0f,0.0f,"gfx/056.000_Lump.anm2"},
+    {57,0,0,12,0.42f,1.0f,13.0f,1.0f,1.0f,2.0f,30.0f,62.0f,0.0f,"gfx/057.000_MemBrain.anm2"},
+    {57,1,0,12,0.40f,1.0f,13.0f,1.0f,1.0f,2.0f,30.0f,62.0f,0.0f,"gfx/057.001_Mama Guts.anm2"},
+    {58,0,0,12,0.0f,1.0f,13.0f,1.0f,1.0f,2.0f,10.0f,35.0f,0.0f,"gfx/058.000_Para-Bite.anm2"},
+    {58,1,0,12,0.0f,1.0f,13.0f,1.0f,1.0f,2.0f,10.0f,35.0f,0.0f,"gfx/058.001_Scarred Para-Bite.anm2"},
+    {59,0,0,12,0.17f,1.0f,13.0f,1.0f,1.0f,2.0f,10.0f,20.0f,0.0f,"gfx/059.000_Fred.anm2"},
+    {60,0,0,12,0.0f,1.0f,13.0f,1.0f,1.0f,1.0f,100.0f,20.0f,0.0f,"gfx/060.000_Eye.anm2"},
+    {60,1,0,12,0.0f,1.0f,13.0f,1.0f,1.0f,1.0f,100.0f,20.0f,0.0f,"gfx/060.001_Bloodshot Eye.anm2"},
+    {75,0,0,12,0.40f,1.0f,30.0f,1.0f,1.0f,2.0f,20.0f,75.0f,0.0f,"gfx/075.000_Blastocyst Medium.anm2"},
+    {76,0,0,12,0.31f,1.0f,20.0f,1.0f,1.0f,1.0f,10.0f,30.0f,0.0f,"gfx/076.000_Blastocyst Small.anm2"},
+    {77,0,0,12,0.22f,1.0f,13.0f,1.0f,1.0f,1.0f,3.0f,12.0f,0.0f,"gfx/077.000_Embryo.anm2"},
+    {216,0,0,12,0.12f,1.0f,13.0f,1.0f,1.0f,1.0f,10.0f,38.0f,0.0f,"gfx/221.000_Swinger.anm2"},
+    {218,0,0,12,0.0f,1.0f,16.0f,1.0f,1.0f,1.0f,15.0f,100.0f,0.0f,"gfx/218.000_Wall Hugger.anm2"},
+    {221,0,0,12,0.30f,1.0f,16.0f,1.0f,1.0f,2.0f,100.0f,20.0f,0.0f,"gfx/220.000_Cod Worm.anm2"},
+    {224,0,0,8,0.24f,1.0f,18.0f,1.0f,1.0f,1.0f,30.0f,100.0f,0.0f,"gfx/224.000_Oob.anm2"},
+    {228,0,0,12,0.16f,1.0f,13.0f,1.0f,1.0f,1.0f,14.0f,36.0f,0.0f,"gfx/228.000_Homunculus.anm2"},
+    {229,1,0,12,0.26f,1.0f,16.0f,1.0f,1.0f,1.0f,22.0f,28.0f,0.0f,"gfx/229.001_Planetoid.anm2"},
+    {247,0,0,12,0.14f,1.0f,13.0f,1.0f,1.0f,1.0f,10.0f,27.0f,0.0f,"gfx/247.000_Flesh Mobile Host.anm2"},
+    {286,0,0,12,0.17f,1.0f,13.0f,1.0f,1.0f,1.0f,20.0f,50.0f,0.0f,"gfx/286.000_FleshDeathsHead.anm2"},
+    {290,0,0,12,0.28f,1.0f,13.0f,1.0f,1.0f,1.0f,10.0f,15.0f,0.0f,"gfx/290.000_Meatball.anm2"},
+    {835,0,0,12,0.15f,1.0f,13.0f,1.0f,1.0f,1.0f,10.0f,60.0f,0.0f,"gfx/835.000_peeper fatty.anm2"},
+    {859,0,0,12,0.20f,1.0f,13.0f,1.0f,1.0f,1.0f,40.0f,20.0f,0.0f,"gfx/859.000_floating host.anm2"},
+    {62,1,0,12,0.18f,1.0f,13.0f,1.0f,1.0f,2.0f,30.0f,300.0f,0.0f,"gfx/062.001_Scolex.anm2"},
+    {62,2,0,12,0.18f,1.0f,13.0f,1.0f,1.0f,1.0f,30.0f,200.0f,0.0f,"gfx/062.002_TheFrail.anm2"},
+    {78,0,0,0,0.33f,1.0f,35.0f,1.0f,1.0f,0.0f,100.0f,950.0f,0.0f,"gfx/078.000_Moms Heart.anm2"},
+    {78,1,0,0,0.33f,1.0f,35.0f,1.0f,1.0f,0.0f,100.0f,950.0f,0.0f,"gfx/078.001_It Lives.anm2"},
+    {266,0,0,12,0.0f,1.0f,30.0f,1.0f,1.0f,2.0f,100.0f,750.0f,0.0f,"gfx/266.000_Mega Gurdy.anm2"},
+    {270,0,0,8,0.0f,1.0f,16.0f,1.0f,1.0f,2.0f,60.0f,500.0f,0.0f,"gfx/270.000_MegaFred.anm2"},
+    {74,0,0,12,0.55f,1.0f,40.0f,1.0f,1.0f,2.0f,30.0f,190.0f,0.0f,"gfx/074.000_Blastocyst Big.anm2"},
+    {81,0,0,0,0.24f,1.0f,20.0f,1.0f,1.0f,2.0f,50.0f,60.0f,0.0f,"gfx/081.000_The Fallen.anm2"}
 };
 }
 const NativeEntityBodyProperties* NativePreparedEnemyBody(int type,int variant){
@@ -196,6 +230,14 @@ bool NativeBossEntityType(int type,int variant){
     if(type==263)return variant==0;
     if(type==265)return variant==0;
     if(type==900)return variant==0;
+    if(type==75)return variant==0;
+    if(type==76)return variant==0;
+    if(type==62)return variant==1||variant==2;
+    if(type==78)return variant==0||variant==1;
+    if(type==266)return variant==0;
+    if(type==270)return variant==0;
+    if(type==74)return variant==0;
+    if(type==81)return variant==0;
     return false;
 }
 const NativeEntityBodyProperties* NativePreparedPlayerBody(int variant){

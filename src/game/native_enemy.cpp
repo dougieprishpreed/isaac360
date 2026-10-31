@@ -37,7 +37,7 @@ void NativeEnemy::Update(const NativeRoomState& room,const NativeEntityBody& pla
     const int phase=(int)body.time;
     const unsigned int salt=seed&63U;
     float vx=0.0f,vy=0.0f;
-    if(type==13||type==18||type==25||type==61||type==240||type==242||type==248||type==38||type==90||type==91||type==92||type==93||type==212||type==219||type==254||(type==260&&body.variant==10)||type==213||type==223||type==246||type==258||type==288||type==83||type==868){
+    if(type==13||type==18||type==25||type==61||type==240||type==242||type==248||type==38||type==90||type==91||type==92||type==93||type==212||type==219||type==254||(type==260&&body.variant==10)||type==213||type==223||type==246||type==258||type==288||type==83||type==868||type==58||type==60||(type==229&&body.variant==1)||type==286||type==859){
         //Fly: fast erratic drift with a per-entity phase offset.
         const float wobble=sinf(phase*0.45f+(float)salt*0.19f);
         const float sway=cosf(phase*0.37f+(float)salt*0.11f);
@@ -92,7 +92,7 @@ void NativeEnemy::Update(const NativeRoomState& room,const NativeEntityBody& pla
         else{vx=dx*0.25f;vy=dy*0.25f;}
         if(shots&&distance<520.0f&&cycle==62)
             shots->Fire(body.position,dx*3.2f,dy*3.2f,1.0f,8.0f,240,body.entityToken);
-    }else if(type==67||type==260||type==79||type==908||type==28||type==36||type==62||type==68||type==71||type==99||type==262||type==264||type==916||type==72||type==43||type==45||type==263||type==265||type==900){
+    }else if(type==67||type==260||type==79||type==908||type==28||type==36||type==62||type==68||type==71||type==99||type==262||type==264||type==916||type==72||type==43||type==45||type==263||type==265||type==900||type==75||type==76||type==78||type==266||type==270||type==74||type==81){
         //Duke/Haunt: floating boss with a periodic spread volley.
         const int cycle=phase%150;
         vx=dx*0.32f;vy=dy*0.32f;

@@ -24,6 +24,8 @@ IMAGES=[
     ('backdrop5','gfx/backdrop/04_Catacombs.png'),
     ('backdrop7','gfx/backdrop/05_Depths.png'),
     ('backdrop8','gfx/backdrop/06_Necropolis.png'),
+    ('backdrop10','gfx/backdrop/07_The Womb.png'),
+    ('backdrop11','gfx/backdrop/08_Utero.png'),
     ('player','gfx/characters/costumes/character_001_isaac.png'),
     ('hearts','gfx/ui/ui_hearts.png'),
     ('tears','gfx/tears.png'),
@@ -201,6 +203,40 @@ ANIMATED=[
     ('thethingwalk','gfx/304.000_TheThing.anm2','',None,64),
     ('ministrowalk','gfx/305.000_Ministro.anm2','',None,64),
     ('portalwalk','gfx/306.000_Portal.anm2','',None,64),
+    ('clottywalk','gfx/015.000_Clotty.anm2','',None,64),
+    ('clotwalk','gfx/015.001_Clot.anm2','',None,64),
+    ('grilledclottywalk','gfx/015.003_grilled clotty.anm2','',None,64),
+    ('doplewalk','gfx/053.000_Dople.anm2','',None,64),
+    ('lumpwalk','gfx/056.000_Lump.anm2','',None,64),
+    ('membrainwalk','gfx/057.000_MemBrain.anm2','',None,64),
+    ('mamagutswalk','gfx/057.001_Mama Guts.anm2','',None,64),
+    ('parabitewalk','gfx/058.000_Para-Bite.anm2','',None,64),
+    ('scarredparabitewalk','gfx/058.001_Scarred Para-Bite.anm2','',None,64),
+    ('fredwalk','gfx/059.000_Fred.anm2','',None,64),
+    ('eyewalk','gfx/060.000_Eye.anm2','',None,64),
+    ('bloodshotteyewalk','gfx/060.001_Bloodshot Eye.anm2','',None,64),
+    ('blastocystwalk','gfx/075.000_Blastocyst Medium.anm2','',None,64),
+    ('blastocystsmaillwalk','gfx/076.000_Blastocyst Small.anm2','',None,64),
+    ('embryowalk','gfx/077.000_Embryo.anm2','',None,64),
+    ('swingerwalk','gfx/221.000_Swinger.anm2','',None,64),
+    ('wallhuggerwalk','gfx/218.000_Wall Hugger.anm2','',None,64),
+    ('codwormwalk','gfx/220.000_Cod Worm.anm2','',None,64),
+    ('oobwalk','gfx/224.000_Oob.anm2','',None,64),
+    ('homunculuswalk','gfx/228.000_Homunculus.anm2','',None,64),
+    ('planetoidwalk','gfx/229.001_Planetoid.anm2','',None,64),
+    ('fleshmobilehostwalk','gfx/247.000_Flesh Mobile Host.anm2','',None,64),
+    ('fleshdeathsheadwalk','gfx/286.000_FleshDeathsHead.anm2','',None,64),
+    ('meatballwalk','gfx/290.000_Meatball.anm2','',None,64),
+    ('peepingfattywalk','gfx/835.000_peeper fatty.anm2','',None,64),
+    ('floastwalk','gfx/859.000_floating host.anm2','',None,64),
+    ('scolexwalk','gfx/062.001_Scolex.anm2','',None,128),
+    ('frailwalk','gfx/062.002_TheFrail.anm2','',None,128),
+    ('momsheartwalk','gfx/078.000_Moms Heart.anm2','',None,128),
+    ('itliveswalk','gfx/078.001_It Lives.anm2','',None,128),
+    ('mamagurdywalk','gfx/266.000_Mega Gurdy.anm2','',None,512),
+    ('mrfredwalk','gfx/270.000_MegaFred.anm2','',None,128),
+    ('blastocystbigwalk','gfx/074.000_Blastocyst Big.anm2','',None,128),
+    ('fallenwalk','gfx/081.000_The Fallen.anm2','',None,128),
 ]
 ANIMATION_FRAME_LIMIT=8
 #Manifest strips that are enemy sprites, keyed by the native type/variant.
@@ -242,11 +278,23 @@ ENEMY_SPRITE_KEYS={
     'eggywalk':(29,2),'triplegrimacewalk':(42,2),'stoneshooterwalk':(202,0),'crossshooterwalk':(202,10),
     'nerveendingwalk':(231,0),'brokengapingwalk':(236,0),'poisonmindwalk':(301,0),'blisterwalk':(303,0),
     'thethingwalk':(304,0),'ministrowalk':(305,0),'portalwalk':(306,0),
+    'clottywalk':(15,0),'clotwalk':(15,1),'grilledclottywalk':(15,3),'doplewalk':(53,0),
+    'lumpwalk':(56,0),'membrainwalk':(57,0),'mamagutswalk':(57,1),'parabitewalk':(58,0),
+    'scarredparabitewalk':(58,1),'fredwalk':(59,0),'eyewalk':(60,0),'bloodshotteyewalk':(60,1),
+    'blastocystwalk':(75,0),'blastocystsmaillwalk':(76,0),'embryowalk':(77,0),'swingerwalk':(216,0),
+    'wallhuggerwalk':(218,0),'codwormwalk':(221,0),'oobwalk':(224,0),'homunculuswalk':(228,0),
+    'planetoidwalk':(229,1),'fleshmobilehostwalk':(247,0),'fleshdeathsheadwalk':(286,0),
+    'meatballwalk':(290,0),'peepingfattywalk':(835,0),'floastwalk':(859,0),
+    'scolexwalk':(62,1),'frailwalk':(62,2),'momsheartwalk':(78,0),'itliveswalk':(78,1),
+    'mamagurdywalk':(266,0),'mrfredwalk':(270,0),'blastocystbigwalk':(74,0),'fallenwalk':(81,0),
 }
-FRAME_LIMITS={name:4 for name in ENEMY_SPRITE_KEYS if name.endswith(('walk','idle')) and name not in (
-    'gaperwalk','flywalk','pooterwalk','fattywalk','skinnywalk','rottywalk','cyclopiawalk',
+CORE4={'gaperwalk','flywalk','pooterwalk','fattywalk','skinnywalk','rottywalk','cyclopiawalk',
     'dinglewalk','danglewalk','dartflywalk','dipwalk','larrywalk','monstrowalk','dukewalk',
-    'hauntidle','attackflywalk','geminiwalk','gurglingwalk','turdlingwalk','grubwalk','plumidle')}
+    'hauntidle','attackflywalk','geminiwalk','gurglingwalk','turdlingwalk','grubwalk','plumidle'}
+#Late-floor actor strips use two original frames; the first-floor families keep
+#four-frame cycles. This keeps the prepared atlas inside the 2048x4096 budget.
+FRAME_LIMITS={name:(4 if name in CORE4 else 2) for name in ENEMY_SPRITE_KEYS}
+FRAME_LIMITS['mamagurdywalk']=2
 _sheet_cache={}
 def load_image(resources,request):
     raw,entry=resources.read(request)

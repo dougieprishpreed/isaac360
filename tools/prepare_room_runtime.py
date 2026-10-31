@@ -98,7 +98,7 @@ def prepare():
     definitions=[]
     #The definition array is indexed by backdrop id-1. Emit a contiguous table
     #for every id, but only bind the floor graphics the port has prepared.
-    supported=(1,2,4,5,7,8)
+    supported=(1,2,4,5,7,8,10,11)
     for i in range(1,61):
         e=next((e for e in backdrops if e.get('id')==str(i)),None)
         if i not in supported or e is None or e.get('anm2') or not e.get('gfx') or int(e.get('walls','0'))<=0:
