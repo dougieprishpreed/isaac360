@@ -401,6 +401,10 @@ int main(int argc,char** argv){
         ++frame;
         if(!fast)Sleep(33);else Sleep(0);
     }
-    if(saveOnExit&&runtime.phase==PNR_READY)Log("WIN save result=%d file=%s",session.SaveContinue(continueFile,runtime)?1:0,continueFile);
+    if(saveOnExit&&runtime.phase==PNR_READY){
+        const bool nativeSaved=session.SaveNativeContinue(nativeContinueFile,runtime);
+        const bool maintainedSaved=session.SaveContinue(continueFile,runtime);
+        Log("WIN save native=%d maintained=%d nativeFile=%s maintainedFile=%s",nativeSaved?1:0,maintainedSaved?1:0,nativeContinueFile,continueFile);
+    }
     Log("WIN done frames=%d phase=%d",frame,runtime.phase);if(gLog)fclose(gLog);return 0;
 }

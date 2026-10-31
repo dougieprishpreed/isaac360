@@ -44,8 +44,12 @@ struct NativePlayerPersistent {
     NativePlayerPersistent():captured(false){}
     bool CaptureInitial(const NativePlayerState&,const NativePlayerStartup&,const NativePlayerCreation&,const NativeEntityBody&,unsigned int* next);
     bool CaptureAfterInitialSetup(const NativePlayerState&,const NativePlayerStartup&,const NativePlayerCreation&,const NativeEntityBody&,unsigned int* next);
+    //Mid-run state capture uses the same native destination ownership as the
+    //fresh save, but retains live health/resources/inventory/active/pocket
+    //owners instead of requiring the clean pre-grant player.
+    bool CaptureCurrent(const NativePlayerState&,const NativePlayerStartup&,const NativePlayerCreation&,const NativeEntityBody&,unsigned int* next);
 private:
-    bool CaptureFresh(const NativePlayerState&,const NativePlayerStartup&,const NativePlayerCreation&,const NativeEntityBody&,bool afterSetup,unsigned int* next);
+    bool CaptureState(const NativePlayerState&,const NativePlayerStartup&,const NativePlayerCreation&,const NativeEntityBody&,bool afterSetup,bool allowCurrent,unsigned int* next);
 };
 struct NativeDescriptorPersistent {
     NativePersistentFields fields;
@@ -87,9 +91,14 @@ struct NativeGamePersistent {
         const NativeRunHistory&,NativePlayerState&,const NativePlayerStartup&,NativePlayerCreation&,NativePlayerSprites&,const NativeEntityBody&,const NativePlayerManager&,unsigned int* next);
     bool CaptureBeforeFileSave(const NormalRunFlow&,NativeWorld&,const NativeRng&,const NativeItemPools&,const NativeNightmares&,
         const NativeRunHistory&,NativePlayerState&,const NativePlayerStartup&,NativePlayerCreation&,NativePlayerSprites&,const NativeEntityBody&,const NativePlayerManager&,unsigned int* next);
+    //Current mid-run game snapshot. The same writer layout is used; inactive
+    //descriptors keep their reset records and the live player/pools are
+    //overlaid instead of requiring the first-floor fresh boundary.
+    bool CaptureCurrent(const NormalRunFlow&,NativeWorld&,const NativeRng&,const NativeItemPools&,const NativeNightmares&,
+        const NativeRunHistory&,NativePlayerState&,const NativePlayerStartup&,NativePlayerCreation&,NativePlayerSprites&,const NativeEntityBody&,const NativePlayerManager&,unsigned int* next);
 private:
-    bool CaptureFresh(const NormalRunFlow&,NativeWorld&,const NativeRng&,const NativeItemPools&,const NativeNightmares&,
-        const NativeRunHistory&,NativePlayerState&,const NativePlayerStartup&,NativePlayerCreation&,NativePlayerSprites&,const NativeEntityBody&,const NativePlayerManager&,bool checkpoint,unsigned int* next);
+    bool CaptureState(const NormalRunFlow&,NativeWorld&,const NativeRng&,const NativeItemPools&,const NativeNightmares&,
+        const NativeRunHistory&,NativePlayerState&,const NativePlayerStartup&,NativePlayerCreation&,NativePlayerSprites&,const NativeEntityBody&,const NativePlayerManager&,bool checkpoint,bool allowCurrent,unsigned int* next);
 };
 struct NativeRunCheckpoint {
     bool valid;int action;unsigned int frame,events[496];NativeGamePersistent state;

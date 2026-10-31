@@ -589,7 +589,13 @@ VOID __cdecl main() {
                         Log("PORT door visual stop slot=%d kind=%d variant=%d aux=%d backdrop=%d",live.doorFailureSlot,live.doorFailureKind,live.doorFailureVariant,live.doorFailureAux,live.backdrop);}}}
             if(gNormalRuntime.phase==PNR_READY){
                 static unsigned int lastContinueSave=0;
-                if(gNormalRuntime.tickFrame>lastContinueSave+300){lastContinueSave=gNormalRuntime.tickFrame;PortGameSession(gMenuRandom,gUi).SaveContinue("game:\\continue.dat",gNormalRuntime);}
+                if(gNormalRuntime.tickFrame>lastContinueSave+300){
+                    lastContinueSave=gNormalRuntime.tickFrame;
+                    PortGameSession saver(gMenuRandom,gUi);
+                    const bool nativeSaved=saver.SaveNativeContinue("game:\\profile\\gamestate1.dat",gNormalRuntime);
+                    const bool maintainedSaved=saver.SaveContinue("game:\\continue.dat",gNormalRuntime);
+                    Log("PORT autosave native=%d maintained=%d",nativeSaved?1:0,maintainedSaved?1:0);
+                }
                 static bool readyLogged=false;
                 if(!readyLogged){NativeWorldResident& first=gNormalRuntime.world.resident[gNormalRuntime.world.currentList];
                     Log("PORT normal ready ticks=0 playerToken=%08x doorVisualGaps=%d",gNormalRuntime.playerBody.entityToken,first.doorVisualGaps);

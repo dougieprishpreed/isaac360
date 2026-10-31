@@ -84,20 +84,26 @@ bool NativeRunHistory::BeginFresh(const NativeRunStart& start,bool debugConsole)
 }
 bool NativeGamePersistent::CaptureInitial(const NormalRunFlow& run,NativeWorld& world,const NativeRng& gameRandom,const NativeItemPools& itemPools,const NativeNightmares& nightmares,
         const NativeRunHistory& history,NativePlayerState& player,const NativePlayerStartup& startup,NativePlayerCreation& creation,NativePlayerSprites& sprites,const NativeEntityBody& body,const NativePlayerManager& manager,unsigned int* next){
-    return CaptureFresh(run,world,gameRandom,itemPools,nightmares,history,player,startup,creation,sprites,body,manager,true,next);
+    return CaptureState(run,world,gameRandom,itemPools,nightmares,history,player,startup,creation,sprites,body,manager,true,false,next);
 }
 bool NativeGamePersistent::CaptureBeforeFileSave(const NormalRunFlow& run,NativeWorld& world,const NativeRng& gameRandom,const NativeItemPools& itemPools,const NativeNightmares& nightmares,
         const NativeRunHistory& history,NativePlayerState& player,const NativePlayerStartup& startup,NativePlayerCreation& creation,NativePlayerSprites& sprites,const NativeEntityBody& body,const NativePlayerManager& manager,unsigned int* next){
-    return CaptureFresh(run,world,gameRandom,itemPools,nightmares,history,player,startup,creation,sprites,body,manager,false,next);
+    return CaptureState(run,world,gameRandom,itemPools,nightmares,history,player,startup,creation,sprites,body,manager,false,false,next);
 }
-bool NativeGamePersistent::CaptureFresh(const NormalRunFlow& run,NativeWorld& world,const NativeRng& gameRandom,const NativeItemPools& itemPools,const NativeNightmares& nightmares,
-        const NativeRunHistory& history,NativePlayerState& player,const NativePlayerStartup& startup,NativePlayerCreation& creation,NativePlayerSprites& sprites,const NativeEntityBody& body,const NativePlayerManager& manager,bool checkpoint,unsigned int* next){
+bool NativeGamePersistent::CaptureCurrent(const NormalRunFlow& run,NativeWorld& world,const NativeRng& gameRandom,const NativeItemPools& itemPools,const NativeNightmares& nightmares,
+        const NativeRunHistory& history,NativePlayerState& player,const NativePlayerStartup& startup,NativePlayerCreation& creation,NativePlayerSprites& sprites,const NativeEntityBody& body,const NativePlayerManager& manager,unsigned int* next){
+    return CaptureState(run,world,gameRandom,itemPools,nightmares,history,player,startup,creation,sprites,body,manager,false,true,next);
+}
+bool NativeGamePersistent::CaptureState(const NormalRunFlow& run,NativeWorld& world,const NativeRng& gameRandom,const NativeItemPools& itemPools,const NativeNightmares& nightmares,
+        const NativeRunHistory& history,NativePlayerState& player,const NativePlayerStartup& startup,NativePlayerCreation& creation,NativePlayerSprites& sprites,const NativeEntityBody& body,const NativePlayerManager& manager,bool checkpoint,bool allowCurrent,unsigned int* next){
     if(next)*next=0x6b6ef0;
     const NativePlacedRoom* selected=world.CurrentDescriptor();
-    if(captured||!history.ready||history.checkpointGuard!=checkpoint||history.restoreGuard||!selected||!nightmares.reset||
-       run.phase!=NRF_NEED_ROOM_ENTRY||run.context.stage!=1||run.context.stageType>2||run.context.challenge||
-       !run.seeds.Valid()||!gameRandom.state||gameRandom.index!=35||!manager.initialized||manager.members.size()!=1||
-       manager.worldMembers.size()!=manager.worldTypes.size()||!world.Current()||!player.runInitializing)return false;
+    if(captured||!history.ready||history.restoreGuard||!selected||!nightmares.reset||
+       run.context.stage<1||run.context.stage>12||run.context.stageType<0||run.context.stageType>5||run.context.challenge||
+       !run.seeds.Valid()||!gameRandom.state||!manager.initialized||manager.members.size()!=1||
+       manager.worldMembers.size()!=manager.worldTypes.size()||!world.Current())return false;
+    if(!allowCurrent&&(history.checkpointGuard!=checkpoint||run.phase!=NRF_NEED_ROOM_ENTRY||run.context.stage!=1||
+       run.context.stageType>2||gameRandom.index!=35||!player.runInitializing))return false;
     for(unsigned int i=0;i<manager.worldTypes.size();++i)if(manager.worldTypes[i]!=1&&manager.worldTypes[i]!=1000)return false;
     //90b1e0 resets destination ownership before925ce0/925df0 clone the
     //live seed manager. No reconstruction of RNG state from START is used.
@@ -121,12 +127,16 @@ bool NativeGamePersistent::CaptureFresh(const NormalRunFlow& run,NativeWorld& wo
     levelConfigurations.clear();
     if(next)*next=0x6b7147;if(!itemPools.Capture(pools))return false;
     if(next)*next=0x6b7159;if(!NativeCaptureBossState(run.bosses,&bosses))return false;
-    if(next)*next=0x6b71bf;if(!world.CaptureInitialRoom(next))return false;
+    if(allowCurrent){unsigned int ignored=0;(void)world.CaptureInitialRoom(&ignored);}
+    else{if(next)*next=0x6b71bf;if(!world.CaptureInitialRoom(next))return false;}
     //6fca60 transfers every descriptor slot, all507 grid owners and the
     //level's actual fields. Unwritten/inactive source bytes remain so; they
     //are not asserted to be zero merely to make a capture succeed.
     if(next)*next=0x6fca60;
-    fields.Put(0x198,run.context.stage);fields.Put(0x19c,run.context.stageType);fields.Put(0x1a0,run.currentGrid);
+    //Current-state saves refresh the active room's persistent record when the
+    //live geometry still admits it. Failure leaves the descriptor's reset
+    //record intact rather than inventing a payload.
+    fields.Put(0x198,run.context.stage);fields.Put(0x19c,run.context.stageType);fields.Put(0x1a0,world.currentGrid);
     fields.Put(0x1a4,run.bossSequence.lastLayoutIndex);fields.Put(0x1a8,run.context.effectiveCurses);
     fields.Put(0x1ac,run.levelSeed);fields.Put(0x1b0,run.floor.plan.streams.secondary.state);fields.Unwritten(0x1b4,4);
     fields.Put(0x1b8,0,1);fields.Put(0x1b9,0,1);fields.Put(0x1ba,0,1);fields.Unwritten(0x1bb,1);
@@ -155,13 +165,15 @@ bool NativeGamePersistent::CaptureFresh(const NormalRunFlow& run,NativeWorld& wo
     fields.Put(0x1e554,(int)dormantCount>0?1:0,1);fields.Put(0x1fb38,flags,2);
     if(next)*next=0x907350;
     players.clear();players.resize(manager.members.size());
-    if(checkpoint){if(!players[0].CaptureInitial(player,startup,creation,body,next))return false;}
+    if(allowCurrent){if(!players[0].CaptureCurrent(player,startup,creation,body,next))return false;}
+    else if(checkpoint){if(!players[0].CaptureInitial(player,startup,creation,body,next))return false;}
     else{
         if(!creation.initialSaveNormalized&&!creation.NormalizeInitialSave(player,sprites,next))return false;
         if(!players[0].CaptureAfterInitialSetup(player,startup,creation,body,next))return false;
     }
     fields.Put(0x19c9c,(unsigned int)players.size());
     fields.Put(0x19c90,0); //90b528 Reset; later wrapper supplies19c94.
+    fields.Put(0x19c94,allowCurrent?(unsigned int)run.player.player:0U);
     fields.Put(0x19c98,0,1); //90b539 Reset; no secondary player sets it here.
     for(unsigned int i=0;i<14;++i)fields.Put(0x218+4*i,nightmares.stageBackdrops[i]);
     Copy(fields,0x78,history.fields,0x1c2f18,1);unsigned int n;if(!history.fields.Get(0x1c2f1c,4,&n))return false;

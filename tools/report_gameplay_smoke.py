@@ -29,6 +29,7 @@ def main():
     familiar=re.search(r'^FAMILIAR spawned=(\d+) shots=(\d+) hits=(\d+) enemies=(\d+)',log,re.M)
     cont=re.search(r'^CONTINUE stage=(\d+) hp=(-?\d+)/(-?\d+) keys=(-?\d+) card=(-?\d+) pill=(-?\d+) items=(\d+)',log,re.M)
     nativeCont=re.search(r'^NATIVE_CONTINUE seed=(\d+) stage=(\d+) hp=(-?\d+)/(-?\d+)',log,re.M)
+    nativeCurrent=re.search(r'^NATIVE_CURRENT stage=(\d+) hp=(-?\d+)/(-?\d+) soul=(-?\d+) keys=(-?\d+) bombs=(-?\d+) coins=(-?\d+) active=(-?\d+) card=(-?\d+) pill=(-?\d+) poolCounter=(\d+)',log,re.M)
     deathflow=re.search(r'^DEATH_FLOW dyingTicks=(\d+) gameOver=(\d+) restartResult=(\d+) restartPhase=(\d+) restartHP=(-?\d+)/(-?\d+)',log,re.M)
     lock=re.search(r'^LOCK treasureSlot=(\d+) noKeyClosed=(\d+) keyOpened=(\d+) keysLeft=(-?\d+) doorsUnlocked=(\d+) bossOpenWithoutDefeat=(\d+) bossDefeated=(\d+)',log,re.M)
     paths=set()
@@ -110,6 +111,13 @@ def main():
             'continue_keys':int(cont.group(4)) if cont else -1,
             'native_continue_seed':int(nativeCont.group(1)) if nativeCont else 0,
             'native_continue_stage':int(nativeCont.group(2)) if nativeCont else -1,
+            'native_current_stage':int(nativeCurrent.group(1)) if nativeCurrent else -1,
+            'native_current_hp':int(nativeCurrent.group(2)) if nativeCurrent else -1,
+            'native_current_keys':int(nativeCurrent.group(5)) if nativeCurrent else -1,
+            'native_current_active':int(nativeCurrent.group(8)) if nativeCurrent else 0,
+            'native_current_card':int(nativeCurrent.group(9)) if nativeCurrent else 0,
+            'native_current_pill':int(nativeCurrent.group(10)) if nativeCurrent else -1,
+            'native_current_pool_counter':int(nativeCurrent.group(11)) if nativeCurrent else 0,
             'dying_ticks':int(deathflow.group(1)) if deathflow else 0,
             'game_over':bool(int(deathflow.group(2))) if deathflow else False,
             'restart_ready':bool(deathflow and int(deathflow.group(4))==5) if deathflow else False,

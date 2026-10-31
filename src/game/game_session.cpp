@@ -1,9 +1,10 @@
 #include "game_session.h"
 #include "native_room_update.h"
 #include "native_rng.h"
+#include "native_save_reader.h"
 #include <string.h>
 #include <stdio.h>
-PortNormalRuntime::PortNormalRuntime():initialSaveFileWritten(false),phase(PNR_IDLE),missingNativePrerequisite(0),completePlayerInitializations(0),completePlayerTicks(0),completeWholeGameplayTicks(0),enemyKills(0),doorsOpened(0),roomTransitions(0),playerHits(0),playerDeathTicks(0),doorsUnlocked(0),gameOverCount(0),pickupsCollected(0),collectiblesCollected(0),playerInvulnerable(0),lastCollectible(0),playerDead(false),bossDefeated(false),descendRequested(false),startingItemsGranted(false),doorTransitionGrace(0),tickFrame(0),playerTailTrailSegments(0),playerTailRenderCallbacks(0),playerTailTicks(0),roomEntryPrefixPrepared(false) {
+PortNormalRuntime::PortNormalRuntime():initialSaveFileWritten(false),phase(PNR_IDLE),missingNativePrerequisite(0),completePlayerInitializations(0),completePlayerTicks(0),completeWholeGameplayTicks(0),enemyKills(0),doorsOpened(0),roomTransitions(0),playerHits(0),playerDeathTicks(0),doorsUnlocked(0),gameOverCount(0),pickupsCollected(0),collectiblesCollected(0),playerInvulnerable(0),lastCollectible(0),playerDead(false),bossDefeated(false),descendRequested(false),startingItemsGranted(false),doorTransitionGrace(0),tickFrame(0),nativeSaveCaptureAddress(0),playerTailTrailSegments(0),playerTailRenderCallbacks(0),playerTailTicks(0),roomEntryPrefixPrepared(false) {
     memset(&run,0,sizeof(run));memset(&entryIssue,0,sizeof(entryIssue));
     gameRandom.Default();
 }
@@ -418,8 +419,13 @@ namespace { bool NativeSavePlayerId(const char*,int*); }
 bool PortGameSession::ContinueNativeSave(const char* path,PortNormalRuntime& runtime,NativeSceneFiles& files,NativeActionSource* actions){
     unsigned int seed=0;
     if(!NativeSaveSeed(path,&seed))return false;
+    NativeSaveSummary summary;
+    const bool exact=NativeReadSaveSummary(path,summary)&&summary.valid&&summary.hasPlayer&&summary.seed==seed;
+    
     int savedPlayer=-1;
-    if(NativeSavePlayerId(path,&savedPlayer)){
+    if(exact)savedPlayer=summary.playerId;
+    else if(!NativeSavePlayerId(path,&savedPlayer))savedPlayer=-1;
+    if(savedPlayer>=0){
         bool found=false;
         for(int page=0;page<2&&!found;++page)for(int choice=0;choice<kNativeCharacterCount;++choice){
             const NativeCharacterDef* c=NativeCharacter(page,choice);
@@ -437,7 +443,66 @@ bool PortGameSession::ContinueNativeSave(const char* path,PortNormalRuntime& run
         NormalRunResult r=AdvanceNormalSetup(runtime,files,actions?actions:&generated);
         if(r==NFR_BAD_REQUEST)return false;
     }
-    return runtime.phase==PNR_READY;
+    if(runtime.phase!=PNR_READY)return false;
+    if(!exact)return true;
+    if(summary.stage<1||summary.stage>12)return false;
+    while(runtime.run.context.stage<summary.stage){
+        files.backdrop=NativeStageBackdrop(runtime.run.context.stage+1);
+        if(!DescendNormal(runtime,files,actions))return false;
+    }
+    //Replay the saved collectible counts through the maintained grant path so
+    //stats/active slots see the same item owners, then restore the exact
+    //numeric resources and pocket identities from the native record.
+    runtime.playerState.collectibleCounts.assign(runtime.playerState.collectibleCounts.size(),0);
+    for(int i=0;i<4;++i)runtime.playerState.activeItems[i]=0;
+    runtime.playerState.pendingCollectibles.clear();runtime.playerState.collectibleOverrides.clear();
+    for(unsigned int id=0;id<summary.collectibles.size();++id){
+        const int count=summary.collectibles[id];
+        if(count<0)return false;
+        for(int n=0;n<count;++n)if(!runtime.playerState.GrantCollectible((int)id))return false;
+    }
+    runtime.playerState.trinketCounts.assign(runtime.playerState.trinketCounts.size(),0);
+    for(unsigned int i=0;i<summary.trinkets.size()&&i<runtime.playerState.trinketCounts.size();++i)
+        runtime.playerState.trinketCounts[i]=summary.trinkets[i];
+    runtime.playerState.heldTrinkets[0]=summary.heldTrinkets[0];
+    runtime.playerState.heldTrinkets[1]=summary.heldTrinkets[1];
+    for(int i=0;i<4;++i)runtime.playerState.activeItems[i]=summary.activeItems[i];
+    runtime.playerState.heldCard=summary.heldCard;
+    runtime.playerState.heldPill=summary.heldPill;
+    runtime.playerState.maxRedHearts=summary.maxRedHearts;runtime.playerState.redHearts=summary.redHearts;
+    runtime.playerState.soulHearts=summary.soulHearts;runtime.playerState.blackHeartMask=summary.blackHeartMask;
+    runtime.playerState.keys=summary.keys;runtime.playerState.bombs=summary.bombs;runtime.playerState.coins=summary.coins;
+    runtime.startingItemsGranted=true;
+    if(summary.hasPools&&!runtime.itemPools.ApplySnapshot(summary.pools))return false;
+    if(summary.currentGrid>=0&&(runtime.world.currentGrid!=summary.currentGrid||
+       runtime.world.layout.currentDimension!=summary.dimension)){
+        NativeWorldIssue issue;NativeRoomSetupContext setup={files.backdrop,runtime.run.floor.plan.configStage,false,0};
+        if(runtime.world.Enter(summary.currentGrid,summary.dimension,files,&issue,&setup)!=NWR_OK)return false;
+    }
+    NativeRoomState* room=runtime.world.Current();
+    if(room){
+        NativePoint at={(room->space.left+room->space.right)*0.5f,(room->space.top+room->space.bottom)*0.5f};
+        runtime.playerBody.position=at;runtime.playerBody.previousPosition=at;
+        runtime.playerBody.velocity.x=runtime.playerBody.velocity.y=0;runtime.playerBody.removed=false;
+    }
+    runtime.phase=PNR_READY;runtime.doorTransitionGrace=0;runtime.descendRequested=false;
+    runtime.projectiles.Reset();runtime.enemyShots.Clear();runtime.bombs.Clear();runtime.familiars.Clear();
+    return true;
+}
+bool PortGameSession::SaveNativeContinue(const char* path,PortNormalRuntime& runtime){
+    if(!path||runtime.phase!=PNR_READY||runtime.playerDead)return false;
+    NativeGamePersistent snapshot;unsigned int next=0;
+    if(!snapshot.CaptureCurrent(runtime.run,runtime.world,runtime.gameRandom,runtime.itemPools,runtime.nightmares,runtime.history,
+        runtime.playerState,runtime.playerStartup,runtime.playerCreation,runtime.playerSprites,runtime.playerBody,runtime.playerManager,&next))return false;
+    runtime.nativeSaveCaptureAddress=next;
+    NativeSaveWriter writer;
+    if(!writer.InitialGame(snapshot)){runtime.nativeSaveCaptureAddress=writer.nextAddress;return false;}
+    FILE* file=fopen(path,"wb");
+    if(!file)return false;
+    size_t wrote=writer.data.empty()?0:fwrite(&writer.data[0],1,writer.data.size(),file);
+    bool closed=fclose(file)==0;
+    return wrote==writer.data.size()&&closed;
+    return true;
 }
 
 namespace {
@@ -459,12 +524,12 @@ bool SkipRoom(NativeSaveCursor& c){
     if(!c.Skip(12+2+2+2+1+4+32+12+2+2+4+20))return false;
     for(int i=0;i<448;++i){
         unsigned int type=0;if(!c.Read(2,&type))return false;
-        if(type&&!c.Skip(2+2+4+4+4))return false;
+        if(type&&!c.Skip(8+2+4+4+4))return false;
     }
     unsigned int entities=0;if(!c.Read(4,&entities))return false;
     if(entities>4096)return false;
     if(!c.Skip(entities*(24+1+8+1+32+1+8+2+4+1)))return false;
-    return c.Skip(4)&&c.Skip(2+2+16+8+4+2);
+    return c.Skip(4+4+2+2+16+8+4+2);
 }
 bool NativeSavePlayerId(const char* path,int* playerId){
     if(!path||!playerId)return false;

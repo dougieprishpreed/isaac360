@@ -62,7 +62,7 @@ struct PortNormalRuntime {
     unsigned int playerHits,playerDeathTicks,doorsUnlocked,gameOverCount,pickupsCollected,collectiblesCollected;int playerInvulnerable,lastCollectible;
     bool playerDead,bossDefeated,descendRequested,startingItemsGranted;
     int doorTransitionGrace;
-    unsigned int tickFrame;
+    unsigned int tickFrame,nativeSaveCaptureAddress;
     //736d70's reached post-755870 presentation/effect state. The trail count
     //is a host-visible record of the original7697a0 first-block segments; the
     //render-callback count is the live7f0e50 list size (0 on this host, so
@@ -97,6 +97,9 @@ struct PortGameSession {
     //Read the native GSR0142 initial-run save, validate its checksum and
     //restore the run seed/initial New Run state.
     bool ContinueNativeSave(const char* path,PortNormalRuntime&,NativeSceneFiles&,NativeActionSource* actions=0);
+    //Write a current-state native GSR0142 snapshot (same layout/checksum) from
+    //the live run, player and item pools.
+    bool SaveNativeContinue(const char* path,PortNormalRuntime&);
     NormalRunResult AdvanceNormalSetup(PortNormalRuntime&,const NativeSceneFiles&,NativeActionSource* actions=0);
     NormalRunResult TickNormal(PortNormalRuntime&,const NativeSceneFiles&,NativeActionSource* actions);
     NativeWorldResult PrepareNormalWorld(const NormalRunFlow&,NativeWorld&,const NativeSceneFiles&,NativeWorldIssue* issue=0);

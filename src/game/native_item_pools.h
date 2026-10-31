@@ -44,6 +44,10 @@ public:
     //removes it below RemoveOn. Returns0 when no eligible entry remains.
     int SelectCollectible(int poolIndex);
     bool Capture(NativeItemPoolSnapshot&) const;
+    //Restore the current-state weights/counters/owners from a native snapshot
+    //onto the freshly initialized prepared pools. Definitions/eligibility are
+    //provided by the prepared catalogue, not reconstructed from the file.
+    bool ApplySnapshot(const NativeItemPoolSnapshot&);
     void Swap(NativeItemPools&);
 };
 #endif

@@ -124,6 +124,27 @@ int NativeItemPools::SelectCollectible(int poolIndex){
     if(id>0&&(unsigned int)id<seen.size())seen[id]=1;
     return id;
 }
+bool NativeItemPools::ApplySnapshot(const NativeItemPoolSnapshot& snapshot){
+    if(!initialized)return false;
+    for(int i=0;i<31;++i){
+        NativeItemPool& pool=pools[i];
+        if(snapshot.weights[i].size()>pool.entries.size())return false;
+        float total=0.0f;
+        for(unsigned int j=0;j<pool.entries.size();++j){
+            pool.entries[j].weight=j<snapshot.weights[i].size()?snapshot.weights[i][j]:0.0f;
+            if(pool.entries[j].weight>0.0f)total+=pool.entries[j].weight;
+        }
+        pool.totalWeight=total;pool.counter=snapshot.poolCounters[i];
+    }
+    seed=snapshot.seed;counter=snapshot.counter;random.state=snapshot.random;backup.state=snapshot.backup;
+    treasureMultiplier=snapshot.treasureMultiplier;devilMultiplier=snapshot.devilMultiplier;
+    seen=snapshot.seen;
+    if(snapshot.trinketEnabled.size()==trinkets.size())
+        for(unsigned int i=0;i<trinkets.size();++i)trinkets[i].enabled=snapshot.trinketEnabled[i]!=0;
+    for(int i=0;i<15;++i){pillEffects[i]=snapshot.pillEffects[i];pillIdentified[i]=snapshot.pillIdentified[i];}
+    memcpy(pocketFlags,snapshot.pocketFlags,sizeof(pocketFlags));
+    return true;
+}
 void NativeItemPools::Swap(NativeItemPools& other){
     std::swap(initialized,other.initialized);std::swap(seed,other.seed);std::swap(counter,other.counter);
     std::swap(random,other.random);std::swap(backup,other.backup);

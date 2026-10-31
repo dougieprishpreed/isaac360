@@ -386,6 +386,44 @@ int RunBombProbe(NativeMt& random,PortFrontend& ui){
     printf("NATIVE_CONTINUE seed=%u stage=%d hp=%d/%d\n",runtime->run.seeds.start,runtime->run.context.stage,
         runtime->playerState.redHearts,runtime->playerState.maxRedHearts);
     delete runtime;return 0;
+}int RunNativeCurrentProbe(NativeMt& random,PortFrontend& ui){
+    (void)random;
+    ui.characterPage=0;ui.characterChoice=1;
+    PortNormalRuntime* first=new PortNormalRuntime;PortGameSession session(random,ui);
+    PortSessionStart start=session.StartNormalCharacter(1,*first);
+    if(start.result!=NPS_WORLD_PENDING){delete first;return 147;}
+    if(!AdvanceToBoundary(session,*first)||first->phase!=PNR_READY){delete first;return 148;}
+    NativeSceneFiles files={"runtime/game/file_index.bin","runtime/game/",NativeStageBackdrop(first->run.context.stage),first->run.context.nativeMode,0};
+    if(!session.DescendNormal(*first,files)||!session.DescendNormal(*first,files)){delete first;return 149;}
+    if(first->run.context.stage!=3){delete first;return 150;}
+    if(!first->playerState.GrantCollectible(1)||!first->playerState.GrantCollectible(8)||
+       !first->playerState.GrantCollectible(45)||!first->playerState.GrantCollectible(25)){delete first;return 151;}
+    first->playerState.maxRedHearts=10;first->playerState.redHearts=5;first->playerState.soulHearts=2;
+    first->playerState.keys=42;first->playerState.bombs=3;first->playerState.coins=17;
+    first->playerState.heldCard=9;first->playerState.heldPill=7;
+    const int poolItem=first->itemPools.SelectCollectible(0);
+    const unsigned int poolCounter=first->itemPools.pools[0].counter;
+    if(poolItem<=0){delete first;return 152;}
+    if(!session.SaveNativeContinue("build/gameplay/profile/current_gamestate1.dat",*first)){
+        printf("NATIVE_CURRENT_SAVE_FAIL capture=%08x\n",first->nativeSaveCaptureAddress);delete first;return 153;}
+    delete first;
+    ui.characterPage=0;ui.characterChoice=3;
+    PortNormalRuntime* second=new PortNormalRuntime;NativeMt local;local.Seed(9200);PortGameSession resumed(local,ui);
+    NativeSceneFiles resumedFiles={"runtime/game/file_index.bin","runtime/game/",1,0,0};
+    if(!resumed.ContinueNativeSave("build/gameplay/profile/current_gamestate1.dat",*second,resumedFiles)){delete second;return 154;}
+    if(second->run.context.stage!=3||second->playerState.playerType!=0||second->playerState.maxRedHearts!=10||
+       second->playerState.redHearts!=5||second->playerState.soulHearts!=2||second->playerState.keys!=42||
+       second->playerState.bombs!=3||second->playerState.coins!=17||second->playerState.activeItems[0]!=45||
+       second->playerState.heldCard!=9||second->playerState.heldPill!=7){delete second;return 155;}
+    bool owned=false;
+    if(!second->playerState.HasCollectible(1,&owned)||!owned||!second->playerState.HasCollectible(25,&owned)||!owned){delete second;return 156;}
+    if(second->itemPools.pools[0].counter!=poolCounter){delete second;return 157;}
+    if(!RunProjectileTicks(resumed,*second,-1,-1,2)){delete second;return 158;}
+    printf("NATIVE_CURRENT stage=%d hp=%d/%d soul=%d keys=%d bombs=%d coins=%d active=%d card=%d pill=%d poolCounter=%u\n",
+        second->run.context.stage,second->playerState.redHearts,second->playerState.maxRedHearts,second->playerState.soulHearts,
+        second->playerState.keys,second->playerState.bombs,second->playerState.coins,second->playerState.activeItems[0],
+        second->playerState.heldCard,second->playerState.heldPill,second->itemPools.pools[0].counter);
+    delete second;return 0;
 }int RunStatProbe(NativeMt& random,PortFrontend& ui){
     PortNormalRuntime* runtime=new PortNormalRuntime;PortGameSession session(random,ui);
     PortSessionStart start=session.StartNormalCharacter(1,*runtime);
@@ -632,6 +670,7 @@ int main(int argc,char** argv){
     if(!failed){int familiar=RunFamiliarProbe(random,ui);if(familiar){printf("FAMILIAR_RESULT failed=%d\n",familiar);failed=true;}}
     if(!failed){int cont=RunContinueProbe(random,ui);if(cont){printf("CONTINUE_RESULT failed=%d\n",cont);failed=true;}}
     if(!failed){int nativeCont=RunNativeContinueProbe(random,ui);if(nativeCont){printf("NATIVE_CONTINUE_RESULT failed=%d\n",nativeCont);failed=true;}}
+    if(!failed){int nativeCurrent=RunNativeCurrentProbe(random,ui);if(nativeCurrent){printf("NATIVE_CURRENT_RESULT failed=%d\n",nativeCurrent);failed=true;}}
     if(!failed){int chars=RunCharacterMatrixProbe(random,ui);if(chars){printf("CHARACTER_RESULT failed=%d\n",chars);failed=true;}}
     if(!failed){int death=RunDeathProbe(random,ui);if(death){printf("DEATH_RESULT failed=%d\n",death);failed=true;}}
     delete runtime;return failed?5:0;
