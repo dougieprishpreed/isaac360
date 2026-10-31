@@ -562,6 +562,12 @@ VOID __cdecl main() {
             if(action==UI_DELETE_SLOT){ZeroMemory(&gProfiles[gUi.selectedSlot],sizeof(NativeProfile));gUi.SlotDeleted(true);}
             if(action==UI_START_CHARACTER){unsigned int runSeed=0;
                 NativeSceneFiles continueFiles={"game:\\game\\file_index.bin","game:\\game\\",1,gNormalRuntime.run.context.nativeMode,0};
+                FILE* nativeContinue=fopen("game:\\profile\\gamestate1.dat","rb");
+                if(nativeContinue){fclose(nativeContinue);
+                    if(PortGameSession(gMenuRandom,gUi).ContinueNativeSave("game:\\profile\\gamestate1.dat",gNormalRuntime,continueFiles,&frameActions))
+                        Log("PORT native continue seed=%u",gNormalRuntime.run.seeds.start);
+                    else Log("PORT native continue failed");
+                    continue;}
                 FILE* continueFile=fopen("game:\\continue.dat","rb");
                 if(continueFile){fclose(continueFile);
                     if(PortGameSession(gMenuRandom,gUi).ContinueSavedRun("game:\\continue.dat",gNormalRuntime,continueFiles,&frameActions))

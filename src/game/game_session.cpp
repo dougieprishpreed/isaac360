@@ -1,5 +1,6 @@
 #include "game_session.h"
 #include "native_room_update.h"
+#include "native_rng.h"
 #include <string.h>
 #include <stdio.h>
 PortNormalRuntime::PortNormalRuntime():initialSaveFileWritten(false),phase(PNR_IDLE),missingNativePrerequisite(0),completePlayerInitializations(0),completePlayerTicks(0),completeWholeGameplayTicks(0),enemyKills(0),doorsOpened(0),roomTransitions(0),playerHits(0),playerDeathTicks(0),doorsUnlocked(0),gameOverCount(0),pickupsCollected(0),collectiblesCollected(0),playerInvulnerable(0),lastCollectible(0),playerDead(false),bossDefeated(false),descendRequested(false),startingItemsGranted(false),doorTransitionGrace(0),tickFrame(0),playerTailTrailSegments(0),playerTailRenderCallbacks(0),playerTailTicks(0),roomEntryPrefixPrepared(false) {
@@ -380,4 +381,52 @@ bool PortGameSession::ContinueSavedRun(const char* path,PortNormalRuntime& runti
     runtime.phase=PNR_READY;runtime.doorTransitionGrace=0;
     runtime.projectiles.Reset();runtime.enemyShots.Clear();runtime.bombs.Clear();runtime.familiars.Clear();
     return true;
+}
+
+namespace {
+unsigned int SaveArithmeticRight(unsigned int n){return (n>>1)|(n&0x80000000U);}
+unsigned int SaveCrcEntry(unsigned int n){
+    n=(n>>1)^((n&1)?0xedb88320U:0);
+    for(int i=1;i<8;++i)n=SaveArithmeticRight(n)^((n&1)?0xedb88320U:0);
+    return n;
+}
+bool NativeSaveSeed(const char* path,unsigned int* seed){
+    if(!path||!seed)return false;
+    FILE* f=fopen(path,"rb");if(!f)return false;
+    if(fseek(f,0,SEEK_END)!=0){fclose(f);return false;}
+    long size=ftell(f);if(size<64||fseek(f,0,SEEK_SET)!=0){fclose(f);return false;}
+    std::vector<unsigned char> data((unsigned int)size);
+    size_t got=fread(&data[0],1,(size_t)size,f);fclose(f);
+    if(got!=(size_t)size||memcmp(&data[0],"ISAACNG_GSR0142",15))return false;
+    unsigned int checksum=0xfedcba76U;
+    for(long i=16;i<size-4;++i){
+        unsigned int n=~checksum;n=(n>>8)^SaveCrcEntry((n&255)^data[i]);checksum=~n;
+    }
+    unsigned int stored=(unsigned int)data[size-4]|((unsigned int)data[size-3]<<8)|
+        ((unsigned int)data[size-2]<<16)|((unsigned int)data[size-1]<<24);
+    if(stored!=(checksum^0x96696996U))return false;
+    long first=size-320;if(first<16)first=16;
+    for(long i=first;i+10<=size;++i){
+        if(data[i+9]!=10)continue;
+        char text[10];memcpy(text,&data[i],9);text[9]=0;
+        if(NativeSeedDecode(text,seed))return true;
+    }
+    return false;
+}
+}
+bool PortGameSession::ContinueNativeSave(const char* path,PortNormalRuntime& runtime,NativeSceneFiles& files,NativeActionSource* actions){
+    unsigned int seed=0;
+    if(!NativeSaveSeed(path,&seed))return false;
+    files.backdrop=NativeStageBackdrop(1);
+    PortSessionStart start=StartNormalCharacter(seed,runtime);
+    if(start.result!=NPS_WORLD_PENDING)return false;
+    for(int step=0;step<2000&&(runtime.phase==PNR_GENERATING||runtime.phase==PNR_ROOM_COMPONENTS);++step){
+        NativeActionFrame frame;frame.Clear(runtime.playerCreation.native153c,runtime.playerBody.entityToken,files.frame+step);
+        frame.SupplyConnection(true);frame.SupplyDrop(false);
+        for(int a=0;a<12;++a){frame.SupplyHeld(a,false);frame.SupplyPressed(a,false);if(a<8)frame.SupplyValue(a,0);}
+        NativeFrameActions generated(frame);
+        NormalRunResult r=AdvanceNormalSetup(runtime,files,actions?actions:&generated);
+        if(r==NFR_BAD_REQUEST)return false;
+    }
+    return runtime.phase==PNR_READY;
 }

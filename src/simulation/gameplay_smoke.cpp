@@ -376,6 +376,16 @@ int RunBombProbe(NativeMt& random,PortFrontend& ui){
         second->playerState.redHearts,second->playerState.maxRedHearts,second->playerState.keys,
         second->playerState.heldCard,second->playerState.heldPill,(int)second->collectiblesCollected);
     delete second;return 0;
+}int RunNativeContinueProbe(NativeMt& random,PortFrontend& ui){
+    (void)random;
+    PortNormalRuntime* runtime=new PortNormalRuntime;NativeMt local;local.Seed(9100);PortGameSession session(local,ui);
+    NativeSceneFiles files={"runtime/game/file_index.bin","runtime/game/",1,0,0};
+    if(!session.ContinueNativeSave("build/gameplay/profile/gamestate1.dat",*runtime,files)){delete runtime;return 144;}
+    if(runtime->phase!=PNR_READY||runtime->run.seeds.start!=1||runtime->run.context.stage!=1){delete runtime;return 145;}
+    if(!RunProjectileTicks(session,*runtime,-1,-1,2)){delete runtime;return 146;}
+    printf("NATIVE_CONTINUE seed=%u stage=%d hp=%d/%d\n",runtime->run.seeds.start,runtime->run.context.stage,
+        runtime->playerState.redHearts,runtime->playerState.maxRedHearts);
+    delete runtime;return 0;
 }int RunStatProbe(NativeMt& random,PortFrontend& ui){
     PortNormalRuntime* runtime=new PortNormalRuntime;PortGameSession session(random,ui);
     PortSessionStart start=session.StartNormalCharacter(1,*runtime);
@@ -621,6 +631,7 @@ int main(int argc,char** argv){
     if(!failed){int active=RunActiveProbe(random,ui);if(active){printf("ACTIVE_RESULT failed=%d\n",active);failed=true;}}
     if(!failed){int familiar=RunFamiliarProbe(random,ui);if(familiar){printf("FAMILIAR_RESULT failed=%d\n",familiar);failed=true;}}
     if(!failed){int cont=RunContinueProbe(random,ui);if(cont){printf("CONTINUE_RESULT failed=%d\n",cont);failed=true;}}
+    if(!failed){int nativeCont=RunNativeContinueProbe(random,ui);if(nativeCont){printf("NATIVE_CONTINUE_RESULT failed=%d\n",nativeCont);failed=true;}}
     if(!failed){int chars=RunCharacterMatrixProbe(random,ui);if(chars){printf("CHARACTER_RESULT failed=%d\n",chars);failed=true;}}
     if(!failed){int death=RunDeathProbe(random,ui);if(death){printf("DEATH_RESULT failed=%d\n",death);failed=true;}}
     delete runtime;return failed?5:0;

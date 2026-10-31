@@ -315,7 +315,7 @@ static void BuildActions(const bool* held,unsigned int frame,NativeActionFrame* 
     for(int i=0;i<12;++i)gPrev[i]=held[i];
 }
 int main(int argc,char** argv){
-    unsigned int seed=1;int frames=0,shotFrame=-1,descendTimes=0;bool hidden=false,fast=false,interactive=true,teleport=false,rewardTest=false,windowShot=false,layoutDump=false,bossEnter=false,invulnerable=false,continueRun=false,saveOnExit=false;const char* scriptText=0;const char* shotFile="build/windows/frame.bmp";const char* continueFile="build/windows/continue.dat";
+    unsigned int seed=1;int frames=0,shotFrame=-1,descendTimes=0;bool hidden=false,fast=false,interactive=true,teleport=false,rewardTest=false,windowShot=false,layoutDump=false,bossEnter=false,invulnerable=false,continueRun=false,saveOnExit=false;const char* scriptText=0;const char* shotFile="build/windows/frame.bmp";const char* continueFile="build/windows/continue.dat";const char* nativeContinueFile="build/windows/profile/gamestate1.dat";
     for(int i=1;i<argc;++i){if(!strcmp(argv[i],"--seed")&&i+1<argc)seed=(unsigned int)strtoul(argv[++i],0,10);
         else if(!strcmp(argv[i],"--frames")&&i+1<argc)frames=atoi(argv[++i]);else if(!strcmp(argv[i],"--hidden"))hidden=true;
         else if(!strcmp(argv[i],"--fast"))fast=true;else if(!strcmp(argv[i],"--script")&&i+1<argc){scriptText=argv[++i];interactive=false;}

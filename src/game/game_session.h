@@ -94,6 +94,9 @@ struct PortGameSession {
     //remains the separate target save format.
     bool SaveContinue(const char* path,PortNormalRuntime&);
     bool ContinueSavedRun(const char* path,PortNormalRuntime&,NativeSceneFiles&,NativeActionSource* actions=0);
+    //Read the native GSR0142 initial-run save, validate its checksum and
+    //restore the run seed/initial New Run state.
+    bool ContinueNativeSave(const char* path,PortNormalRuntime&,NativeSceneFiles&,NativeActionSource* actions=0);
     NormalRunResult AdvanceNormalSetup(PortNormalRuntime&,const NativeSceneFiles&,NativeActionSource* actions=0);
     NormalRunResult TickNormal(PortNormalRuntime&,const NativeSceneFiles&,NativeActionSource* actions);
     NativeWorldResult PrepareNormalWorld(const NormalRunFlow&,NativeWorld&,const NativeSceneFiles&,NativeWorldIssue* issue=0);
