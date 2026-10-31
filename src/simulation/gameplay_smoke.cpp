@@ -99,7 +99,7 @@ int RunDeathProbe(NativeMt& random,PortFrontend& ui){
     runtime->playerBody.position=live.enemies.entries[0]->body.position;
     runtime->playerBody.previousPosition=runtime->playerBody.position;
     unsigned int ticks=0;
-    while(ticks<600&&!runtime->playerDead){if(!RunProjectileTicks(session,*runtime,-1,-1,1))return 45;++ticks;}
+    while(ticks<600&&!runtime->playerDead){if(!RunProjectileTicks(session,*runtime,-1,-1,1)){printf("DEATH_STOP prereq=%08x update=%08x phase=%d hp=%d dead=%d\n",runtime->missingNativePrerequisite,runtime->playerUpdate.address,runtime->phase,runtime->playerState.redHearts,runtime->playerDead?1:0);return 45;}++ticks;}
     printf("DEATH seed=1035486403 room=268500997 hits=%u hp=%d/%d soul=%d dead=%d ticks=%u enemies=%d\n",
         runtime->playerHits,runtime->playerState.redHearts,runtime->playerState.maxRedHearts,
         runtime->playerState.soulHearts,runtime->playerDead?1:0,ticks,live.enemies.count);
@@ -332,6 +332,23 @@ int RunBombProbe(NativeMt& random,PortFrontend& ui){
     if(!RunActionPress(session,*runtime,9,1)){delete runtime;return 125;}
     if(runtime->playerState.redHearts!=std::min(maxHp,6)){delete runtime;return 126;}
     printf("ACTIVE id=%d hp=%d/%d\n",runtime->playerState.activeItems[0],runtime->playerState.redHearts,runtime->playerState.maxRedHearts);
+    delete runtime;return 0;
+}int RunFamiliarProbe(NativeMt& random,PortFrontend& ui){
+    PortNormalRuntime* runtime=new PortNormalRuntime;PortGameSession session(random,ui);
+    PortSessionStart start=session.StartNormalCharacter(1,*runtime);
+    if(start.result!=NPS_WORLD_PENDING){delete runtime;return 127;}
+    if(!AdvanceToBoundary(session,*runtime)||runtime->phase!=PNR_READY){delete runtime;return 128;}
+    if(!runtime->playerState.GrantCollectible(8)||!runtime->playerState.GrantCollectible(117)){delete runtime;return 129;}
+    NativeWorldResident& live=runtime->world.resident[runtime->world.currentList];
+    if(!live.room||live.enemies.count>=64){delete runtime;return 130;}
+    NativePoint at=runtime->playerBody.position;at.x+=150.0f;
+    NativeEnemy* enemy=new NativeEnemy;
+    if(!enemy->Begin(10,0,777,at,0,1)){delete enemy;delete runtime;return 131;}
+    live.enemies.entries[live.enemies.count++]=enemy;
+    if(!RunProjectileTicks(session,*runtime,-1,-1,180)){delete runtime;return 132;}
+    if(runtime->familiars.spawned!=2||(runtime->familiars.shots+runtime->familiars.hits)==0){delete runtime;return 133;}
+    printf("FAMILIAR spawned=%u shots=%u hits=%u enemies=%d\n",runtime->familiars.spawned,
+        runtime->familiars.shots,runtime->familiars.hits,live.enemies.count);
     delete runtime;return 0;
 }int RunStatProbe(NativeMt& random,PortFrontend& ui){
     PortNormalRuntime* runtime=new PortNormalRuntime;PortGameSession session(random,ui);
@@ -576,6 +593,7 @@ int main(int argc,char** argv){
     if(!failed){int stat=RunStatProbe(random,ui);if(stat){printf("STAT_RESULT failed=%d\n",stat);failed=true;}}
     if(!failed){int pocket=RunPocketProbe(random,ui);if(pocket){printf("POCKET_RESULT failed=%d\n",pocket);failed=true;}}
     if(!failed){int active=RunActiveProbe(random,ui);if(active){printf("ACTIVE_RESULT failed=%d\n",active);failed=true;}}
+    if(!failed){int familiar=RunFamiliarProbe(random,ui);if(familiar){printf("FAMILIAR_RESULT failed=%d\n",familiar);failed=true;}}
     if(!failed){int chars=RunCharacterMatrixProbe(random,ui);if(chars){printf("CHARACTER_RESULT failed=%d\n",chars);failed=true;}}
     if(!failed){int death=RunDeathProbe(random,ui);if(death){printf("DEATH_RESULT failed=%d\n",death);failed=true;}}
     delete runtime;return failed?5:0;

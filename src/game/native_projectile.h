@@ -55,6 +55,25 @@ struct NativeBomb {
     int timer;
     float radius;
 };
+struct NativeFamiliar {
+    int item;
+    NativePoint position;
+    int shootCooldown,contactCooldown;
+    float time;
+};
+class NativeFamiliarSystem {
+public:
+    std::vector<NativeFamiliar> active;
+    unsigned int spawned,shots,hits;
+    NativeFamiliarSystem();
+    void Clear();
+    bool Sync(PortNormalRuntime& runtime);
+    bool Step(PortNormalRuntime& runtime);
+    void Swap(NativeFamiliarSystem&);
+private:
+    NativeFamiliarSystem(const NativeFamiliarSystem&);
+    NativeFamiliarSystem& operator=(const NativeFamiliarSystem&);
+};
 class NativeBombSystem {
 public:
     std::vector<NativeBomb> active;

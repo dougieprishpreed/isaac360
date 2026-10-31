@@ -44,7 +44,7 @@ PortSessionStart PortGameSession::StartNormalCharacter(unsigned int seed,PortNor
         runtime.playerState.Swap(state);
         runtime.playerCreation.Swap(creation);
         runtime.playerManager.Swap(manager);
-        runtime.playerUpdate=NativePlayerUpdate();runtime.projectiles.Reset();runtime.enemyShots.Clear();runtime.bombs.Clear();
+        runtime.playerUpdate=NativePlayerUpdate();runtime.projectiles.Reset();runtime.enemyShots.Clear();runtime.bombs.Clear();runtime.familiars.Clear();
         runtime.roomFx.Swap(roomFx);
         runtime.minimaps.Reset();
         //Virtual Init, the reached resource/callback services and manager
@@ -112,7 +112,7 @@ bool PortGameSession::DescendNormal(PortNormalRuntime& runtime,NativeSceneFiles&
     runtime.playerBody.velocity.x=runtime.playerBody.velocity.y=0;
     runtime.playerBody.removed=false;
     runtime.playerInvulnerable=0;runtime.doorTransitionGrace=0;
-    runtime.projectiles.Reset();runtime.enemyShots.Clear();
+    runtime.projectiles.Reset();runtime.enemyShots.Clear();runtime.bombs.Clear();runtime.familiars.Clear();
     runtime.descendRequested=false;runtime.bossDefeated=false;
     runtime.roomTransitions=0;runtime.missingNativePrerequisite=0;
     runtime.phase=PNR_READY;

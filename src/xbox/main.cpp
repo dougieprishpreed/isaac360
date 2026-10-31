@@ -325,7 +325,28 @@ static void DrawTrapdoor(){
     TexRect(gGameplayAtlas,px-32,py-32,64,64,(float)(kGameplayTrapdooropenX+frame*64),(float)kGameplayTrapdooropenY,64,64,
         (float)kGameplayAtlasWidth,(float)kGameplayAtlasHeight);
 }
-static void DrawEnemies(){
+static void DrawFamiliars(){
+    if(!gGameplayAtlas||gNormalRuntime.world.currentList<0||gNormalRuntime.world.currentList>=kNativeWorldRoomLimit)return;
+    NativeWorldResident& live=gNormalRuntime.world.resident[gNormalRuntime.world.currentList];
+    if(!live.room||!live.view||!live.view->background.ready)return;
+    const NativeRoomBackground& background=live.view->background;const NativeRoomSpace& space=live.room->space;
+    const float roomW=background.right-background.left,worldW=space.right-space.left;
+    const float roomH=background.bottom-background.top,worldH=space.bottom-space.top;
+    if(worldW<=0||worldH<=0)return;
+    for(unsigned int i=0;i<gNormalRuntime.familiars.active.size();++i){
+        const NativeFamiliar& f=gNormalRuntime.familiars.active[i];
+        int sx=0,sy=0,frames=0;
+        if(f.item==8){sx=kGameplayBrotherbobbywalkX;sy=kGameplayBrotherbobbywalkY;frames=kGameplayBrotherbobbywalkFrames;}
+        else if(f.item==117){sx=kGameplayDeadbirdwalkX;sy=kGameplayDeadbirdwalkY;frames=kGameplayDeadbirdwalkFrames;}
+        else continue;
+        if(frames<=0)continue;
+        const int frame=((int)(f.time/6))%frames;
+        const float px=background.left+(f.position.x-space.left)*roomW/worldW;
+        const float py=background.top+(f.position.y-space.top)*roomH/worldH;
+        TexRect(gGameplayAtlas,px-32,py-48,64,64,(float)(sx+frame*64),(float)sy,64,64,
+            (float)kGameplayAtlasWidth,(float)kGameplayAtlasHeight);
+    }
+}static void DrawEnemies(){
     if(!gGameplayAtlas||gNormalRuntime.world.currentList<0||gNormalRuntime.world.currentList>=kNativeWorldRoomLimit)return;
     NativeWorldResident& live=gNormalRuntime.world.resident[gNormalRuntime.world.currentList];
     if(!live.room||!live.view||!live.view->background.ready)return;
@@ -421,7 +442,7 @@ static void DrawHud(){
         (float)kGameplayAtlasWidth,(float)kGameplayAtlasHeight);
 }
 static void Gameplay(){
-    DrawBackground();DrawDoors();DrawRocks();DrawPickups();DrawTrapdoor();DrawEnemies();DrawPlayer();DrawProjectiles();DrawHud();
+    DrawBackground();DrawDoors();DrawRocks();DrawPickups();DrawTrapdoor();DrawEnemies();DrawFamiliars();DrawPlayer();DrawProjectiles();DrawHud();
     gDevice->SetTexture(0,gAtlas);
 }
 static void Anim(int id,int frame,float x,float y,float scale=kFrontendScale,float angle=0,const int* itemIcon=0,DWORD tint=0xffffffff,bool flipX=false,const float* extraAdd=0) {

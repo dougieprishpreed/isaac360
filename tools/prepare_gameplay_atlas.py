@@ -278,6 +278,8 @@ ANIMATED=[
     ('mulliganwalk','gfx/016.000_Mulligan.anm2','',None,64),
     ('mulligoonwalk','gfx/016.001_Mulligoon.anm2','',None,64),
     ('mulliboomwalk','gfx/016.002_Mulliboom.anm2','',None,64),
+    ('brotherbobbywalk','gfx/003.001_brother bobby.anm2','FloatSide',None,64),
+    ('deadbirdwalk','gfx/characters/117_dead bird.anm2','HeadRight',None,64),
     ('lambwalk','gfx/273.000_TheLamb.anm2','',None,128),
     ('deliriumwalk','gfx/412.000_Delirium.anm2','',None,256),
     ('darkonewalk','gfx/267.000_Dark One.anm2','',None,128),

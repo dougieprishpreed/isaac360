@@ -189,7 +189,23 @@ static void DrawTrapdoor(){
     float px=bg.left+(room->trapdoorX-space.left)*rw/ww,py=bg.top+(room->trapdoorY-space.top)*rh/wh;
     TexRect(px-32,py-32,64,64,(float)(kGameplayTrapdooropenX+frame*64),(float)kGameplayTrapdooropenY,64,64);
 }
-static void DrawEnemies(){
+static void DrawFamiliars(){
+    NativeWorldResident& live=gRuntime->world.resident[gRuntime->world.currentList];
+    if(!live.room||!live.view||!live.view->background.ready)return;
+    const NativeRoomBackground& bg=live.view->background;const NativeRoomSpace& space=live.room->space;
+    float rw=bg.right-bg.left,rh=bg.bottom-bg.top,ww=space.right-space.left,wh=space.bottom-space.top;if(ww<=0||wh<=0)return;
+    for(unsigned int i=0;i<gRuntime->familiars.active.size();++i){
+        const NativeFamiliar& f=gRuntime->familiars.active[i];
+        int sx=0,sy=0,frames=0;
+        if(f.item==8){sx=kGameplayBrotherbobbywalkX;sy=kGameplayBrotherbobbywalkY;frames=kGameplayBrotherbobbywalkFrames;}
+        else if(f.item==117){sx=kGameplayDeadbirdwalkX;sy=kGameplayDeadbirdwalkY;frames=kGameplayDeadbirdwalkFrames;}
+        else continue;
+        if(frames<=0)continue;
+        int frame=((int)(f.time/6))%frames;
+        float px=bg.left+(f.position.x-space.left)*rw/ww,py=bg.top+(f.position.y-space.top)*rh/wh;
+        TexRect(px-32,py-48,64,64,(float)(sx+frame*64),(float)sy,64,64);
+    }
+}static void DrawEnemies(){
     NativeWorldResident& live=gRuntime->world.resident[gRuntime->world.currentList];
     if(!live.room||!live.view||!live.view->background.ready)return;
     const NativeRoomBackground& bg=live.view->background;const NativeRoomSpace& space=live.room->space;
@@ -244,7 +260,7 @@ static void Render(){
     gDevice->SetTextureStageState(0,D3DTSS_COLOROP,D3DTOP_SELECTARG1);gDevice->SetTextureStageState(0,D3DTSS_COLORARG1,D3DTA_TEXTURE);
     gDevice->SetTextureStageState(0,D3DTSS_ALPHAOP,D3DTOP_SELECTARG1);gDevice->SetTextureStageState(0,D3DTSS_ALPHAARG1,D3DTA_TEXTURE);
     gDevice->SetTexture(0,gAtlas);
-    DrawBackground();DrawDoors();DrawRocks();DrawPickups();DrawTrapdoor();DrawEnemies();DrawPlayer();DrawProjectiles();DrawHud();
+    DrawBackground();DrawDoors();DrawRocks();DrawPickups();DrawTrapdoor();DrawEnemies();DrawFamiliars();DrawPlayer();DrawProjectiles();DrawHud();
     gDevice->EndScene();
 }
 static bool SaveBMP(const char* path){

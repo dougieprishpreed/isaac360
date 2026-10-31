@@ -197,3 +197,85 @@ void NativeBombSystem::Swap(NativeBombSystem& b){
     n=enemyHits;enemyHits=b.enemyHits;b.enemyHits=n;
     n=rockHits;rockHits=b.rockHits;b.rockHits=n;
 }
+
+NativeFamiliarSystem::NativeFamiliarSystem(){spawned=shots=hits=0;}
+void NativeFamiliarSystem::Clear(){active.clear();spawned=shots=hits=0;}
+bool NativeFamiliarSystem::Sync(PortNormalRuntime& runtime){
+    if(runtime.playerDead||!runtime.playerBody.ready)return true;
+    const int familiarItems[]={8,117}; //Brother Bobby, Dead Bird.
+    for(int k=0;k<2;++k){
+        bool held=false;
+        if(!runtime.playerState.HasCollectible(familiarItems[k],&held))return false;
+        if(!held)continue;
+        bool present=false;
+        for(unsigned int i=0;i<active.size();++i)if(active[i].item==familiarItems[k]){present=true;break;}
+        if(present)continue;
+        NativeFamiliar f;f.item=familiarItems[k];f.position=runtime.playerBody.position;
+        f.shootCooldown=30;f.contactCooldown=0;f.time=0;
+        active.push_back(f);++spawned;
+    }
+    return true;
+}
+bool NativeFamiliarSystem::Step(PortNormalRuntime& runtime){
+    NativeRoomState* room=runtime.world.Current();
+    if(!room||runtime.world.currentList<0||runtime.world.currentList>=kNativeWorldRoomLimit)return false;
+    NativeWorldResident& live=runtime.world.resident[runtime.world.currentList];
+    for(unsigned int i=0;i<active.size();++i){
+        NativeFamiliar& f=active[i];f.time+=1.0f;
+        NativeEnemy* nearest=0;float best=1.0e9f;
+        for(int e=0;e<live.enemies.count;++e){NativeEnemy* enemy=live.enemies.entries[e];
+            if(!enemy||!enemy->ready||enemy->dead)continue;
+            float dx=enemy->body.position.x-f.position.x,dy=enemy->body.position.y-f.position.y;
+            float d=dx*dx+dy*dy;if(d<best){best=d;nearest=enemy;}}
+        if(f.item==8){
+            const float ox=(i%2)?-34.0f:34.0f,oy=-30.0f;
+            f.position.x+=(runtime.playerBody.position.x+ox-f.position.x)*0.15f;
+            f.position.y+=(runtime.playerBody.position.y+oy-f.position.y)*0.15f;
+            if(f.shootCooldown>0)--f.shootCooldown;
+            if(f.shootCooldown<=0&&nearest){
+                float dx=nearest->body.position.x-f.position.x,dy=nearest->body.position.y-f.position.y;
+                float d=(float)sqrt((double)(dx*dx+dy*dy));
+                if(d>0.0f&&d<500.0f){
+                    NativeProjectile p;p.position=f.position;
+                    p.velocity.x=dx/d*8.0f;p.velocity.y=dy/d*8.0f;
+                    p.damage=3.5f;p.travelled=0;p.range=runtime.playerState.stats.range;
+                    p.owner=runtime.playerBody.entityToken;
+                    runtime.projectiles.active.push_back(p);++runtime.projectiles.spawned;
+                    ++shots;f.shootCooldown=45;
+                }
+            }
+        }else if(f.item==117){
+            if(nearest){
+                float dx=nearest->body.position.x-f.position.x,dy=nearest->body.position.y-f.position.y;
+                float d=(float)sqrt((double)(dx*dx+dy*dy));
+                if(d>0.0f){f.position.x+=dx/d*1.4f;f.position.y+=dy/d*1.4f;}
+                if(f.contactCooldown>0)--f.contactCooldown;
+                if(d<24.0f&&f.contactCooldown<=0){
+                    nearest->Damage(5.0f);++hits;f.contactCooldown=30;
+                    if(nearest->dead){
+                        ++runtime.enemyKills;
+                        if(NativeBossEntityType(nearest->type,nearest->body.variant)){
+                            runtime.bossDefeated=true;
+                            if(room->trapdoorState==0){room->trapdoorState=1;room->trapdoorTimer=0;
+                                room->trapdoorX=nearest->body.position.x;room->trapdoorY=nearest->body.position.y;}
+                        }
+                    }
+                }
+            }else{
+                const float ox=(i%2)?-34.0f:34.0f,oy=-30.0f;
+                f.position.x+=(runtime.playerBody.position.x+ox-f.position.x)*0.15f;
+                f.position.y+=(runtime.playerBody.position.y+oy-f.position.y)*0.15f;
+            }
+        }
+        NativePoint clamped;if(room->space.Clamp(f.position,4,4,4,4,&clamped))f.position=clamped;
+    }
+    for(int e=0;e<live.enemies.count;){NativeEnemy* enemy=live.enemies.entries[e];
+        if(enemy&&enemy->dead){delete enemy;for(int j=e+1;j<live.enemies.count;++j)live.enemies.entries[j-1]=live.enemies.entries[j];--live.enemies.count;live.enemies.entries[live.enemies.count]=0;continue;}
+        ++e;}
+    if(live.enemies.count==0)room->clear=true;
+    return true;
+}
+void NativeFamiliarSystem::Swap(NativeFamiliarSystem& b){
+    active.swap(b.active);unsigned int n=spawned;spawned=b.spawned;b.spawned=n;
+    n=shots;shots=b.shots;b.shots=n;n=hits;hits=b.hits;b.hits=n;
+}

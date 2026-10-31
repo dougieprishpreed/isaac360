@@ -146,6 +146,7 @@ bool NativeRoomUpdate::TickSimulationTail(PortNormalRuntime& runtime,NativeActio
     }
     if(!runtime.enemyShots.Step(runtime)){*next=0x61f6d0;return false;}
     if(!runtime.bombs.Step(runtime)){*next=0x733ef0;return false;}
+    if(!runtime.familiars.Sync(runtime)||!runtime.familiars.Step(runtime)){*next=0x73c823;return false;}
     //Boss trapdoor: the opening animation lasts five ticks per original
     //frame, then the hole is usable. Contact requests the maintained
     //next-floor descent from the adapter/session owner.
@@ -261,7 +262,7 @@ bool NativeRoomUpdate::TickSimulationTail(PortNormalRuntime& runtime,NativeActio
                     runtime.playerBody.previousPosition=runtime.playerBody.position;runtime.playerBody.velocity.x=runtime.playerBody.velocity.y=0;
                 }}
             }
-            runtime.projectiles.Reset();runtime.enemyShots.Clear();runtime.bombs.Clear();runtime.doorTransitionGrace=30;++runtime.roomTransitions;
+            runtime.projectiles.Reset();runtime.enemyShots.Clear();runtime.bombs.Clear();runtime.familiars.Clear();runtime.doorTransitionGrace=30;++runtime.roomTransitions;
             return true;
         }
     }
