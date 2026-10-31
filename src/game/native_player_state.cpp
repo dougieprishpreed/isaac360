@@ -60,7 +60,17 @@ bool NativePlayerState::Damage(int amount){
     if(amount<=0)return redHearts<=0&&soulHearts<=0;
     if(damageTakenThisFloor<1000000)++damageTakenThisFloor;
     crownOfLightDisabled=true;purityActive=false;
-    if(soulHearts>0){int take=std::min(soulHearts,amount);soulHearts-=take;amount-=take;}
+    if(soulHearts>0){
+        const int take=std::min(soulHearts,amount);
+        const int remaining=soulHearts-take;
+        //Black hearts share the soul-heart pool. Damage consumes the pool;
+        //retain only mask bits that still address a remaining half-heart.
+        unsigned int keep=0;
+        for(int slot=0;slot<remaining;++slot)
+            if((unsigned int)blackHeartMask&(1U<<(slot/2)))keep|=1U<<(slot/2);
+        blackHeartMask=(int)keep;
+        soulHearts=remaining;amount-=take;
+    }
     if(amount>0){redHearts-=amount;if(redHearts<0)redHearts=0;}
     if(stats.ready)stats.RecomputeCache(*this);
     return redHearts<=0&&soulHearts<=0;

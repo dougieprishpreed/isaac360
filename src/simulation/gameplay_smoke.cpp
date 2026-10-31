@@ -470,6 +470,19 @@ int RunBombProbe(NativeMt& random,PortFrontend& ui){
         audio.deviceReady?1:0,audio.sfxStarted,audio.sfxLoaded,audio.musicStarted,
         audio.musicFrames,audio.sfxFrames,audio.LastRms(),audio.sfxStarted-before);
     delete runtime;return 0;
+}int RunBlackHeartProbe(NativeMt& random,PortFrontend& ui){
+    ui.characterPage=0;ui.characterChoice=1;ui.characterMode=0;
+    PortNormalRuntime* runtime=new PortNormalRuntime;PortGameSession session(random,ui);
+    PortSessionStart start=session.StartNormalCharacter(1,*runtime);
+    if(start.result!=NPS_WORLD_PENDING||!AdvanceToBoundary(session,*runtime)||runtime->phase!=PNR_READY){delete runtime;return 211;}
+    NativePlayerState& state=runtime->playerState;
+    state.maxRedHearts=6;state.redHearts=6;state.soulHearts=0;state.blackHeartMask=0;
+    if(!state.GrantCollectible(80)||state.soulHearts!=4||state.blackHeartMask==0){delete runtime;return 212;}
+    if(state.Damage(1)||state.soulHearts!=3||state.blackHeartMask==0){delete runtime;return 213;}
+    if(state.Damage(3)||state.soulHearts!=0||state.blackHeartMask!=0||state.redHearts!=6){delete runtime;return 214;}
+    if(state.Damage(2)||state.redHearts!=4){delete runtime;return 215;}
+    printf("BLACKHEART absorbed=4 soul=0 red=4 mask=0\n");
+    delete runtime;return 0;
 }int RunFamiliarProbe(NativeMt& random,PortFrontend& ui){
     PortNormalRuntime* runtime=new PortNormalRuntime;PortGameSession session(random,ui);
     PortSessionStart start=session.StartNormalCharacter(1,*runtime);
@@ -938,6 +951,7 @@ int main(int argc,char** argv){
     if(!failed){int reroll=RunRerollCacheProbe(random,ui);if(reroll){printf("REROLL_RESULT failed=%d\n",reroll);failed=true;}}
     if(!failed){int bossAttacks=RunBossAttackProbe(random,ui);if(bossAttacks){printf("BOSS_ATTACKS_RESULT failed=%d\n",bossAttacks);failed=true;}}
     if(!failed){int audioProbe=RunAudioProbe(random,ui);if(audioProbe){printf("AUDIO_RESULT failed=%d\n",audioProbe);failed=true;}}
+    if(!failed){int blackHeart=RunBlackHeartProbe(random,ui);if(blackHeart){printf("BLACKHEART_RESULT failed=%d\n",blackHeart);failed=true;}}
     if(!failed){int familiar=RunFamiliarProbe(random,ui);if(familiar){printf("FAMILIAR_RESULT failed=%d\n",familiar);failed=true;}}
     if(!failed){int cont=RunContinueProbe(random,ui);if(cont){printf("CONTINUE_RESULT failed=%d\n",cont);failed=true;}}
     if(!failed){int nativeCont=RunNativeContinueProbe(random,ui);if(nativeCont){printf("NATIVE_CONTINUE_RESULT failed=%d\n",nativeCont);failed=true;}}

@@ -33,6 +33,7 @@ def main():
     bossAttacks=re.search(r'^BOSS_ATTACKS (.+)$',log,re.M)
     bossFlags=bossAttacks.group(1) if bossAttacks else ''
     audio=re.search(r'^AUDIO device=(\d+) sfx=(\d+) loaded=(\d+) music=(\d+) music_frames=(\d+) sfx_frames=(\d+) rms=(-?[0-9.]+) gameplay_sfx=(\d+)',log,re.M)
+    blackheart=re.search(r'^BLACKHEART absorbed=(\d+) soul=(\d+) red=(\d+) mask=(\d+)',log,re.M)
     pocket=re.search(r'^POCKET hp=(-?\d+)/(-?\d+) bombs=(-?\d+) keys=(-?\d+) coins=(-?\d+)',log,re.M)
     active=re.search(r'^ACTIVE id=(\d+) hp=(-?\d+)/(-?\d+)',log,re.M)
     familiar=re.search(r'^FAMILIAR spawned=(\d+) shots=(\d+) hits=(\d+) enemies=(\d+)',log,re.M)
@@ -169,6 +170,9 @@ def main():
             'audio_sfx_frames':int(audio.group(6)) if audio else 0,
             'audio_rms':float(audio.group(7)) if audio else 0.0,
             'audio_gameplay_sfx':int(audio.group(8)) if audio else 0,
+            'blackheart_absorbed':int(blackheart.group(1)) if blackheart else 0,
+            'blackheart_soul':int(blackheart.group(2)) if blackheart else -1,
+            'blackheart_red':int(blackheart.group(3)) if blackheart else -1,
             'pocket_hp':int(pocket.group(1)) if pocket else -1,
             'pocket_max_hp':int(pocket.group(2)) if pocket else -1,
             'pocket_bombs':int(pocket.group(3)) if pocket else -1,
