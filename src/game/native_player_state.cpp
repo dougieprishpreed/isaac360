@@ -4,7 +4,7 @@
 namespace {
 void Fold(unsigned int& h,unsigned int n){for(int i=0;i<4;++i)h=(h^((n>>(i*8))&255))*16777619U;}
 }
-NativePlayerState::NativePlayerState():ready(false),playerType(-1),canShoot(false),maxRedHearts(0),redHearts(0),soulHearts(0),blackHeartMask(0),keys(0),bombs(0),coins(0),resourcesReady(false),runInitializing(false),native1734(false),playerTearsEnabled(false),boneHearts(0),boneMask(0),brokenHearts(0),rottenHearts(0),storedHearts(0),bombReserve(0),healthItemSlots(0),healthItemRemainder(0),changingHealthItems(false),temporaryCollectible(0),transformationFlags(0),native12c8(0),native12ca(0){for(int i=0;i<4;++i)activeItems[i]=0;for(int i=0;i<15;++i)formCounts[i]=0;heldTrinkets[0]=heldTrinkets[1]=temporaryTrinket=native17ec=native17f0=0;trinketsDisabled=ghost=temporaryTrinketGolden=false;}
+NativePlayerState::NativePlayerState():ready(false),playerType(-1),canShoot(false),maxRedHearts(0),redHearts(0),soulHearts(0),blackHeartMask(0),keys(0),bombs(0),coins(0),resourcesReady(false),runInitializing(false),native1734(false),playerTearsEnabled(false),boneHearts(0),boneMask(0),brokenHearts(0),rottenHearts(0),storedHearts(0),bombReserve(0),healthItemSlots(0),healthItemRemainder(0),changingHealthItems(false),temporaryCollectible(0),transformationFlags(0),native12c8(0),native12ca(0){for(int i=0;i<4;++i)activeItems[i]=0;for(int i=0;i<15;++i)formCounts[i]=0;heldTrinkets[0]=heldTrinkets[1]=temporaryTrinket=native17ec=native17f0=0;heldCard=0;heldPill=-1;trinketsDisabled=ghost=temporaryTrinketGolden=false;}
 bool NativePlayerState::ResetFreshNumbers(const NativeRunStart& start,const NativePlayerStartup& startup,NativeEntityBody& body){
     const NativePlayerDef* d=NativePlayer(start.player);
     if(ready||playerType!=-1||!NativeRunStartValid(start)||!d||!startup.ready||!body.ready||body.type!=1||body.variant!=0||body.subtype!=start.player||
@@ -28,7 +28,7 @@ bool NativePlayerState::FinishFreshInventory(NativePlayerStartup& startup){
     trinketCounts.assign(startup.banks[NPB_TRINKET].size(),0);
     //709f6a/74,70a0c4,70b3d0,7099ce,70b477. These are live query
     //owners, independent of the constructor snapshot retained for diagnostics.
-    heldTrinkets[0]=heldTrinkets[1]=temporaryTrinket=native17ec=native17f0=0;
+    heldTrinkets[0]=heldTrinkets[1]=temporaryTrinket=native17ec=native17f0=0;heldCard=0;heldPill=-1;
     trinketsDisabled=ghost=temporaryTrinketGolden=false;
     native1734=false;playerTearsEnabled=true;
     trinketOverrides.assign(startup.banks[NPB_TRINKET].size(),0);
@@ -71,7 +71,7 @@ void NativePlayerState::Swap(NativePlayerState& b){
     std::swap(ready,b.ready);std::swap(playerType,b.playerType);std::swap(canShoot,b.canShoot);std::swap(maxRedHearts,b.maxRedHearts);std::swap(redHearts,b.redHearts);
     std::swap(soulHearts,b.soulHearts);std::swap(blackHeartMask,b.blackHeartMask);std::swap(keys,b.keys);std::swap(bombs,b.bombs);std::swap(coins,b.coins);
     std::swap(native12c8,b.native12c8);std::swap(native12ca,b.native12ca);collectibleCounts.swap(b.collectibleCounts);trinketCounts.swap(b.trinketCounts);
-    for(int i=0;i<2;++i)std::swap(heldTrinkets[i],b.heldTrinkets[i]);std::swap(temporaryTrinket,b.temporaryTrinket);std::swap(native17ec,b.native17ec);std::swap(native17f0,b.native17f0);
+    for(int i=0;i<2;++i)std::swap(heldTrinkets[i],b.heldTrinkets[i]);std::swap(temporaryTrinket,b.temporaryTrinket);std::swap(native17ec,b.native17ec);std::swap(native17f0,b.native17f0);std::swap(heldCard,b.heldCard);std::swap(heldPill,b.heldPill);
     std::swap(trinketsDisabled,b.trinketsDisabled);std::swap(ghost,b.ghost);std::swap(temporaryTrinketGolden,b.temporaryTrinketGolden);trinketOverrides.swap(b.trinketOverrides);
     std::swap(resourcesReady,b.resourcesReady);std::swap(runInitializing,b.runInitializing);std::swap(boneHearts,b.boneHearts);std::swap(boneMask,b.boneMask);std::swap(brokenHearts,b.brokenHearts);
     std::swap(native1734,b.native1734);std::swap(playerTearsEnabled,b.playerTearsEnabled);
@@ -82,7 +82,7 @@ void NativePlayerState::Swap(NativePlayerState& b){
     native166c.swap(b.native166c);native1678.swap(b.native1678);pendingCollectibles.swap(b.pendingCollectibles);effects.Swap(b.effects);stats.Swap(b.stats);
 }
 unsigned int NativePlayerState::StateHash() const {
-    unsigned int h=2166136261U;Fold(h,ready);Fold(h,playerType);Fold(h,canShoot);Fold(h,maxRedHearts);Fold(h,redHearts);Fold(h,soulHearts);Fold(h,blackHeartMask);
+    unsigned int h=2166136261U;Fold(h,ready);Fold(h,playerType);Fold(h,canShoot);Fold(h,maxRedHearts);Fold(h,redHearts);Fold(h,soulHearts);Fold(h,blackHeartMask);Fold(h,(unsigned int)heldCard);Fold(h,(unsigned int)heldPill);
     Fold(h,keys);Fold(h,bombs);Fold(h,coins);Fold(h,native12c8);Fold(h,native12ca);Fold(h,effects.StateHash());Fold(h,stats.StateHash());
     Fold(h,resourcesReady);Fold(h,runInitializing);Fold(h,boneHearts);Fold(h,boneMask);Fold(h,brokenHearts);Fold(h,rottenHearts);Fold(h,storedHearts);Fold(h,bombReserve);
     Fold(h,native1734);Fold(h,playerTearsEnabled);

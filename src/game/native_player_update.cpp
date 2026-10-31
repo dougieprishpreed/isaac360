@@ -348,6 +348,71 @@ bool RunReachedPlayerTail(NativePlayerUpdate& call,PortNormalRuntime& runtime,Li
     (void)creation;(void)sprites;(void)ax;(void)ay;(void)f1f7c;(void)v1300;(void)v35c;(void)v360;(void)v1794;(void)v19f8;
     return true;
 }
+
+void AdjustTears(NativePlayerState& state,float delta){
+    float tears=30.0f/(state.stats.fireDelay+1.0f)-1.0f;
+    tears+=delta;if(tears<-0.9f)tears=-0.9f;
+    float delay=30.0f/(tears+1.0f)-1.0f;
+    state.stats.fireDelay=std::max(5.0f,delay);
+}
+void DamageAllEnemies(PortNormalRuntime& runtime,float amount){
+    if(runtime.world.currentList<0||runtime.world.currentList>=kNativeWorldRoomLimit)return;
+    NativeWorldResident& live=runtime.world.resident[runtime.world.currentList];
+    NativeRoomState* room=runtime.world.Current();if(!room)return;
+    for(int i=0;i<live.enemies.count;++i){NativeEnemy* enemy=live.enemies.entries[i];
+        if(!enemy||!enemy->ready||enemy->dead)continue;
+        const float px=enemy->body.position.x,py=enemy->body.position.y;
+        enemy->Damage(amount);
+        if(enemy->dead&&NativeBossEntityType(enemy->type,enemy->body.variant)){
+            runtime.bossDefeated=true;
+            if(room->trapdoorState==0){room->trapdoorState=1;room->trapdoorTimer=0;room->trapdoorX=px;room->trapdoorY=py;}
+        }
+        if(enemy->dead)++runtime.enemyKills;
+    }
+    for(int e=0;e<live.enemies.count;){NativeEnemy* enemy=live.enemies.entries[e];
+        if(enemy&&enemy->dead){delete enemy;for(int j=e+1;j<live.enemies.count;++j)live.enemies.entries[j-1]=live.enemies.entries[j];--live.enemies.count;live.enemies.entries[live.enemies.count]=0;continue;}
+        ++e;}
+    if(live.enemies.count==0)room->clear=true;
+}
+void UsePill(PortNormalRuntime& runtime,int effect){
+    NativePlayerState& state=runtime.playerState;
+    switch(effect){
+    case 2:state.soulHearts=std::min(99,state.soulHearts+4);break; //Balls of Steel
+    case 3:state.keys=std::min(99,state.keys+state.bombs);state.bombs=0;break; //Bombs are Key
+    case 5:state.redHearts=state.maxRedHearts;break; //Full Health
+    case 6:state.maxRedHearts=std::max(2,state.maxRedHearts-2);state.redHearts=std::min(state.redHearts,state.maxRedHearts);break;
+    case 7:state.AddHeartContainers(2);break; //Health Up
+    case 11:state.stats.range=std::max(6.5f,state.stats.range-1.5f);break;
+    case 12:state.stats.range+=1.5f;break;
+    case 13:state.stats.moveSpeed=std::max(1.0f,state.stats.moveSpeed-0.15f);break;
+    case 14:state.stats.moveSpeed=std::min(2.0f,state.stats.moveSpeed+0.15f);break;
+    case 15:AdjustTears(state,-0.35f);break;
+    case 16:AdjustTears(state,0.35f);break;
+    case 17:state.stats.luck-=1.0f;break;
+    case 18:state.stats.luck+=1.0f;break;
+    default:break;
+    }
+    state.stats.dirty=0xffffU;
+}
+void UseCard(PortNormalRuntime& runtime,int id){
+    NativePlayerState& state=runtime.playerState;
+    switch(id){
+    case 6:state.soulHearts=std::min(99,state.soulHearts+4);break; //The Hierophant
+    case 7:state.AddHeartContainers(4);break; //The Lovers
+    case 9: //Justice
+        if(!state.AddHeartContainers(2))state.redHearts=std::min(state.maxRedHearts,state.redHearts+2);
+        state.bombs=std::min(99,state.bombs+1);state.keys=std::min(99,state.keys+1);state.coins=std::min(99,state.coins+1);break;
+    case 12:state.stats.damage+=1.0f;state.stats.baseDamage+=1.0f;state.stats.dirty=0xffffU;break; //Strength
+    case 14:DamageAllEnemies(runtime,40.0f);break; //Death
+    case 20:state.redHearts=state.maxRedHearts;DamageAllEnemies(runtime,100.0f);break; //The Sun
+    case 23:state.bombs=std::min(99,state.bombs*2);break;
+    case 24:state.coins=std::min(99,state.coins*2);break;
+    case 25:state.keys=std::min(99,state.keys*2);break;
+    case 26:state.redHearts=state.maxRedHearts;break;
+    default:break;
+    }
+}
+
 }
 void NativePlayerUpdate::Begin(){
     address=0x736d70;missingOffset=0;active=false;returned=false;
@@ -544,12 +609,14 @@ bool NativePlayerUpdate::Resume(PortNormalRuntime& runtime,NativeActionSource* a
     }
     if(address==0x755210){
         bool pressed;if(!Action(actions,false,10,creation,body.entityToken,&pressed)){*next=0x7552a5;return false;}
-        unsigned int kind,controls;
-        if(!fields.Get(0x16bc,4,&kind)||!fields.Get(0x358,1,&controls))return false;
-        unsigned int item=0;if(kind==2&&!fields.Get(0x16b8,4,&item))return false;
-        if(kind==2&&(int)item>0){*next=0x7552f0;return false;}
-        if(controls){unsigned int cooldown;if(!fields.Get(0x35c,4,&cooldown))return false;
-            if((int)cooldown<1&&pressed&&!(body.flagsLow&0x800)){*next=0x75534a;return false;}}
+        //Pocket slot use: a pressed pill/card action applies the held pocket
+        //item and clears the slot. The native 7552f0/75534a dispatch branches
+        //remain item-effect services; this maintained path covers the prepared
+        //numeric/heart/resource effects.
+        if(pressed){
+            if(state.heldPill>=0){UsePill(runtime,state.heldPill);state.heldPill=-1;}
+            else if(state.heldCard){UseCard(runtime,state.heldCard);state.heldCard=0;}
+        }
         address=0x72c430;
     }
     if(address==0x72c430){

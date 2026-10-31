@@ -274,6 +274,52 @@ int RunBombProbe(NativeMt& random,PortFrontend& ui){
         runtime->bombs.placed,runtime->bombs.explosions,runtime->bombs.enemyHits,
         runtime->playerState.bombs,live.enemies.count);
     delete runtime;return 0;
+}unsigned int RunActionPress(PortGameSession& session,PortNormalRuntime& runtime,int action,unsigned int count){
+    unsigned int done=0;
+    for(unsigned int i=0;i<count;++i){
+        NativeSceneFiles files={"runtime/game/file_index.bin","runtime/game/",NativeStageBackdrop(runtime.run.context.stage),runtime.run.context.nativeMode,0};
+        NativeActionFrame frame;frame.Clear(runtime.playerCreation.native153c,runtime.playerBody.entityToken,files.frame+i);
+        frame.SupplyConnection(true);frame.SupplyDrop(false);
+        for(int a=0;a<12;++a){frame.SupplyHeld(a,false);frame.SupplyPressed(a,false);}
+        for(int a=0;a<8;++a)frame.SupplyValue(a,0);
+        frame.SupplyHeld(action,true);frame.SupplyPressed(action,true);
+        NativeFrameActions actions(frame);
+        if(session.TickNormal(runtime,files,&actions)!=NFR_OK)break;
+        ++done;
+    }
+    return done;
+}int RunPocketProbe(NativeMt& random,PortFrontend& ui){
+    PortNormalRuntime* runtime=new PortNormalRuntime;PortGameSession session(random,ui);
+    PortSessionStart start=session.StartNormalCharacter(1,*runtime);
+    if(start.result!=NPS_WORLD_PENDING){delete runtime;return 107;}
+    if(!AdvanceToBoundary(session,*runtime)||runtime->phase!=PNR_READY){delete runtime;return 108;}
+    NativeWorldResident& live=runtime->world.resident[runtime->world.currentList];
+    if(!live.room||live.pickups.count+2>=64){delete runtime;return 109;}
+    //Pill pickup and use.
+    NativePickup* pill=new NativePickup;
+    if(!pill->Begin(5,380,0,0,555,0,runtime->playerBody.position)){delete pill;delete runtime;return 110;}
+    live.pickups.entries[live.pickups.count++]=pill;
+    if(!RunProjectileTicks(session,*runtime,-1,-1,1)){delete runtime;return 111;}
+    if(!pill->collected||runtime->playerState.heldPill<0){delete runtime;return 112;}
+    if(!RunActionPress(session,*runtime,10,1)||runtime->playerState.heldPill!=-1){delete runtime;return 113;}
+    //Card pickup and use.
+    NativePickup* card=new NativePickup;
+    if(!card->Begin(5,350,9,0,556,0,runtime->playerBody.position)){delete card;delete runtime;return 114;}
+    live.pickups.entries[live.pickups.count++]=card;
+    if(!RunProjectileTicks(session,*runtime,-1,-1,1)){delete runtime;return 115;}
+    if(!card->collected||runtime->playerState.heldCard!=9){delete runtime;return 116;}
+    const int bombs0=runtime->playerState.bombs,keys0=runtime->playerState.keys,coins0=runtime->playerState.coins;
+    if(!RunActionPress(session,*runtime,10,1)||runtime->playerState.heldCard!=0){delete runtime;return 117;}
+    if(runtime->playerState.bombs!=std::min(99,bombs0+1)||runtime->playerState.keys!=std::min(99,keys0+1)||
+       runtime->playerState.coins!=std::min(99,coins0+1)){delete runtime;return 118;}
+    //Direct Health Up pill effect.
+    const int hp0=runtime->playerState.maxRedHearts;
+    runtime->playerState.heldPill=7;
+    if(!RunActionPress(session,*runtime,10,1)){delete runtime;return 119;}
+    if(runtime->playerState.heldPill!=-1||runtime->playerState.maxRedHearts!=std::min(14,hp0+2)){delete runtime;return 120;}
+    printf("POCKET hp=%d/%d bombs=%d keys=%d coins=%d\n",runtime->playerState.redHearts,runtime->playerState.maxRedHearts,
+        runtime->playerState.bombs,runtime->playerState.keys,runtime->playerState.coins);
+    delete runtime;return 0;
 }int RunStatProbe(NativeMt& random,PortFrontend& ui){
     PortNormalRuntime* runtime=new PortNormalRuntime;PortGameSession session(random,ui);
     PortSessionStart start=session.StartNormalCharacter(1,*runtime);
@@ -515,6 +561,7 @@ int main(int argc,char** argv){
     if(!failed){int bomb=RunBombProbe(random,ui);if(bomb){printf("BOMB_RESULT failed=%d\n",bomb);failed=true;}}
     if(!failed){int hard=RunHardModeProbe(random,ui);if(hard){printf("HARD_RESULT failed=%d\n",hard);failed=true;}}
     if(!failed){int stat=RunStatProbe(random,ui);if(stat){printf("STAT_RESULT failed=%d\n",stat);failed=true;}}
+    if(!failed){int pocket=RunPocketProbe(random,ui);if(pocket){printf("POCKET_RESULT failed=%d\n",pocket);failed=true;}}
     if(!failed){int chars=RunCharacterMatrixProbe(random,ui);if(chars){printf("CHARACTER_RESULT failed=%d\n",chars);failed=true;}}
     if(!failed){int death=RunDeathProbe(random,ui);if(death){printf("DEATH_RESULT failed=%d\n",death);failed=true;}}
     delete runtime;return failed?5:0;

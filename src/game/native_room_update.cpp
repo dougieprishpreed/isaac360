@@ -193,6 +193,27 @@ bool NativeRoomUpdate::TickSimulationTail(PortNormalRuntime& runtime,NativeActio
                     ++runtime.collectiblesCollected;taken=true;break;
                 }
             }
+        }else if(p->variant==350||p->variant==360){
+            //Card/rune pocket slot. A valid subtype names the card identity;
+            //otherwise the prepared item owner draws one.
+            int card=p->subtype;
+            if(p->variant==360)card=(p->subtype>0?1000+p->subtype:0);
+            if(card<1||(card>97&&card<1001)||card>1097)card=0;
+            if(!card){unsigned int draw=0;
+                if(runtime.itemPools.random.Next(&draw))card=1+(int)(draw%97);}
+            if(card>0){runtime.playerState.heldCard=card;taken=true;}
+        }else if(p->variant==380){
+            //Pill pocket slot: subtype is the pill color, or draw a color and
+            //resolve its prepared effect id.
+            int color=p->subtype;unsigned int draw=0;
+            if(color<1||color>13){if(!runtime.itemPools.random.Next(&draw))color=0;else color=1+(int)(draw%13);}
+            if(color>=1&&color<=13){
+                int effect=runtime.itemPools.pillEffects[color];
+                if(effect<0)effect=0;
+                runtime.playerState.heldPill=effect;
+                runtime.itemPools.pillIdentified[color]=true;
+                taken=true;
+            }
         }
         if(taken){p->collected=true;++runtime.pickupsCollected;}
     }

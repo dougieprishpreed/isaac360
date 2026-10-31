@@ -33,6 +33,7 @@ public:
     std::vector<int> native166c,native1678; //Empty variable-length histories, not98 card counters.
     std::vector<unsigned char> trinketCounts;
     int heldTrinkets[2],temporaryTrinket,native17ec,native17f0;
+    int heldCard,heldPill; //Pocket slots: card id / pill effect id,0 empty.
     bool trinketsDisabled,ghost,temporaryTrinketGolden;
     std::vector<unsigned char> trinketOverrides;
     NativePlayerEffects effects;
@@ -58,6 +59,7 @@ public:
     bool HeartLimit(bool ignoreBroken,int* result) const;
     bool BeginFresh(const NativeRunStart&,NativePlayerStartup&,NativeEntityBody&);
     bool FullHealth() const; //Per ordinary player in00908b40 /0078bb50.
+    bool AddHeartContainers(int halfHearts){if(!AddMaxHearts(halfHearts))return false;redHearts+=halfHearts;if(redHearts>maxRedHearts)redHearts=maxRedHearts;return true;}
     bool LowHealth() const;
     void Swap(NativePlayerState&);
     unsigned int StateHash() const;
