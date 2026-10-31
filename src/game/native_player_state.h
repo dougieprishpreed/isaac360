@@ -48,6 +48,9 @@ public:
     //calls and resource/UI effects. Starting grants belong to76c990 later.
     bool InitializeStartingResources(const NativeRunStart&,NativePlayerResourceUi&);
     bool HasCollectible(int id,bool* result) const;
+    //Maintained pickup grant: records ownership in the native collectible
+    //counter slice. Per-item stat/effect branches remain separate services.
+    bool GrantCollectible(int id);
     //Reached ordinary contact damage: soul hearts absorb before red hearts.
     //Returns true when the player has no remaining heart health.
     bool Damage(int amount);

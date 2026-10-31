@@ -19,6 +19,11 @@ def main():
     transition=re.search(r'^TRANSITION seed=(\d+) from=(-?\d+) slot=(\d+) to=(-?\d+) definition=(-?\d+) room=(\d+) enemies=(\d+) transitions=(\d+)',log,re.M)
     death=re.search(r'^DEATH seed=(\d+) room=(\d+) hits=(\d+) hp=(-?\d+)/(-?\d+) soul=(-?\d+) dead=(\d+) ticks=(\d+) enemies=(\d+)',log,re.M)
     descend=re.search(r'^DESCEND from=(\d+) to=(\d+) room=(-?\d+) definition=(-?\d+) hp=(-?\d+)/(-?\d+) soul=(-?\d+)',log,re.M)
+    item=re.search(r'^ITEM pool=(\d+) id=(\d+) collected=(\d+) owned=(\d+) poolCounter=(\d+)(?: effect_hp=(\d+)/(\d+) effect_keys=(\d+))?',log,re.M)
+    bomb=re.search(r'^BOMB placed=(\d+) explosions=(\d+) enemyHits=(\d+) bombsLeft=(-?\d+) enemies=(\d+)',log,re.M)
+    chars=re.search(r'^CHARACTERS ok=(\d+) fail=(\d+)',log,re.M)
+    hard=re.search(r'^HARD mode=(\d+) phase=(\d+) player=(\d+) hp=(-?\d+)/(-?\d+)',log,re.M)
+    stat=re.search(r'^STAT fd=(-?[0-9.]+) damage=(-?[0-9.]+) speed=(-?[0-9.]+) luck=(-?[0-9.]+)',log,re.M)
     deathflow=re.search(r'^DEATH_FLOW dyingTicks=(\d+) gameOver=(\d+) restartResult=(\d+) restartPhase=(\d+) restartHP=(-?\d+)/(-?\d+)',log,re.M)
     lock=re.search(r'^LOCK treasureSlot=(\d+) noKeyClosed=(\d+) keyOpened=(\d+) keysLeft=(-?\d+) doorsUnlocked=(\d+) bossOpenWithoutDefeat=(\d+) bossDefeated=(\d+)',log,re.M)
     paths=set()
@@ -66,6 +71,27 @@ def main():
             'descend_to':int(descend.group(2)) if descend else 0,
             'descend_room':int(descend.group(3)) if descend else -1,
             'descend_definition':int(descend.group(4)) if descend else -1,
+            'item_pool':int(item.group(1)) if item else -1,
+            'item_id':int(item.group(2)) if item else 0,
+            'item_collected':int(item.group(3)) if item else 0,
+            'item_owned':bool(int(item.group(4))) if item else False,
+            'item_pool_counter':int(item.group(5)) if item else 0,
+            'item_effect_hp':int(item.group(6)) if item and item.group(6) else 0,
+            'item_effect_keys':int(item.group(8)) if item and item.group(8) else 0,
+            'bomb_placed':int(bomb.group(1)) if bomb else 0,
+            'bomb_explosions':int(bomb.group(2)) if bomb else 0,
+            'bomb_enemy_hits':int(bomb.group(3)) if bomb else 0,
+            'bomb_bombs_left':int(bomb.group(4)) if bomb else -1,
+            'bomb_enemies_left':int(bomb.group(5)) if bomb else -1,
+            'characters_ok':int(chars.group(1)) if chars else 0,
+            'characters_fail':int(chars.group(2)) if chars else -1,
+            'hard_mode':int(hard.group(1)) if hard else -1,
+            'hard_ready':(int(hard.group(2))==5) if hard else False,
+            'hard_hp':int(hard.group(4)) if hard else -1,
+            'stat_fire_delay':float(stat.group(1)) if stat else 0.0,
+            'stat_damage':float(stat.group(2)) if stat else 0.0,
+            'stat_speed':float(stat.group(3)) if stat else 0.0,
+            'stat_luck':float(stat.group(4)) if stat else 0.0,
             'dying_ticks':int(deathflow.group(1)) if deathflow else 0,
             'game_over':bool(int(deathflow.group(2))) if deathflow else False,
             'restart_ready':bool(deathflow and int(deathflow.group(4))==5) if deathflow else False,

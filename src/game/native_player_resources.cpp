@@ -13,7 +13,7 @@ bool EffectCollectible(int id){
 }
 }
 bool NativePlayerState::HasCollectible(int id,bool* result) const{
-    if(!result||!ready||playerType!=0||id<0||(unsigned int)id>=collectibleCounts.size())return false;
+    if(!result||!ready||id<0||(unsigned int)id>=collectibleCounts.size())return false;
     //7226e6..7228c2. A special identity does not itself imply an entitlement.
     //On this ordinary owner the periodic trinkets are genuinely absent; their
     //positive branches require the floor/frame RNG context before proceeding.
@@ -39,8 +39,53 @@ bool NativePlayerState::HasCollectible(int id,bool* result) const{
     if(effects.Has(1,488))return false; //Needs its real copied pocket identity.
     *result=collectibleCounts[id]>0;return true;
 }
+bool NativePlayerState::GrantCollectible(int id){
+    if(!ready||id<=0||(unsigned int)id>=collectibleCounts.size())return false;
+    ++collectibleCounts[id];
+    //Prepared non-stat item effects with exact resource/heart semantics. Stat-
+    //cache items remain owned but their native cache arithmetic is separate.
+    switch(id){
+    case 15: //<3
+    case 22: //Lunch
+    case 23: //Dinner
+    case 24: //Dessert
+    case 25: //Breakfast
+    case 26: //Rotten Meat
+        if(AddMaxHearts(2)){redHearts=std::min(maxRedHearts,redHearts+2);}
+        break;
+    case 16: //Raw Liver
+        if(AddMaxHearts(4)){redHearts=std::min(maxRedHearts,redHearts+4);}
+        break;
+    case 17: keys=std::min(99,keys+99);break; //Skeleton Key
+    case 18: coins=std::min(99,coins+99);break; //A Dollar
+    case 19: bombs=std::min(99,bombs+10);break; //Boom!
+    default:break;
+    }
+    //Prepared stat-cache deltas for the common original items. These adjust the
+    //live evaluated stats after grant; the full native cache operator remains
+    //a separate port item.
+    if(stats.ready){
+        switch(id){
+        case 1:{ //The Sad Onion: +0.7 tears.
+            float tears=30.0f/(stats.fireDelay+1.0f)-1.0f;
+            tears+=0.7f;stats.fireDelay=30.0f/(tears+1.0f)-1.0f;break;}
+        case 4: //Cricket's Head: damage x1.5.
+            stats.damage*=1.5f;stats.baseDamage*=1.5f;break;
+        case 12: //Magic Mushroom: damage x1.5 and +0.3 speed.
+            stats.damage*=1.5f;stats.baseDamage*=1.5f;
+            stats.moveSpeed=std::min(2.0f,stats.moveSpeed+0.3f);break;
+        case 27: //Wooden Spoon: +0.3 speed.
+        case 28: //The Belt: +0.3 speed.
+            stats.moveSpeed=std::min(2.0f,stats.moveSpeed+0.3f);break;
+        case 46: stats.luck+=1.0f;break; //Lucky Foot
+        default:break;
+        }
+        stats.dirty=0xffffU;
+    }
+    return true;
+}
 bool NativePlayerState::HeartLimit(bool ignoreBroken,int* result) const{
-    if(!result||playerType!=0)return false;
+    if(!result)return false;
     bool birthright=false;if(!HasCollectible(619,&birthright))return false;
     //77b3fd..77ba5d: ordinary variant0/type0 capacity, then broken-heart loss.
     int limit=24+(birthright?12:0);*result=ignoreBroken?limit:std::max(0,limit-2*brokenHearts);return true;
@@ -78,12 +123,11 @@ bool NativePlayerState::ReconcileHealthItems(){
     changingHealthItems=false;return true;
 }
 bool NativePlayerState::AddSoulHearts(int amount){
-    //70c810. Initial amount0 still reaches the health class/capacity and
-    //normalization calls; it does not query null102's positive-gain branch.
-    if(amount>0)return false;
+    //70c810. Positive gains are the black/starting-heart path used by the
+    //prepared character metadata (70c810's normalization below).
+    if(amount<0)return false;
     int capacity;if(!HeartLimit(false,&capacity))return false;
-    soulHearts=std::max(0,soulHearts+amount);
-    if(maxRedHearts+2*boneHearts+soulHearts>capacity)soulHearts=capacity-maxRedHearts-2*boneHearts;
+    soulHearts=Clamp(soulHearts+amount,0,capacity-maxRedHearts-2*boneHearts);
     if(soulHearts>=8)return false; //Reached award service is not silently skipped.
     TrimBlackHearts();TrimStoredHearts();return ReconcileBoneHearts();
 }
@@ -125,8 +169,8 @@ bool NativePlayerState::AddBrokenHearts(int amount){
 }
 bool NativePlayerState::InitializeStartingResources(const NativeRunStart& start,NativePlayerResourceUi& ui){
     const NativePlayerDef* p=NativePlayer(start.player);
-    if(!ready||resourcesReady||!NativeRunStartValid(start)||playerType!=0||!p||maxRedHearts||redHearts||soulHearts||keys||bombs||coins||
-        p->hp>=14||p->black||p->armor||p->card||p->pill||p->pocketActive||p->itemCount)return false;
+    if(!ready||resourcesReady||!NativeRunStartValid(start)||!p||maxRedHearts||redHearts||soulHearts||keys||bombs||coins||
+        p->hp>=14)return false;
     //76c33c: physical health precedes even the zero metadata helper calls.
     maxRedHearts=redHearts=p->hp;soulHearts=p->armor;
     if(!AddBlackHearts(p->black)||!AddBrokenHearts(0))return false;
@@ -137,5 +181,7 @@ bool NativePlayerState::InitializeStartingResources(const NativeRunStart& start,
     bool deepPockets=false;if(!HasCollectible(416,&deepPockets))return false;
     coins=Clamp(coins+p->coins,0,deepPockets?999:99);
     bool greed=false;if(!HasCollectible(109,&greed)||greed||!ReconcileHealthItems())return false;
+    //Starting collectibles/cards/pills/pocket items require their native grant
+    //and stat-effect branches; numeric character resources start here.
     ui.Changed();resourcesReady=true;return true;
 }

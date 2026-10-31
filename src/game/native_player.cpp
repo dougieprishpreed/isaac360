@@ -37,12 +37,14 @@ NativePlayerStartResult NativePlayerStart(const NativeProfile& p,int page,int ch
     if(!out||choice<1||!NativeCharacter(page,choice)||mode<0||mode>3)return NPS_BAD_REQUEST;
     if(!NativeCharacterUnlocked(p,page,choice)||(mode==3&&!p.Award(341)))return NPS_LOCKED;
     const NativeCharacterDef* c=NativeCharacter(page,choice);
-    if(c->player!=0)return NPS_UNSUPPORTED_PLAYER;
+    //All prepared entities2 player records are eligible; character-specific
+    //startup branches that are still incomplete surface as explicit stops.
+    if(!NativePlayer(c->player))return NPS_UNSUPPORTED_PLAYER;
     if(mode>1)return NPS_UNSUPPORTED_MODE;
     NativeRunStart result={c->player,mode,p.Award(29)};*out=result;return NPS_OK;
 }
 bool NativeRunStartValid(const NativeRunStart& s) {
-    return s.player==0&&s.mode>=0&&s.mode<=1;
+    return NativePlayer(s.player)&&s.mode>=0&&s.mode<=1;
 }
 int NativeCharacterWheel(const NativeProfile& p,int page,int choice,NativeCharacterPortrait* out) {
     if(!out||!NativeCharacter(page,choice))return 0;

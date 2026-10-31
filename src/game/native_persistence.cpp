@@ -41,7 +41,7 @@ bool NativePlayerPersistent::CaptureAfterInitialSetup(const NativePlayerState& s
 }
 bool NativePlayerPersistent::CaptureFresh(const NativePlayerState& state,const NativePlayerStartup& startup,const NativePlayerCreation& creation,const NativeEntityBody& body,bool afterSetup,unsigned int* next){
     if(next)*next=0x761de0;
-    if(captured||!creation.prefixPrepared||!startup.ready||!state.resourcesReady||state.playerType!=0||state.ghost||state.stats.ready!=afterSetup||
+    if(captured||!creation.prefixPrepared||!startup.ready||!state.resourcesReady||state.ghost||state.stats.ready!=afterSetup||
        !state.effects.Entries().empty()||!state.collectibleOverrides.empty()||state.temporaryCollectible||
        !Empty(state.collectibleCounts)||!Empty(state.trinketCounts)||!Empty(state.pillEffectCounts))return false;
     //This caller is the first room-entry checkpoint, BEFORE76c990. A real

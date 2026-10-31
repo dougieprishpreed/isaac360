@@ -86,13 +86,12 @@ NativePlayerCreation::NativePlayerCreation():constructed(false),costumesReset(fa
 bool NativePlayerCreation::FinishPostGeneration(const NativeRunStart& start,NativePlayerStartup& startup,NativeEntityBody& body,NativePlayerSprites& sprites,NativePlayerState& state,NativePlayerManager& manager,unsigned int* next){
     if(next)*next=0x76c990;
     const NativePlayerDef* p=NativePlayer(start.player);
-    if(!prefixPrepared||postGenerationPrepared||!NativeRunStartValid(start)||!p||start.player!=0||!manager.initialized||!state.resourcesReady)return false;
+    if(!prefixPrepared||postGenerationPrepared||!NativeRunStartValid(start)||!p||!manager.initialized||!state.resourcesReady)return false;
     //76c9d6's early alternate branch is an actual owned effect predicate.
     if(state.effects.Has(1,667)){if(next)*next=0x76c9e5;return false;}
-    //Ordinary challenge0/type0: the inherited metadata has no card, pill,
-    //trinket, pocket active or mandatory item. Other character/challenge paths
-    //are excluded by the actual New Run selection, not omitted grant defaults.
-    if(p->card||p->pill||p->pocketActive||p->itemCount)return false;
+    //Character-specific cards, pills, pocket actives and starting items need
+    //their native grant/effect branches; numeric resources are already owned.
+    //The fresh no-item stat evaluation remains the maintained start path.
     //76cc8e appends105 only for the genuine award29 obligation established
     //by the profile owner. Keep that grant pending until its full713120 path.
     if(start.isaacD6){
@@ -166,8 +165,8 @@ bool NativePlayerCreation::FinishFreshReset(const NativePlayerStartup& startup,N
 }
 bool NativePlayerCreation::PrepareFreshAppearance(const NativeEntityBody& body,NativePlayerSprites& sprites,const NativePlayerState& state){
     unsigned char ghost=1;
-    if(!constructed||!costumesReset||appearancePrepared||!body.ready||body.variant!=0||body.subtype!=0||state.playerType!=0||!state.ready||
-        !state.canShoot||!constructorFields.Byte(0x1f80,&ghost)||ghost||!costumeRecords.empty()||!sprites.bodyReady)return false;
+    if(!constructed||!costumesReset||appearancePrepared||!body.ready||body.variant!=0||!state.ready||
+        !constructorFields.Byte(0x1f80,&ghost)||ghost||!costumeRecords.empty()||!sprites.bodyReady)return false;
     NativeSprite& sprite=sprites.sprites[0];
     //76eafc: reset selectors, then ordinary challenge0 skips challenge30's
     //replacement.76ec20 writes all15 layer paths, not a shared sheet object.

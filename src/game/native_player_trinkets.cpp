@@ -1,6 +1,6 @@
 #include "native_player_state.h"
 bool NativePlayerState::TrinketMultiplier(int id,int* output) const{
-    if(!output||!ready||playerType!=0||id<=0||(unsigned int)(id&0x7fff)>=trinketCounts.size()||trinketOverrides.size()!=trinketCounts.size())return false;
+    if(!output||!ready||id<=0||(unsigned int)(id&0x7fff)>=trinketCounts.size()||trinketOverrides.size()!=trinketCounts.size())return false;
     //77c353: disabled trinkets and ghosts return before inventory predicates.
     if(trinketsDisabled||ghost){*output=0;return true;}
     id&=0x7fff;int total=0,value;bool held;

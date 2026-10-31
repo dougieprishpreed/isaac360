@@ -145,6 +145,7 @@ bool NativeRoomUpdate::TickSimulationTail(PortNormalRuntime& runtime,NativeActio
         }
     }
     if(!runtime.enemyShots.Step(runtime)){*next=0x61f6d0;return false;}
+    if(!runtime.bombs.Step(runtime)){*next=0x733ef0;return false;}
     //Boss trapdoor: the opening animation lasts five ticks per original
     //frame, then the hole is usable. Contact requests the maintained
     //next-floor descent from the adapter/session owner.
@@ -169,6 +170,30 @@ bool NativeRoomUpdate::TickSimulationTail(PortNormalRuntime& runtime,NativeActio
         }else if(p->variant==20){runtime.playerState.coins=std::min(99,runtime.playerState.coins+1);taken=true;}
         else if(p->variant==30){runtime.playerState.keys=std::min(99,runtime.playerState.keys+1);taken=true;}
         else if(p->variant==40){runtime.playerState.bombs=std::min(99,runtime.playerState.bombs+1);taken=true;}
+        else if(p->variant==100){
+            //Treasure pedestal: the prepared treasure pool selects and the
+            //native collectible counter records ownership. Item stat/effect
+            //branches remain separate services.
+            int id=runtime.itemPools.SelectCollectible(0);
+            if(id>0&&runtime.playerState.GrantCollectible(id)){
+                runtime.lastCollectible=id;++runtime.collectiblesCollected;taken=true;
+            }
+        }else if(p->variant==300){
+            //Trinket pedestal: choose the first available prepared trinket
+            //from the pool's own owner draw and record ownership.
+            unsigned int draw=0;
+            if(runtime.itemPools.random.Next(&draw)){
+                for(unsigned int k=0;k<runtime.itemPools.trinkets.size();++k){
+                    unsigned int index=(draw+k)%(unsigned int)runtime.itemPools.trinkets.size();
+                    const NativePoolTrinket& t=runtime.itemPools.trinkets[index];
+                    if(!t.enabled||!t.unlocked||index>=runtime.playerState.trinketCounts.size())continue;
+                    if(runtime.playerState.trinketCounts[index])continue;
+                    runtime.playerState.trinketCounts[index]=1;
+                    if(!runtime.playerState.heldTrinkets[0])runtime.playerState.heldTrinkets[0]=(int)index;
+                    ++runtime.collectiblesCollected;taken=true;break;
+                }
+            }
+        }
         if(taken){p->collected=true;++runtime.pickupsCollected;}
     }
     //Primary weapon/projectile lifecycle follows the room simulation owner.
@@ -215,7 +240,7 @@ bool NativeRoomUpdate::TickSimulationTail(PortNormalRuntime& runtime,NativeActio
                     runtime.playerBody.previousPosition=runtime.playerBody.position;runtime.playerBody.velocity.x=runtime.playerBody.velocity.y=0;
                 }}
             }
-            runtime.projectiles.Reset();runtime.enemyShots.Clear();runtime.doorTransitionGrace=30;++runtime.roomTransitions;
+            runtime.projectiles.Reset();runtime.enemyShots.Clear();runtime.bombs.Clear();runtime.doorTransitionGrace=30;++runtime.roomTransitions;
             return true;
         }
     }

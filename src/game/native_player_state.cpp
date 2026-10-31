@@ -7,8 +7,8 @@ void Fold(unsigned int& h,unsigned int n){for(int i=0;i<4;++i)h=(h^((n>>(i*8))&2
 NativePlayerState::NativePlayerState():ready(false),playerType(-1),canShoot(false),maxRedHearts(0),redHearts(0),soulHearts(0),blackHeartMask(0),keys(0),bombs(0),coins(0),resourcesReady(false),runInitializing(false),native1734(false),playerTearsEnabled(false),boneHearts(0),boneMask(0),brokenHearts(0),rottenHearts(0),storedHearts(0),bombReserve(0),healthItemSlots(0),healthItemRemainder(0),changingHealthItems(false),temporaryCollectible(0),transformationFlags(0),native12c8(0),native12ca(0){for(int i=0;i<4;++i)activeItems[i]=0;for(int i=0;i<15;++i)formCounts[i]=0;heldTrinkets[0]=heldTrinkets[1]=temporaryTrinket=native17ec=native17f0=0;trinketsDisabled=ghost=temporaryTrinketGolden=false;}
 bool NativePlayerState::ResetFreshNumbers(const NativeRunStart& start,const NativePlayerStartup& startup,NativeEntityBody& body){
     const NativePlayerDef* d=NativePlayer(start.player);
-    if(ready||playerType!=-1||!NativeRunStartValid(start)||start.player!=0||!d||!startup.ready||!body.ready||body.type!=1||body.variant!=0||body.subtype!=start.player||
-        body.initialSeed!=startup.entityInitSeed||body.entityCollisionClass!=4||startup.banks[NPB_TRINKET].size()<=97||d->black||d->card||d->pill||d->pocketActive)return false;
+    if(ready||playerType!=-1||!NativeRunStartValid(start)||!d||!startup.ready||!body.ready||body.type!=1||body.variant!=0||body.subtype!=start.player||
+        body.initialSeed!=startup.entityInitSeed||body.entityCollisionClass!=4||startup.banks[NPB_TRINKET].size()<=97)return false;
     NativePlayerState next;next.playerType=start.player;next.runInitializing=true;
     //7099a5 Clear(true) is empty on a genuinely fresh player. No callbacks
     //are skipped. Later nonempty reinitialization needs the actual services.
@@ -18,7 +18,7 @@ bool NativePlayerState::ResetFreshNumbers(const NativeRunStart& start,const Nati
     return true;
 }
 bool NativePlayerState::FinishFreshInventory(NativePlayerStartup& startup){
-    if(ready||playerType!=0||!startup.ready||startup.banks[NPB_TRINKET].size()<=97||!collectibleCounts.empty()||!trinketCounts.empty())return false;
+    if(ready||!startup.ready||startup.banks[NPB_TRINKET].size()<=97||!collectibleCounts.empty()||!trinketCounts.empty())return false;
     NativeRng local=startup.banks[NPB_TRINKET][97];unsigned int value;if(!local.Next(&value))return false;
     native12c8=(unsigned short)(12+value%9);native12ca=0; //709e04..62.
     //77c5d0: normal challenge0's default+6c=1 (4203f8), variant0,

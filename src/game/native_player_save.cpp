@@ -6,7 +6,7 @@ bool Byte(const NativePlayerCreation& c,unsigned int at,unsigned char expected){
 bool NativePlayerCreation::NormalizeInitialSave(NativePlayerState& state,NativePlayerSprites& sprites,unsigned int* next){
     if(next)*next=0x757a50;
     if(!next||initialSaveNormalized||!postGenerationPrepared||!state.native1734||!state.runInitializing||!state.stats.ready||
-       state.playerType||state.ghost||!state.pendingCollectibles.empty()||!state.effects.Entries().empty()||!costumeRecords.empty())return false;
+       state.playerType<0||state.ghost||!state.pendingCollectibles.empty()||!state.effects.Entries().empty()||!costumeRecords.empty())return false;
     for(unsigned int i=0;i<state.collectibleCounts.size();++i)if(state.collectibleCounts[i])return false;
     //711e20 observes the actual null temporary-item owner. Its payload16e4
     //remains unwritten and is not inspected when16dc is null.

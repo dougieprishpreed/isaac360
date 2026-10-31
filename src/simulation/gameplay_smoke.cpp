@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include <algorithm>
 namespace {
 unsigned int RunMovementTicks(PortGameSession& session,PortNormalRuntime& runtime,float x,float y,unsigned int count){
     unsigned int done=0;
@@ -227,6 +228,113 @@ int RunDescendProbe(NativeMt& random,PortFrontend& ui){
         runtime->playerState.redHearts,runtime->playerState.maxRedHearts,runtime->playerState.soulHearts);
     delete runtime;return 0;
 }
+int RunItemProbe(NativeMt& random,PortFrontend& ui){
+    PortNormalRuntime* runtime=new PortNormalRuntime;PortGameSession session(random,ui);
+    PortSessionStart start=session.StartNormalCharacter(1,*runtime);
+    if(start.result!=NPS_WORLD_PENDING){delete runtime;return 80;}
+    if(!AdvanceToBoundary(session,*runtime)||runtime->phase!=PNR_READY){delete runtime;return 81;}
+    NativeWorldResident& live=runtime->world.resident[runtime->world.currentList];
+    if(!live.room||live.pickups.count>=64){delete runtime;return 82;}
+    NativePickup* pickup=new NativePickup;
+    if(!pickup->Begin(5,100,0,0,12345,0,runtime->playerBody.position)){delete pickup;delete runtime;return 83;}
+    live.pickups.entries[live.pickups.count++]=pickup;
+    const unsigned int before=runtime->itemPools.pools[0].counter;
+    const unsigned int collectedBefore=runtime->collectiblesCollected;
+    if(!RunProjectileTicks(session,*runtime,-1,-1,2)){delete runtime;return 84;}
+    bool owned=false;
+    if(runtime->lastCollectible<=0||!runtime->playerState.HasCollectible(runtime->lastCollectible,&owned)||!owned){delete runtime;return 85;}
+    if(!pickup->collected||runtime->collectiblesCollected!=collectedBefore+1||runtime->itemPools.pools[0].counter!=before+1){delete runtime;return 86;}
+    const int hpBefore=runtime->playerState.maxRedHearts,keysBefore=runtime->playerState.keys;
+    if(!runtime->playerState.GrantCollectible(25)){delete runtime;return 87;} //Breakfast
+    if(runtime->playerState.maxRedHearts!=std::min(14,hpBefore+2)){delete runtime;return 88;}
+    if(!runtime->playerState.GrantCollectible(17)){delete runtime;return 89;} //Skeleton Key
+    if(runtime->playerState.keys!=std::min(99,keysBefore+99)){delete runtime;return 90;}
+    printf("ITEM pool=0 id=%d collected=%u owned=1 poolCounter=%u effect_hp=%d/%d effect_keys=%d\n",
+        runtime->lastCollectible,runtime->collectiblesCollected,runtime->itemPools.pools[0].counter,
+        runtime->playerState.redHearts,runtime->playerState.maxRedHearts,runtime->playerState.keys);
+    delete runtime;return 0;
+}
+int RunBombProbe(NativeMt& random,PortFrontend& ui){
+    PortNormalRuntime* runtime=new PortNormalRuntime;PortGameSession session(random,ui);
+    PortSessionStart start=session.StartNormalCharacter(1,*runtime);
+    if(start.result!=NPS_WORLD_PENDING){delete runtime;return 91;}
+    if(!AdvanceToBoundary(session,*runtime)||runtime->phase!=PNR_READY){delete runtime;return 92;}
+    NativeWorldResident& live=runtime->world.resident[runtime->world.currentList];
+    if(!live.room||live.enemies.count>=64){delete runtime;return 93;}
+    const NativePoint at=runtime->playerBody.position;
+    NativeEnemy* enemy=new NativeEnemy;
+    if(!enemy->Begin(10,0,54321,at,0,1)){delete enemy;delete runtime;return 94;}
+    live.enemies.entries[live.enemies.count++]=enemy;
+    const int bombsBefore=runtime->playerState.bombs;
+    if(!runtime->bombs.Place(*runtime)||runtime->playerState.bombs!=bombsBefore-1){delete runtime;return 95;}
+    runtime->playerBody.position.x-=200.0f;runtime->playerBody.previousPosition=runtime->playerBody.position;
+    if(!RunProjectileTicks(session,*runtime,-1,-1,60)){delete runtime;return 96;}
+    if(runtime->bombs.explosions<1||live.enemies.count!=0||runtime->playerHits!=0){delete runtime;return 97;}
+    printf("BOMB placed=%u explosions=%u enemyHits=%u bombsLeft=%d enemies=%d\n",
+        runtime->bombs.placed,runtime->bombs.explosions,runtime->bombs.enemyHits,
+        runtime->playerState.bombs,live.enemies.count);
+    delete runtime;return 0;
+}int RunStatProbe(NativeMt& random,PortFrontend& ui){
+    PortNormalRuntime* runtime=new PortNormalRuntime;PortGameSession session(random,ui);
+    PortSessionStart start=session.StartNormalCharacter(1,*runtime);
+    if(start.result!=NPS_WORLD_PENDING){delete runtime;return 103;}
+    if(!AdvanceToBoundary(session,*runtime)||runtime->phase!=PNR_READY||!runtime->playerState.stats.ready){delete runtime;return 104;}
+    const float fd0=runtime->playerState.stats.fireDelay,dmg0=runtime->playerState.stats.damage,spd0=runtime->playerState.stats.moveSpeed;
+    if(!runtime->playerState.GrantCollectible(1)||!runtime->playerState.GrantCollectible(4)||
+       !runtime->playerState.GrantCollectible(27)||!runtime->playerState.GrantCollectible(46)){delete runtime;return 105;}
+    if(!(runtime->playerState.stats.fireDelay<fd0)||!(runtime->playerState.stats.damage>dmg0)||
+       !(runtime->playerState.stats.moveSpeed>spd0)||runtime->playerState.stats.luck<1.0f){delete runtime;return 106;}
+    printf("STAT fd=%.3f damage=%.3f speed=%.3f luck=%.1f\n",runtime->playerState.stats.fireDelay,
+        runtime->playerState.stats.damage,runtime->playerState.stats.moveSpeed,runtime->playerState.stats.luck);
+    delete runtime;return 0;
+}int RunHardModeProbe(NativeMt& random,PortFrontend& ui){
+    (void)random;(void)ui;
+    PortFrontend local;local.Init(false);
+    if(!local.BindSaveDirectory("build/gameplay/profile/"))return 98;
+    local.profile.difficulty=1;local.characterPage=0;local.characterChoice=1;local.characterMode=1;
+    if(!local.music.StartCharacter(0)){printf("HARD music\n");return 99;}
+    PortNormalRuntime* runtime=new PortNormalRuntime;NativeMt localGlobal;localGlobal.Seed(777);PortGameSession session(localGlobal,local);
+    PortSessionStart start=session.StartNormalCharacter(1,*runtime);
+    if(start.result!=NPS_WORLD_PENDING){printf("HARD start=%d\n",start.result);delete runtime;return 100;}
+    if(!AdvanceToBoundary(session,*runtime)||runtime->phase!=PNR_READY){printf("HARD advance phase=%d prereq=%08x\n",runtime->phase,runtime->missingNativePrerequisite);delete runtime;return 101;}
+    if(!RunProjectileTicks(session,*runtime,-1,-1,2)){delete runtime;return 102;}
+    printf("HARD mode=%d phase=%d player=%d hp=%d/%d slots=%d\n",runtime->run.player.mode,runtime->phase,
+        runtime->playerState.playerType,runtime->playerState.redHearts,runtime->playerState.maxRedHearts,
+        (int)runtime->playerState.collectibleCounts.size());
+    delete runtime;return 0;
+}int RunCharacterMatrixProbe(NativeMt& random,PortFrontend& ui){
+    (void)random;(void)ui;
+    int ok=0,fail=0;
+    for(int page=0;page<2;++page)for(int choice=0;choice<kNativeCharacterCount;++choice){
+        const NativeCharacterDef* c=NativeCharacter(page,choice);if(!c)continue;
+        const NativePlayerDef* def=NativePlayer(c->player);if(!def){++fail;printf("CHAR_FAIL page=%d choice=%d player=%d missing-def\n",page,choice,c->player);continue;}
+        PortFrontend local;local.Init(false);
+        if(!local.BindSaveDirectory("build/gameplay/profile/"))return 90;
+        memset(&local.profile,0,sizeof(local.profile));
+        if(def->achievement>=0&&def->achievement<kNativeAwardCount)local.profile.awards[def->achievement]=true;
+        if(def->id==9||def->id==30)local.profile.edenTokens=1;
+        local.characterPage=page;local.characterChoice=choice;local.characterMode=0;
+        if(!local.music.StartCharacter(page)){++fail;printf("CHAR_FAIL page=%d choice=%d player=%d music\n",page,choice,c->player);continue;}
+        PortNormalRuntime* rt=new PortNormalRuntime;NativeMt localGlobal;localGlobal.Seed(1U+(unsigned int)(page*18+choice));PortGameSession session(localGlobal,local);
+        PortSessionStart start=session.StartNormalCharacter(1,*rt);
+        bool good=start.result==NPS_WORLD_PENDING;
+        int startItems=0,startItemsOwned=0;
+        if(good){unsigned int steps=AdvanceToBoundary(session,*rt);good=steps&&rt->phase==PNR_READY&&rt->playerState.ready&&rt->playerState.playerType==c->player;
+            if(good)good=RunProjectileTicks(session,*rt,-1,-1,2)!=0;}
+        if(good)for(int i=0;i<def->itemCount;++i)if(def->items[i]>0){
+            bool has=false;++startItems;
+            if(rt->playerState.HasCollectible(def->items[i],&has)&&has)++startItemsOwned;
+        }
+        if(good&&startItemsOwned!=startItems)good=false;
+        if(good){++ok;printf("CHAR ok page=%d choice=%d player=%d hp=%d/%d startItems=%d/%d\n",page,choice,c->player,
+            rt->playerState.redHearts,rt->playerState.maxRedHearts,startItemsOwned,startItems);}
+        else{++fail;printf("CHAR_FAIL page=%d choice=%d player=%d result=%d phase=%d type=%d prereq=%08x\n",page,choice,c->player,
+            start.result,rt->phase,rt->playerState.playerType,rt->missingNativePrerequisite);}
+        delete rt;
+    }
+    printf("CHARACTERS ok=%d fail=%d\n",ok,fail);
+    return 0;
+}
 int main(int argc,char** argv){
     unsigned int seed=argc>1?(unsigned int)strtoul(argv[1],0,0):1;
     NativeMt random;random.ColdStart();PortFrontend ui;ui.Init(false);
@@ -403,6 +511,11 @@ int main(int argc,char** argv){
     if(!failed){int transition=RunTransitionProbe(random,ui);if(transition){printf("TRANSITION_RESULT failed=%d\n",transition);failed=true;}}
     if(!failed){int locks=RunLockProbe(random,ui);if(locks){printf("LOCK_RESULT failed=%d\n",locks);failed=true;}}
     if(!failed){int descend=RunDescendProbe(random,ui);if(descend){printf("DESCEND_RESULT failed=%d\n",descend);failed=true;}}
+    if(!failed){int item=RunItemProbe(random,ui);if(item){printf("ITEM_RESULT failed=%d\n",item);failed=true;}}
+    if(!failed){int bomb=RunBombProbe(random,ui);if(bomb){printf("BOMB_RESULT failed=%d\n",bomb);failed=true;}}
+    if(!failed){int hard=RunHardModeProbe(random,ui);if(hard){printf("HARD_RESULT failed=%d\n",hard);failed=true;}}
+    if(!failed){int stat=RunStatProbe(random,ui);if(stat){printf("STAT_RESULT failed=%d\n",stat);failed=true;}}
+    if(!failed){int chars=RunCharacterMatrixProbe(random,ui);if(chars){printf("CHARACTER_RESULT failed=%d\n",chars);failed=true;}}
     if(!failed){int death=RunDeathProbe(random,ui);if(death){printf("DEATH_RESULT failed=%d\n",death);failed=true;}}
     delete runtime;return failed?5:0;
 }

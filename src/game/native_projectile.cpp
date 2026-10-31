@@ -117,3 +117,83 @@ bool NativeEnemyShotSystem::Step(PortNormalRuntime& runtime){
     }
     return true;
 }
+
+NativeBombSystem::NativeBombSystem(){placed=explosions=enemyHits=rockHits=0;}
+void NativeBombSystem::Clear(){active.clear();placed=explosions=enemyHits=rockHits=0;}
+bool NativeBombSystem::Place(PortNormalRuntime& runtime){
+    if(runtime.playerDead||!runtime.playerBody.ready||runtime.playerState.bombs<=0)return false;
+    --runtime.playerState.bombs;
+    NativeBomb bomb;bomb.position=runtime.playerBody.position;bomb.timer=45;bomb.radius=90.0f;
+    active.push_back(bomb);++placed;return true;
+}
+bool NativeBombSystem::Step(PortNormalRuntime& runtime){
+    NativeRoomState* room=runtime.world.Current();
+    if(!room||runtime.world.currentList<0||runtime.world.currentList>=kNativeWorldRoomLimit)return false;
+    NativeWorldResident& live=runtime.world.resident[runtime.world.currentList];
+    for(unsigned int i=0;i<active.size();){
+        NativeBomb& bomb=active[i];
+        if(--bomb.timer>0){++i;continue;}
+        const float radius=bomb.radius;
+        for(int e=0;e<live.enemies.count;++e){
+            NativeEnemy* enemy=live.enemies.entries[e];if(!enemy||!enemy->ready||enemy->dead)continue;
+            float dx=enemy->body.position.x-bomb.position.x,dy=enemy->body.position.y-bomb.position.y;
+            if(dx*dx+dy*dy>radius*radius)continue;
+            const float px=enemy->body.position.x,py=enemy->body.position.y;
+            enemy->Damage(100.0f);++enemyHits;
+            if(enemy->dead){
+                ++runtime.enemyKills;
+                if(NativeBossEntityType(enemy->type,enemy->body.variant)){
+                    runtime.bossDefeated=true;
+                    if(room->trapdoorState==0){room->trapdoorState=1;room->trapdoorTimer=0;room->trapdoorX=px;room->trapdoorY=py;}
+                }
+            }
+        }
+        for(int g=0;g<room->staticGridCount;){
+            const NativeStaticGrid& grid=room->staticGrids[g];
+            const bool destructible=grid.type==1000||grid.type==1001||grid.type==1002||grid.type==1500||grid.type==1400;
+            bool destroyed=false;
+            if(destructible){
+                float gx=0,gy=0;
+                if(room->geometry.Position(grid.grid,&gx,&gy)){
+                    float dx=gx+20.0f-bomb.position.x,dy=gy+20.0f-bomb.position.y;
+                    if(dx*dx+dy*dy<=radius*radius){
+                        const int cell=room->geometry.PositionIndex(gx+20.0f,gy+20.0f);
+                        if(cell>=0){room->collision.occupied[cell]=0;room->collision.types[cell]=0;}
+                        room->staticGrids[g]=room->staticGrids[--room->staticGridCount];
+                        ++rockHits;destroyed=true;
+                    }
+                }
+            }
+            if(!destroyed)++g;
+        }
+        if(!runtime.playerDead&&runtime.playerInvulnerable<=0){
+            float dx=runtime.playerBody.position.x-bomb.position.x,dy=runtime.playerBody.position.y-bomb.position.y;
+            if(dx*dx+dy*dy<=radius*radius*0.5625f){
+                if(runtime.playerState.Damage(2)){
+                    runtime.playerDead=true;runtime.playerBody.removed=true;runtime.phase=PNR_DYING;runtime.playerDeathTicks=0;
+                }
+                ++runtime.playerHits;runtime.playerInvulnerable=30;
+            }
+        }
+        for(int e=0;e<live.enemies.count;){
+            NativeEnemy* enemy=live.enemies.entries[e];
+            if(enemy&&enemy->dead){
+                delete enemy;
+                for(int j=e+1;j<live.enemies.count;++j)live.enemies.entries[j-1]=live.enemies.entries[j];
+                --live.enemies.count;live.enemies.entries[live.enemies.count]=0;continue;
+            }
+            ++e;
+        }
+        if(live.enemies.count==0)room->clear=true;
+        ++explosions;
+        active.erase(active.begin()+i);
+    }
+    return true;
+}
+void NativeBombSystem::Swap(NativeBombSystem& b){
+    active.swap(b.active);
+    unsigned int n=placed;placed=b.placed;b.placed=n;
+    n=explosions;explosions=b.explosions;b.explosions=n;
+    n=enemyHits;enemyHits=b.enemyHits;b.enemyHits=n;
+    n=rockHits;rockHits=b.rockHits;b.rockHits=n;
+}

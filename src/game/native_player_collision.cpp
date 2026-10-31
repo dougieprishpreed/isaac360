@@ -34,7 +34,7 @@ bool NativePlayerGridCollision(PortNormalRuntime& runtime,bool positionOnly,unsi
     if(!next)return false;*next=0x6712a0;
     NativeEntityBody& body=runtime.playerBody;const NativePlayerState& player=runtime.playerState;
     NativeRoomState* room=runtime.world.Current();
-    if(!body.ready||body.type!=1||body.variant||player.playerType||player.ghost||!room)return false;
+    if(!body.ready||body.type!=1||body.variant||player.playerType<0||player.ghost||!room)return false;
     if(!positionOnly){body.gridContact=false;body.gridContactKnown=true;}
     if(!body.gridCollisionClass||body.collision.points.empty()||body.childToken){*next=0;return true;}
     //The actual post-generation cache owns class5. No flying/other-class

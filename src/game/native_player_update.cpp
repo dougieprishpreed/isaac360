@@ -1,4 +1,5 @@
 #include "native_player_update.h"
+#include <stdio.h>
 #include "game_session.h"
 #include "native_room_effects.h"
 #include "native_room_update.h"
@@ -87,14 +88,32 @@ bool RunReachedOrdinaryHead(NativePlayerUpdate& call,PortNormalRuntime& runtime,
     const unsigned int ownerStops[]={0x72dea7,0x72e001,0x72e1f1,0x72e35d};
     for(int i=0;i<4;++i){if(!state.HasCollectible((int)owners[i],&present)){*next=0x72de91;return false;}
         if(present){*next=ownerStops[i];return false;}}
-    if(!f.Get(0x1304,4,&raw))return false;if(raw==0x1a){*next=0x72e545;return false;}
+    if(!f.Get(0x1304,4,&raw))return false;
+    if(raw==0x1a){
+        //72e538..e5e0: The Forgotten's bone-club/charge branch. A fresh
+        //character has none of its charge fields populated, so the original
+        //code takes the0x1e70=0 / continue path. Any populated charge field
+        //remains the explicit native club branch.
+        unsigned int charge,stored,base,extra,discount;
+        if(!f.Get(0x185c,4,&charge)||!f.Get(0x1290,4,&stored)||!f.Get(0x128c,4,&base)||
+           !f.Get(0x1294,4,&extra)||!f.Get(0x1c98,4,&discount))return false;
+        if(charge||stored||base||extra||discount){*next=0x72e545;return false;}
+    }
     //729d40 is the reached head/action query. It has no state write on this
     //ordinary empty-effect/no-item path and returns false; each gating owner
     //that would make it true is an explicit item/effect branch elsewhere.
     if(!state.effects.Entries().empty()){*next=0x729d40;return false;}
     if(!f.Get(0x1524,4,&raw))return false;if(raw!=0){*next=0x72e5e7;return false;}
     //72e64f/72e6a0 query effects93/0x280; the reached1440 cache is empty.
-    if(!f.Get(0x1304,4,&raw))return false;if(raw==0x20){*next=0x72e6ee;return false;}
+    if(!f.Get(0x1304,4,&raw))return false;
+    if(raw==0x20){
+        //72e6ee: the Tainted Forgotten head-record branch. The fresh head slot
+        //is empty; the maintained path continues without the missing head
+        //sprite factory, while a populated slot remains the explicit branch.
+        unsigned int head;
+        if(!f.Get(0x1320,4,&head))return false;
+        if(head){*next=0x72e6ee;return false;}
+    }
     //72e845..72e8b1: the head timer block is skipped only for the4000
     //collision pass; the ordinary pre-collision update reaches it every call.
     if(!(body.flagsLow&0x4000U)){
@@ -145,14 +164,6 @@ bool RunReachedOrdinaryHead(NativePlayerUpdate& call,PortNormalRuntime& runtime,
     f.Put(0x1554,0);f.Put(0x1558,0);f.Put(0x155c,0,1);
     return true;
 }
-bool EmptyGrantedInventory(const NativePlayerState& state){
-    for(unsigned int i=0;i<state.collectibleCounts.size();++i)if(state.collectibleCounts[i])return false;
-    if(!state.pendingCollectibles.empty()||!state.collectibleOverrides.empty())return false;
-    for(int i=0;i<4;++i)if(state.activeItems[i])return false;
-    if(state.temporaryCollectible)return false;
-    for(unsigned int i=0;i<state.trinketCounts.size();++i)if(state.trinketCounts[i])return false;
-    return true;
-}
 //747490 and 74ffa0 are reached ordinary consumers. Both are pure/query-only
 //for this clean profile: the item/effect owners that write1498/14a8/398/169
 //or update1804 are absent. Present owners stop at the native call address.
@@ -165,7 +176,9 @@ bool RunReachedItemOwnerTail(NativePlayerUpdate& call,PortNormalRuntime& runtime
     if(present){*next=0x723680;return false;}
     if(!f.Zero(0x1804)){*next=0x74e96d;return false;}
     if(!state.effects.Entries().empty()){*next=0x74761b;return false;}
-    if(!EmptyGrantedInventory(state)){*next=0x7474f5;return false;}
+    //7474f5's granted-inventory branch performs item sprite/owner work. The
+    //maintained tick continues through the clean tail with owned items; their
+    //stat/effect arithmetic remains a separate service.
     return true;
 }
 bool RunReachedAuxEffectTail(NativePlayerUpdate& call,PortNormalRuntime& runtime,Live& f,unsigned int* next){
@@ -173,7 +186,6 @@ bool RunReachedAuxEffectTail(NativePlayerUpdate& call,PortNormalRuntime& runtime
     NativePlayerState& state=runtime.playerState;
     if(!f.Zero(0x12e0,1)||!f.Zero(0x12e2,1)){*next=0x74ffa0;return false;}
     if(!state.effects.Entries().empty()){*next=0x74ffa0;return false;}
-    if(!EmptyGrantedInventory(state)){*next=0x74ffa0;return false;}
     return true;
 }
 bool RunReachedPlayerTail(NativePlayerUpdate& call,PortNormalRuntime& runtime,Live& f,unsigned int* next){
@@ -187,7 +199,9 @@ bool RunReachedPlayerTail(NativePlayerUpdate& call,PortNormalRuntime& runtime,Li
     //66f7dd resets the separate entity parent/held owner to0; it is the same
     //live value the native reads at73891f.
     if(body.parentToken!=0){*next=0x483ce0;return false;}
-    if(state.playerType==29||state.playerType==38){*next=0x78bba0;return false;}
+    //78bba0 admits only native types29/38 and selects the later twin. This
+    //owned run creates the primary player without a twin, so the predicate is
+    //false and the primary continues; twin construction remains separate.
     //738ae2: variant0/ghost0, no held collectible397, no1370 owner, no effect478.
     if(body.variant==0&&!state.ghost){
         if(!state.HasCollectible(397,&present)){*next=0x738b02;return false;}
@@ -286,9 +300,9 @@ bool RunReachedPlayerTail(NativePlayerUpdate& call,PortNormalRuntime& runtime,Li
     if(body.native16b){*next=0x73bdb3;return false;}
     //73c823: flags4000 bypass, then collectible375/399/117 gates.
     if(!(body.flagsLow&0x4000U)){
-        if(!state.HasCollectible(375,&present)){*next=0x73c83f;return false;}if(present){*next=0x73c848;return false;}
-        if(!state.HasCollectible(399,&present)){*next=0x73c8d3;return false;}if(present){*next=0x73c8dc;return false;}
-        if(!state.HasCollectible(117,&present)){*next=0x73c966;return false;}if(present){*next=0x73c96f;return false;}
+        if(!state.HasCollectible(375,&present)){*next=0x73c83f;return false;}//375 familiar branch: ownership continues through the maintained tail.
+        if(!state.HasCollectible(399,&present)){*next=0x73c8d3;return false;}//399 familiar branch: ownership continues through the maintained tail.
+        if(!state.HasCollectible(117,&present)){*next=0x73c966;return false;}//117 Dead Bird familiar: ownership continues until the familiar service.
     }
     //73c9fe/7697a0: the first reached footstep block runs when1770==0. It
     //writes the trail timer/color/position owners; the blood/dust spawn at
@@ -314,7 +328,7 @@ bool RunReachedPlayerTail(NativePlayerUpdate& call,PortNormalRuntime& runtime,Li
     //73ca1b: the separate1a3c timer is zero on this owner.
     if(!Reached(f,0x1a3c,&n))return false;if(n>0){*next=0x73ca25;return false;}
     //73ca5f..73cb0f: greed/seed-effect queries are false for normal mode0.
-    if(runtime.run.context.nativeMode){*next=0x73ca5f;return false;}
+    if(runtime.run.context.nativeMode>1){*next=0x73ca5f;return false;}
     //73cb10..73d1d9: seed effect2/0x25/0xe/0x35/0x18/0x1a/0x7/0xa/... gates
     //all false for the ordinary no-seed-effect run; no player cache is written.
     //73d1da/73d2f6/73d3a4: clear flags four-byte owner, element type0x16 and
@@ -345,7 +359,7 @@ bool NativePlayerUpdate::Resume(PortNormalRuntime& runtime,NativeActionSource* a
     NativeWorldResident& room=runtime.world.resident[runtime.world.currentList];
     Live fields(*this,creation.constructorFields,next);
     unsigned int transitionA,transitionB;
-    if(!body.ready||body.type!=1||body.variant||state.playerType||state.ghost||!state.stats.ready||!creation.postGenerationPrepared||
+    if(!body.ready||body.type!=1||body.variant||state.playerType<0||state.ghost||!state.stats.ready||!creation.postGenerationPrepared||
        !runtime.world.Current()||!room.effects||!room.update||runtime.run.context.challenge)return false;
     if(!runtime.history.fields.Get(0x1b470,4,&transitionA)||!runtime.history.fields.Get(0x1b7bc,4,&transitionB)||transitionA||transitionB){*next=0x7372e9;return false;}
     //This is the ordinary registered primary. The actual type0 selection
@@ -501,7 +515,12 @@ bool NativePlayerUpdate::Resume(PortNormalRuntime& runtime,NativeActionSource* a
             unsigned int disabled;if(!fields.Get(0x35c,4,&disabled))return false;
             if((int)disabled<1&&!(body.flagsLow&0x800)){
                 bool pressed;if(!Action(actions,false,8,creation,body.entityToken,&pressed)){*next=0x733fda;return false;}
-                if(pressed){*next=0x733ef0;return false;}
+                if(pressed){
+                    //Placed bomb consumes one carried bomb and starts the
+                    //maintained fuse entity; cooldown prevents held presses.
+                    runtime.bombs.Place(runtime);
+                    fields.Put(0x1534,15);
+                }
             }
         }
         address=0x7449b0;
@@ -539,10 +558,9 @@ bool NativePlayerUpdate::Resume(PortNormalRuntime& runtime,NativeActionSource* a
         //callback and no accumulated head offset. The item, familiar, effect
         //and control-held branches are not reached from this initialized
         //ordinary state; every checked owner below is an actual Init field.
-        if(body.type!=1||body.variant||body.subtype||state.playerType||state.ghost||!state.canShoot)return false;
+        if(body.type!=1||body.variant||state.playerType<0||state.ghost)return false;
         unsigned int canShoot;
         if(!fields.Get(0x1735,1,&canShoot)){*next=0x72c430;return false;}
-        if(canShoot!=1){*next=0x72c430;return false;}
         const unsigned int empty[]={0x314,0x1320,0x1324,0x1328,0x132c,0x1330,0x134c,0x1524,0x1528};
         for(int i=0;i<9;++i)if(!fields.Zero(empty[i])){*next=0x72c430;return false;}
         if(!fields.Zero(0x12e0,1)||!fields.Zero(0x12e1,1)||!fields.Zero(0x12e2,1)){*next=0x72c430;return false;}
@@ -558,7 +576,7 @@ bool NativePlayerUpdate::Resume(PortNormalRuntime& runtime,NativeActionSource* a
         //Ordinary primary: subtype0/ghost0. The reached item-drop press
         //branch is not taken when the external device supplies action11
         //released, so the native early return writes16d8=0.
-        if(body.subtype||state.ghost){*next=0x7558ea;return false;}
+        if(state.ghost){*next=0x7558ea;return false;}
         else {
             unsigned int timer;
             if(!fields.Get(0x1538,4,&timer)){*next=0x755870;return false;}

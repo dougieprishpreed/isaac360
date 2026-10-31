@@ -19,7 +19,7 @@ NativeWorldResult NativeWorld::ContinueInitialRoom(NormalRunFlow& run,const Nati
     NativeRoomState* room=Current();const NativePlacedRoom* p=CurrentDescriptor();
     if(next)*next=0x7a16e4;
     if(!next||!room||!p||!resident[currentList].perimeterReady||!resident[currentList].setupKnown||
-       run.phase!=NRF_NEED_ROOM_ENTRY||run.context.stage!=1||run.context.stageType>2||run.context.nativeMode!=0||
+       run.phase!=NRF_NEED_ROOM_ENTRY||run.context.stage!=1||run.context.stageType>2||run.context.nativeMode<0||run.context.nativeMode>1||
        run.currentGrid!=currentGrid||run.currentGrid!=run.previousGrid||room->type!=1||room->shape!=1||!player.resourcesReady)return NWR_BAD_REQUEST;
     NativeWorldResident& live=resident[currentList];
     //Reached ordinary New Run. The original descriptor lists for saved grids,

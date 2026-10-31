@@ -37,7 +37,7 @@ bool NativePlayerStats::EvaluateFresh(NativePlayerState& state,const NativePlaye
  //This is the reached initial empty-inventory branch, not a substitute for
  //later cache evaluation. Its facts come from the owners populated by Init.
  //Any grant/effect/form/pill change must enter its native arithmetic branch.
- if(ready||!state.resourcesReady||state.playerType!=0||body.type!=1||body.variant||body.subtype||!body.native168||!body.native16a||body.removed||
+ if(ready||!state.resourcesReady||body.type!=1||body.variant||!body.native168||!body.native16a||body.removed||
     !creation.prefixPrepared||!creation.weapon.ready||!sprites.bodyReady||!manager.initialized||!startup.ready||
     !Zero(state.collectibleCounts)||!Zero(state.trinketCounts)||!Zero(state.pillEffectCounts)||!state.effects.Entries().empty()||
     !state.collectibleOverrides.empty()||state.temporaryCollectible||state.transformationFlags||!state.pendingCollectibles.empty())return false;

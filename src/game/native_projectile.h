@@ -47,4 +47,25 @@ private:
     NativeEnemyShotSystem(const NativeEnemyShotSystem&);
     NativeEnemyShotSystem& operator=(const NativeEnemyShotSystem&);
 };
+//Placed bomb: 45-tick fuse, radial damage to enemies/player and destruction of
+//ordinary rock/poop/fireplace static grids. Maintained gameplay service until
+//the native bomb entity lifecycle is integrated.
+struct NativeBomb {
+    NativePoint position;
+    int timer;
+    float radius;
+};
+class NativeBombSystem {
+public:
+    std::vector<NativeBomb> active;
+    unsigned int placed,explosions,enemyHits,rockHits;
+    NativeBombSystem();
+    void Clear();
+    bool Place(PortNormalRuntime& runtime);
+    bool Step(PortNormalRuntime& runtime);
+    void Swap(NativeBombSystem&);
+private:
+    NativeBombSystem(const NativeBombSystem&);
+    NativeBombSystem& operator=(const NativeBombSystem&);
+};
 #endif

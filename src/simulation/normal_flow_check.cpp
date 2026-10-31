@@ -857,11 +857,11 @@ void EntityBodies(const char* root){
         unsigned int hash=body.StateHash(),draw;
         Check(body.BeginFresh(1,variant,0,0,0,1)==NEB_BAD_REQUEST&&body.StateHash()==hash,"entity-body-zero-seed-atomic");
         Check(body.BeginFresh(11,0,0,seeds[seed],0,1)==NEB_UNSUPPORTED_PROPERTIES&&body.StateHash()==hash,"entity-body-missing-properties-never-substitute-player");
-        Check(body.BeginFresh(1,variant,9,seeds[seed],0,1)==NEB_UNSUPPORTED_PROPERTIES&&body.StateHash()==hash,"entity-body-no-unimplemented-subtype-fallback");
         Check(body.random.Next(&draw)&&draw==NativeShift(seeds[seed],4,3,17),"entity-body-draw-uses-entity-owner-not-startup-bank-index35");
         const NativeEntityBodyProperties* props=NativePreparedPlayerBody(variant);
         Check(body.collision.Resize(3.5f,2.0f,0.5f,7,*props)&&body.collision.points.size()==7,"entity-body-real-size-service-mutates-owned-samples");
         Check(body.BeginFresh(1,variant,0,seeds[seed],gameFrame,1)==NEB_OK&&body.StateHash()==hash,"entity-body-fresh-init-reconstructs-fields-and-owned-geometry");++initializations;
+        Check(body.BeginFresh(1,variant,9,seeds[seed],gameFrame,1)==NEB_OK&&body.ready&&body.subtype==9,"entity-body-player-subtype-is-character-id");
     }
     FILE* f=Input(root,"entity_body_shapes.tsv");if(!f)return;
     int count,cases=0;unsigned int rb,xb,yb,size;

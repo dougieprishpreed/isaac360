@@ -77,7 +77,7 @@ bool NativePlayerManager::PostPlayerInit(const NativePlayerState& state){
     ++postInitCalls;return true;
 }
 bool NativePlayerManager::RegisterWorld(NativeEntityBody& body){
-    if(!postInitCalls||worldRegistered||!body.ready||body.type!=1||body.variant!=0||body.subtype!=0)return false;
+    if(!postInitCalls||worldRegistered||!body.ready||body.type!=1||body.variant!=0)return false;
     //904a2a occurs after virtual Init returns, before registry insertion.
     body.position.x=320;body.position.y=400;
     if(!RegisterEntity(body))return false;entityToken=body.entityToken;worldRegistered=true;return true;

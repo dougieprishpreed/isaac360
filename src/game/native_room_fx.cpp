@@ -30,7 +30,7 @@ NativeRoomFx::NativeRoomFx():begun(false),ready(false),nextAddress(0),initialSee
 bool NativeRoomFx::PrepareInitial(const NormalRunFlow& run,NativeMt& global){
     const NativePlacedRoom* selected=run.layout.ByCell(run.currentGrid,run.placement.dimension);
     const NativeRoomDef* d=selected?NativeRoom(selected->definition):0;
-    if(!d||run.phase!=NRF_NEED_ROOM_ENTRY||run.currentGrid!=run.previousGrid||run.context.stage!=1||run.context.nativeMode!=0||
+    if(!d||run.phase!=NRF_NEED_ROOM_ENTRY||run.currentGrid!=run.previousGrid||run.context.stage!=1||run.context.nativeMode<0||run.context.nativeMode>1||
        run.context.challenge||run.context.stageType<0||run.context.stageType>1||d->shape!=1||d->type!=1||selected->visitedCount||!global.Valid())return false;
     if(ready)return definition==selected->definition&&stageType==run.context.stageType;
     //A stopped native initialization retains the already consumed parent

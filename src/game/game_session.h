@@ -45,6 +45,7 @@ struct PortNormalRuntime {
     NativePlayerUpdate playerUpdate;
     NativeProjectileSystem projectiles;
     NativeEnemyShotSystem enemyShots;
+    NativeBombSystem bombs;
     NativeRoomFx roomFx;
     NativeMinimaps minimaps;
     NativePauseUi pauseUi;
@@ -57,8 +58,8 @@ struct PortNormalRuntime {
     //services remain separate presentation work.
     unsigned int completeWholeGameplayTicks;
     unsigned int enemyKills,doorsOpened,roomTransitions;
-    unsigned int playerHits,playerDeathTicks,doorsUnlocked,gameOverCount,pickupsCollected;int playerInvulnerable;
-    bool playerDead,bossDefeated,descendRequested;
+    unsigned int playerHits,playerDeathTicks,doorsUnlocked,gameOverCount,pickupsCollected,collectiblesCollected;int playerInvulnerable,lastCollectible;
+    bool playerDead,bossDefeated,descendRequested,startingItemsGranted;
     int doorTransitionGrace;
     unsigned int tickFrame;
     //736d70's reached post-755870 presentation/effect state. The trail count

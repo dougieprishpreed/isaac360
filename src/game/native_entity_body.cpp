@@ -327,7 +327,7 @@ NativeEntityBody::NativeEntityBody():ready(false),native168(false),native169(fal
 }
 NativeEntityBodyResult NativeEntityBody::BeginFresh(int t,int v,int sub,unsigned int seed,unsigned int frame,int stage,const NativePoint* pos,const NativePoint* vel){
     if(t<0||v<0||sub<0||!seed||stage<0)return NEB_BAD_REQUEST;
-    const NativeEntityBodyProperties* p=t==1&&sub==0?NativePreparedPlayerBody(v):
+    const NativeEntityBodyProperties* p=t==1?NativePreparedPlayerBody(v):
         (t==1000?NativePreparedEffectBody(v,sub):(sub==0?NativePreparedEnemyBody(t,v):0));
     if(!p)return NEB_UNSUPPORTED_PROPERTIES;
     NativeEntityBody next;next.type=t;next.variant=v;next.subtype=sub;next.initialSeed=seed;next.random.Set(seed,30);

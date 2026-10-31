@@ -39,6 +39,10 @@ public:
     //6eb5e0 called by6b47f8 before904960. Restricted to its actual ordinary,
     //empty-manager path; this is not a replacement for later item selection.
     bool InitializeOrdinary(unsigned int seed,const NativeRunStart&,const NativeProfile&,NativeSoundState&);
+    //Maintained weighted selector over one prepared pool. Uses that pool's
+    //native selection stream, applies DecreaseBy to the chosen entry and
+    //removes it below RemoveOn. Returns0 when no eligible entry remains.
+    int SelectCollectible(int poolIndex);
     bool Capture(NativeItemPoolSnapshot&) const;
     void Swap(NativeItemPools&);
 };

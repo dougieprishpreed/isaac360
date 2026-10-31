@@ -1,7 +1,7 @@
 #include "game_session.h"
 #include "native_room_update.h"
 #include <string.h>
-PortNormalRuntime::PortNormalRuntime():initialSaveFileWritten(false),phase(PNR_IDLE),missingNativePrerequisite(0),completePlayerInitializations(0),completePlayerTicks(0),completeWholeGameplayTicks(0),enemyKills(0),doorsOpened(0),roomTransitions(0),playerHits(0),playerDeathTicks(0),doorsUnlocked(0),gameOverCount(0),pickupsCollected(0),playerInvulnerable(0),playerDead(false),bossDefeated(false),descendRequested(false),doorTransitionGrace(0),tickFrame(0),playerTailTrailSegments(0),playerTailRenderCallbacks(0),playerTailTicks(0),roomEntryPrefixPrepared(false) {
+PortNormalRuntime::PortNormalRuntime():initialSaveFileWritten(false),phase(PNR_IDLE),missingNativePrerequisite(0),completePlayerInitializations(0),completePlayerTicks(0),completeWholeGameplayTicks(0),enemyKills(0),doorsOpened(0),roomTransitions(0),playerHits(0),playerDeathTicks(0),doorsUnlocked(0),gameOverCount(0),pickupsCollected(0),collectiblesCollected(0),playerInvulnerable(0),lastCollectible(0),playerDead(false),bossDefeated(false),descendRequested(false),startingItemsGranted(false),doorTransitionGrace(0),tickFrame(0),playerTailTrailSegments(0),playerTailRenderCallbacks(0),playerTailTicks(0),roomEntryPrefixPrepared(false) {
     memset(&run,0,sizeof(run));memset(&entryIssue,0,sizeof(entryIssue));
     gameRandom.Default();
 }
@@ -44,13 +44,13 @@ PortSessionStart PortGameSession::StartNormalCharacter(unsigned int seed,PortNor
         runtime.playerState.Swap(state);
         runtime.playerCreation.Swap(creation);
         runtime.playerManager.Swap(manager);
-        runtime.playerUpdate=NativePlayerUpdate();runtime.projectiles.Reset();runtime.enemyShots.Clear();
+        runtime.playerUpdate=NativePlayerUpdate();runtime.projectiles.Reset();runtime.enemyShots.Clear();runtime.bombs.Clear();
         runtime.roomFx.Swap(roomFx);
         runtime.minimaps.Reset();
         //Virtual Init, the reached resource/callback services and manager
         //registration have returned before006b4b5e generation begins.
         runtime.missingNativePrerequisite=0;runtime.phase=PNR_GENERATING;runtime.tickFrame=0;
-        runtime.completePlayerInitializations=runtime.completePlayerTicks=0;runtime.completeWholeGameplayTicks=0;runtime.enemyKills=runtime.doorsOpened=runtime.roomTransitions=0;runtime.playerHits=runtime.playerDeathTicks=runtime.doorsUnlocked=runtime.gameOverCount=runtime.pickupsCollected=0;runtime.playerInvulnerable=0;runtime.playerDead=false;runtime.bossDefeated=false;runtime.descendRequested=false;runtime.doorTransitionGrace=0;
+        runtime.completePlayerInitializations=runtime.completePlayerTicks=0;runtime.completeWholeGameplayTicks=0;runtime.enemyKills=runtime.doorsOpened=runtime.roomTransitions=0;runtime.playerHits=runtime.playerDeathTicks=runtime.doorsUnlocked=runtime.gameOverCount=runtime.pickupsCollected=runtime.collectiblesCollected=0;runtime.lastCollectible=0;runtime.playerInvulnerable=0;runtime.playerDead=false;runtime.bossDefeated=false;runtime.descendRequested=false;runtime.startingItemsGranted=false;runtime.doorTransitionGrace=0;
         runtime.playerTailTrailSegments=0;runtime.playerTailRenderCallbacks=0;runtime.playerTailTicks=0;}
     if(start.result==NPS_WORLD_PENDING)runtime.roomEntryPrefixPrepared=false;
     delete next;
@@ -203,6 +203,15 @@ NormalRunResult PortGameSession::TickNormal(PortNormalRuntime& runtime,const Nat
     }
     if(runtime.playerDead){runtime.phase=PNR_DYING;runtime.playerDeathTicks=0;return NFR_PENDING;}
     if(runtime.phase!=PNR_READY||runtime.world.currentList<0||runtime.world.currentList>=kNativeWorldRoomLimit)return NFR_BAD_REQUEST;
+    if(!runtime.startingItemsGranted){
+        //Character starting collectibles are granted after the fresh initial
+        //save normalization; ownership and non-stat effects apply now, while
+        //active-item slots and stat-cache arithmetic remain separate services.
+        const NativePlayerDef* def=NativePlayer(runtime.playerState.playerType);
+        if(def)for(int i=0;i<def->itemCount;++i)
+            if(def->items[i]>0)runtime.playerState.GrantCollectible(def->items[i]);
+        runtime.startingItemsGranted=true;
+    }
     NativeWorldResident& live=runtime.world.resident[runtime.world.currentList];
     if(!live.update||!runtime.playerBody.ready)return NFR_BAD_REQUEST;
     ++runtime.tickFrame;runtime.history.fields.Put(0x1a2e1c,runtime.tickFrame);

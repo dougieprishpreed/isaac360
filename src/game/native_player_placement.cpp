@@ -6,7 +6,7 @@ bool NativePlayerManager::PlaceInitial(const NormalRunFlow& run,const NativeWorl
     if(next)*next=0x905cd0;
     const NativePlacedRoom* p=world.CurrentDescriptor();
     if(!next||!initialized||members.size()!=1||!p||entityToken!=body.entityToken||!body.ready||!worldRegistered||
-       run.context.stage!=1||run.context.stageType<0||run.context.stageType>2||run.context.challenge||run.context.nativeMode||
+       run.context.stage!=1||run.context.stageType<0||run.context.stageType>2||run.context.challenge||run.context.nativeMode<0||run.context.nativeMode>1||
        body.variant||state.native1734||creation.postGenerationPrepared||world.currentGrid!=world.previousGrid)return false;
     //7562c3..2ef, before the variant/caller tests. These are live stores,
     //not edits to the immutable constructor export or cache snapshot.

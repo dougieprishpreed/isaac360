@@ -98,6 +98,32 @@ bool NativeItemPools::InitializeOrdinary(unsigned int initial,const NativeRunSta
         NativePocketSoundReset change={1,card.id,card.announcer};soundResets.push_back(change);sounds.native199[card.announcer]=false;}
     initialized=true;return true;
 }
+int NativeItemPools::SelectCollectible(int poolIndex){
+    if(!initialized||poolIndex<0||poolIndex>=31)return 0;
+    NativeItemPool& pool=pools[poolIndex];
+    if(pool.entries.empty()||pool.totalWeight<=0.0f)return 0;
+    float roll=0.0f;
+    if(!pool.selection.Float(&roll))return 0;
+    float target=roll*pool.totalWeight,accum=0.0f;int chosen=-1;
+    for(unsigned int i=0;i<pool.entries.size();++i){
+        float next=accum+pool.entries[i].weight;
+        if(target<next){chosen=(int)i;break;}
+        accum=next;
+    }
+    if(chosen<0)chosen=(int)pool.entries.size()-1;
+    NativeItemPoolEntry& entry=pool.entries[chosen];
+    int id=entry.id;
+    entry.weight-=entry.decreaseBy;
+    if(entry.weight<entry.removeOn)entry.weight=0.0f;
+    pool.totalWeight=0.0f;
+    for(unsigned int i=0;i<pool.entries.size();){
+        if(pool.entries[i].weight<=0.0f){pool.entries.erase(pool.entries.begin()+i);continue;}
+        pool.totalWeight+=pool.entries[i].weight;++i;
+    }
+    ++pool.counter;++counter;
+    if(id>0&&(unsigned int)id<seen.size())seen[id]=1;
+    return id;
+}
 void NativeItemPools::Swap(NativeItemPools& other){
     std::swap(initialized,other.initialized);std::swap(seed,other.seed);std::swap(counter,other.counter);
     std::swap(random,other.random);std::swap(backup,other.backup);
