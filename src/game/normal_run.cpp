@@ -74,7 +74,7 @@ NormalRunResult NormalRunFlow::SupplyFloorContext(const NativeFloorContext& c,co
     // First ordinary chapter without scripted/configured-room/item overrides.
     // Stage type and effective curses are explicit caller inputs, not inferred
     // from a discovered file or a fabricated zero-valued native service.
-    if(c.stage<1||c.stage>8||c.stageType<0||c.stageType>2||c.challenge||c.gameFlags||c.runCounter||c.held599||c.reservationProfileGate)return NFR_BAD_REQUEST;
+    if(c.stage<1||c.stage>10||c.stageType<0||c.stageType>2||c.challenge||c.gameFlags||c.runCounter||c.held599||c.reservationProfileGate)return NFR_BAD_REQUEST;
     NativeLevelSeeds level;if(!NativeInitNormalLevelSeeds(seeds,c.stage,c.stageType,&level))return NFR_BAD_REQUEST;
     if(evaluatedCurseOwner) {if(!evaluatedCurseOwner->state||evaluatedCurseOwner->index!=35)return NFR_BAD_REQUEST;level.setup=*evaluatedCurseOwner;}
     else if(c.effectiveCurses||Byte(profile,0x65))return NFR_BAD_REQUEST;

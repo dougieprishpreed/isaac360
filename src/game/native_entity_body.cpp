@@ -196,7 +196,44 @@ const NativeEntityBodyProperties kEnemyBodies[]={
     {266,0,0,12,0.0f,1.0f,30.0f,1.0f,1.0f,2.0f,100.0f,750.0f,0.0f,"gfx/266.000_Mega Gurdy.anm2"},
     {270,0,0,8,0.0f,1.0f,16.0f,1.0f,1.0f,2.0f,60.0f,500.0f,0.0f,"gfx/270.000_MegaFred.anm2"},
     {74,0,0,12,0.55f,1.0f,40.0f,1.0f,1.0f,2.0f,30.0f,190.0f,0.0f,"gfx/074.000_Blastocyst Big.anm2"},
-    {81,0,0,0,0.24f,1.0f,20.0f,1.0f,1.0f,2.0f,50.0f,60.0f,0.0f,"gfx/081.000_The Fallen.anm2"}
+    {81,0,0,0,0.24f,1.0f,20.0f,1.0f,1.0f,2.0f,50.0f,60.0f,0.0f,"gfx/081.000_The Fallen.anm2"},
+    {55,1,0,12,0.17f,1.0f,13.0f,1.0f,1.0f,2.0f,10.0f,25.0f,0.0f,"gfx/055.001_Kamikaze Leech.anm2"},
+    {55,2,0,12,0.17f,1.0f,13.0f,1.0f,1.0f,2.0f,10.0f,25.0f,0.0f,"gfx/055.002_Holy Leech.anm2"},
+    {834,0,0,12,0.14f,1.0f,13.0f,1.0f,1.0f,1.0f,10.0f,35.0f,0.0f,"gfx/834.000_whipper.anm2"},
+    {834,1,0,12,0.14f,1.0f,13.0f,1.0f,1.0f,1.0f,10.0f,35.0f,0.0f,"gfx/834.001_snapper.anm2"},
+    {41,1,0,12,0.14f,1.0f,13.0f,1.0f,1.0f,1.0f,10.0f,20.0f,0.0f,"gfx/041.001_Selfless Knight.anm2"},
+    {38,3,0,4,0.16f,1.0f,13.0f,1.0f,1.0f,1.0f,10.0f,25.0f,0.0f,"gfx/038.003_Wrinkly Baby.anm2"},
+    {38,1,0,8,0.16f,1.0f,13.0f,1.0f,1.0f,1.0f,10.0f,25.0f,0.0f,"gfx/038.001_Angelic Baby.anm2"},
+    {61,2,0,4,0.14f,1.0f,17.0f,1.0f,1.0f,1.0f,100.0f,18.0f,0.0f,"gfx/061.002_soul sucker.anm2"},
+    {61,5,0,4,0.14f,1.0f,17.0f,1.0f,1.0f,0.0f,5.0f,10.0f,0.0f,"gfx/061.005_bulb.anm2"},
+    {251,0,0,12,0.16f,1.0f,13.0f,1.0f,1.0f,1.0f,14.0f,60.0f,0.0f,"gfx/251.000_Begotten.anm2"},
+    {283,0,0,12,0.14f,1.0f,13.0f,1.0f,1.0f,1.0f,10.0f,20.0f,0.0f,"gfx/283.000_BoneKnight.anm2"},
+    {259,0,0,4,0.16f,1.0f,13.0f,1.0f,1.0f,1.0f,10.0f,25.0f,0.0f,"gfx/259.000_Imp.anm2"},
+    {285,0,0,12,0.21f,1.0f,13.0f,1.0f,1.0f,1.0f,10.0f,20.0f,0.0f,"gfx/285.000_Red Ghost.anm2"},
+    {230,0,0,12,0.26f,1.0f,16.0f,1.0f,1.0f,1.0f,22.0f,32.0f,0.0f,"gfx/230.000_camillojr.anm2"},
+    {225,0,0,8,0.32f,1.0f,20.0f,1.0f,1.0f,1.0f,14.0f,20.0f,0.0f,"gfx/225.000_Black Maw.anm2"},
+    {278,0,0,12,0.14f,1.0f,13.0f,1.0f,1.0f,2.0f,10.0f,33.0f,0.0f,"gfx/278.000_Black Globin.anm2"},
+    {203,0,0,0,0.22f,1.0f,13.0f,1.0f,1.0f,0.0f,100.0f,1.0f,0.0f,"gfx/203.000_Brimstone Head.anm2"},
+    {50,0,0,12,0.13f,1.0f,13.0f,1.0f,1.0f,2.0f,30.0f,60.0f,0.0f,"gfx/050.000_Greed.anm2"},
+    {52,0,0,12,0.12f,1.0f,13.0f,1.0f,1.0f,2.0f,30.0f,60.0f,0.0f,"gfx/052.000_Pride.anm2"},
+    {53,1,0,12,0.14f,1.0f,13.0f,1.0f,1.0f,0.0f,10.0f,20.0f,0.0f,"gfx/053.001_Evil Twin.anm2"},
+    {279,0,0,12,0.25f,1.0f,13.0f,1.0f,1.0f,2.0f,10.0f,20.0f,0.0f,"gfx/279.000_Black Globins Head.anm2"},
+    {833,0,0,12,0.10f,1.0f,13.0f,1.0f,1.0f,1.0f,16.0f,25.0f,0.0f,"gfx/833.000_candler.anm2"},
+    {816,0,0,8,0.10f,1.0f,13.0f,1.0f,1.0f,1.0f,16.0f,14.0f,0.0f,"gfx/816.000_polty.anm2"},
+    {805,0,0,12,0.34f,1.0f,13.0f,1.0f,1.0f,1.0f,100.0f,14.0f,0.0f,"gfx/805.000_bishop.anm2"},
+    {253,0,0,12,0.26f,1.0f,16.0f,1.0f,1.0f,1.0f,22.0f,40.0f,0.0f,"gfx/253.000_PsyTumor.anm2"},
+    {22,2,0,12,0.14f,1.0f,13.0f,1.0f,1.0f,0.0f,7.0f,40.0f,0.0f,"gfx/022.002_Holy Mulligan.anm2"},
+    {60,2,0,12,0.14f,1.0f,13.0f,1.0f,1.0f,1.0f,100.0f,20.0f,0.0f,"gfx/060.002_Holy Eye.anm2"},
+    {227,1,0,12,0.20f,1.0f,20.0f,1.0f,1.0f,1.0f,30.0f,60.0f,0.0f,"gfx/227.001_Holy Bony.anm2"},
+    {69,0,0,12,0.19f,1.0f,20.0f,1.0f,1.0f,2.0f,20.0f,350.0f,0.0f,"gfx/069.000_Loki.anm2"},
+    {100,0,0,12,0.54f,1.0f,35.0f,1.0f,1.0f,1.0f,38.0f,130.0f,0.0f,"gfx/100.000_Widow.anm2"},
+    {291,0,0,12,0.0f,1.0f,32.0f,1.0f,1.0f,0.0f,50.0f,0.0f,0.0f,"gfx/291.000_Pitfall.anm2"},
+    {15,2,0,12,0.28f,1.0f,13.0f,1.0f,1.0f,1.0f,10.0f,15.0f,0.0f,"gfx/015.002_I.Blob.anm2"},
+    {84,0,0,12,0.52f,1.0f,35.0f,1.0f,1.0f,2.0f,50.0f,600.0f,0.0f,"gfx/084.000_Satan.anm2"},
+    {102,0,0,12,0.33f,1.0f,20.0f,1.0f,1.0f,1.0f,50.0f,2000.0f,0.0f,"gfx/102.000_Isaac (final boss).anm2"},
+    {16,0,0,12,0.13f,1.0f,13.0f,1.0f,1.0f,0.0f,6.0f,13.0f,0.0f,"gfx/016.000_Mulligan.anm2"},
+    {16,1,0,12,0.13f,1.0f,13.0f,1.0f,1.0f,0.0f,6.0f,13.0f,0.0f,"gfx/016.001_Mulligoon.anm2"},
+    {16,2,0,12,0.13f,1.0f,13.0f,1.0f,1.0f,0.0f,6.0f,13.0f,0.0f,"gfx/016.002_Mulliboom.anm2"}
 };
 }
 const NativeEntityBodyProperties* NativePreparedEnemyBody(int type,int variant){
@@ -238,6 +275,12 @@ bool NativeBossEntityType(int type,int variant){
     if(type==270)return variant==0;
     if(type==74)return variant==0;
     if(type==81)return variant==0;
+    if(type==50)return variant==0;
+    if(type==52)return variant==0;
+    if(type==69)return variant==0;
+    if(type==84)return variant==0;
+    if(type==100)return variant==0;
+    if(type==102)return variant==0;
     return false;
 }
 const NativeEntityBodyProperties* NativePreparedPlayerBody(int variant){

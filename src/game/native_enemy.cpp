@@ -37,7 +37,7 @@ void NativeEnemy::Update(const NativeRoomState& room,const NativeEntityBody& pla
     const int phase=(int)body.time;
     const unsigned int salt=seed&63U;
     float vx=0.0f,vy=0.0f;
-    if(type==13||type==18||type==25||type==61||type==240||type==242||type==248||type==38||type==90||type==91||type==92||type==93||type==212||type==219||type==254||(type==260&&body.variant==10)||type==213||type==223||type==246||type==258||type==288||type==83||type==868||type==58||type==60||(type==229&&body.variant==1)||type==286||type==859){
+    if(type==13||type==18||type==25||type==61||type==240||type==242||type==248||type==38||type==90||type==91||type==92||type==93||type==212||type==219||type==254||(type==260&&body.variant==10)||type==213||type==223||type==246||type==258||type==288||type==83||type==868||type==58||type==60||(type==229&&body.variant==1)||type==286||type==859||type==285||type==259||type==816||type==225||type==279){
         //Fly: fast erratic drift with a per-entity phase offset.
         const float wobble=sinf(phase*0.45f+(float)salt*0.19f);
         const float sway=cosf(phase*0.37f+(float)salt*0.11f);
@@ -59,7 +59,7 @@ void NativeEnemy::Update(const NativeRoomState& room,const NativeEntityBody& pla
         if(cycle==0&&distance>0.0f){vx=dx*2.4f;vy=dy*2.4f;}
         else if(cycle<18){vx=body.velocity.x*0.92f;vy=body.velocity.y*0.92f;}
         else{vx=dx*0.30f;vy=dy*0.30f;}
-    }else if(type==226||type==237||type==21||type==23||type==41||type==881){
+    }else if(type==226||type==237||type==21||type==23||type==41||type==881||type==834){
         //Skinny/Rotty: charge windows separated by short recovery.
         const int cycle=phase%70;const float speed=body.variant==1?1.55f:1.10f;
         if(cycle>=16&&cycle<46){vx=dx*speed;vy=dy*speed;}
@@ -92,7 +92,7 @@ void NativeEnemy::Update(const NativeRoomState& room,const NativeEntityBody& pla
         else{vx=dx*0.25f;vy=dy*0.25f;}
         if(shots&&distance<520.0f&&cycle==62)
             shots->Fire(body.position,dx*3.2f,dy*3.2f,1.0f,8.0f,240,body.entityToken);
-    }else if(type==67||type==260||type==79||type==908||type==28||type==36||type==62||type==68||type==71||type==99||type==262||type==264||type==916||type==72||type==43||type==45||type==263||type==265||type==900||type==75||type==76||type==78||type==266||type==270||type==74||type==81){
+    }else if(type==67||type==260||type==79||type==908||type==28||type==36||type==62||type==68||type==71||type==99||type==262||type==264||type==916||type==72||type==43||type==45||type==263||type==265||type==900||type==75||type==76||type==78||type==266||type==270||type==74||type==81||type==50||type==52||type==69||type==84||type==100||type==102){
         //Duke/Haunt: floating boss with a periodic spread volley.
         const int cycle=phase%150;
         vx=dx*0.32f;vy=dy*0.32f;
@@ -122,7 +122,7 @@ void NativeEnemy::Update(const NativeRoomState& room,const NativeEntityBody& pla
         if(cycle>=20&&cycle<58){vx=dx*1.05f;vy=dy*1.05f;}
         else if(cycle<20){vx=0.0f;vy=0.0f;}
         else{vx=dx*0.30f;vy=dy*0.30f;}
-    }else if(type==33||type==235||type==42||type==80||type==205||type==202||type==236||type==306){
+    }else if(type==33||type==235||type==42||type==80||type==205||type==202||type==236||type==306||type==203||type==291||type==833){
         //Fireplace: stationary environmental hazard.
         vx=0.0f;vy=0.0f;
     }else{
