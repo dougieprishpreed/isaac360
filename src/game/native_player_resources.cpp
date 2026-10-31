@@ -1,6 +1,7 @@
 #include "native_player_state.h"
 #include "native_sprite.h"
 #include "native_player_resource_data.h"
+#include "native_item_pool_data.h"
 #include <algorithm>
 
 const NativeSpriteSheet* NativePreparedPlayerTearsSheet(){return &kNativePlayerTearsSheet;}
@@ -42,6 +43,7 @@ bool NativePlayerState::HasCollectible(int id,bool* result) const{
 bool NativePlayerState::GrantCollectible(int id){
     if(!ready||id<=0||(unsigned int)id>=collectibleCounts.size())return false;
     ++collectibleCounts[id];
+    if(NativePoolIsActive(id)){for(int i=0;i<4;++i)if(!activeItems[i]){activeItems[i]=id;break;}}
     //Prepared non-stat item effects with exact resource/heart semantics. Stat-
     //cache items remain owned but their native cache arithmetic is separate.
     switch(id){
@@ -71,12 +73,27 @@ bool NativePlayerState::GrantCollectible(int id){
             tears+=0.7f;stats.fireDelay=30.0f/(tears+1.0f)-1.0f;break;}
         case 4: //Cricket's Head: damage x1.5.
             stats.damage*=1.5f;stats.baseDamage*=1.5f;break;
+        case 6:{ //Number One: +1.5 tears, -1.5 range.
+            float tears=30.0f/(stats.fireDelay+1.0f)-1.0f;
+            tears+=1.5f;stats.fireDelay=std::max(5.0f,30.0f/(tears+1.0f)-1.0f);}
+            stats.range=std::max(6.5f,stats.range-1.5f);break;
         case 12: //Magic Mushroom: damage x1.5 and +0.3 speed.
             stats.damage*=1.5f;stats.baseDamage*=1.5f;
             stats.moveSpeed=std::min(2.0f,stats.moveSpeed+0.3f);break;
+        case 13: //The Virus: +0.3 speed.
+            stats.moveSpeed=std::min(2.0f,stats.moveSpeed+0.3f);break;
+        case 14: //Roid Rage: +0.6 speed, +1.5 range.
+            stats.moveSpeed=std::min(2.0f,stats.moveSpeed+0.6f);stats.range+=1.5f;break;
         case 27: //Wooden Spoon: +0.3 speed.
         case 28: //The Belt: +0.3 speed.
             stats.moveSpeed=std::min(2.0f,stats.moveSpeed+0.3f);break;
+        case 29: //Mom's Underwear.
+        case 30: //Mom's Heels.
+        case 31: //Mom's Lipstick.
+            stats.range+=1.5f;break;
+        case 32:{ //Wire Coat Hanger: +0.7 tears.
+            float tears=30.0f/(stats.fireDelay+1.0f)-1.0f;
+            tears+=0.7f;stats.fireDelay=std::max(5.0f,30.0f/(tears+1.0f)-1.0f);break;}
         case 46: stats.luck+=1.0f;break; //Lucky Foot
         default:break;
         }

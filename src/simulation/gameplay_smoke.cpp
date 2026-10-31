@@ -320,6 +320,19 @@ int RunBombProbe(NativeMt& random,PortFrontend& ui){
     printf("POCKET hp=%d/%d bombs=%d keys=%d coins=%d\n",runtime->playerState.redHearts,runtime->playerState.maxRedHearts,
         runtime->playerState.bombs,runtime->playerState.keys,runtime->playerState.coins);
     delete runtime;return 0;
+}int RunActiveProbe(NativeMt& random,PortFrontend& ui){
+    PortNormalRuntime* runtime=new PortNormalRuntime;PortGameSession session(random,ui);
+    PortSessionStart start=session.StartNormalCharacter(1,*runtime);
+    if(start.result!=NPS_WORLD_PENDING){delete runtime;return 121;}
+    if(!AdvanceToBoundary(session,*runtime)||runtime->phase!=PNR_READY){delete runtime;return 122;}
+    runtime->playerState.redHearts=4;
+    if(!runtime->playerState.GrantCollectible(45)){delete runtime;return 123;} //Yum Heart
+    if(runtime->playerState.activeItems[0]!=45){delete runtime;return 124;}
+    const int maxHp=runtime->playerState.maxRedHearts;
+    if(!RunActionPress(session,*runtime,9,1)){delete runtime;return 125;}
+    if(runtime->playerState.redHearts!=std::min(maxHp,6)){delete runtime;return 126;}
+    printf("ACTIVE id=%d hp=%d/%d\n",runtime->playerState.activeItems[0],runtime->playerState.redHearts,runtime->playerState.maxRedHearts);
+    delete runtime;return 0;
 }int RunStatProbe(NativeMt& random,PortFrontend& ui){
     PortNormalRuntime* runtime=new PortNormalRuntime;PortGameSession session(random,ui);
     PortSessionStart start=session.StartNormalCharacter(1,*runtime);
@@ -562,6 +575,7 @@ int main(int argc,char** argv){
     if(!failed){int hard=RunHardModeProbe(random,ui);if(hard){printf("HARD_RESULT failed=%d\n",hard);failed=true;}}
     if(!failed){int stat=RunStatProbe(random,ui);if(stat){printf("STAT_RESULT failed=%d\n",stat);failed=true;}}
     if(!failed){int pocket=RunPocketProbe(random,ui);if(pocket){printf("POCKET_RESULT failed=%d\n",pocket);failed=true;}}
+    if(!failed){int active=RunActiveProbe(random,ui);if(active){printf("ACTIVE_RESULT failed=%d\n",active);failed=true;}}
     if(!failed){int chars=RunCharacterMatrixProbe(random,ui);if(chars){printf("CHARACTER_RESULT failed=%d\n",chars);failed=true;}}
     if(!failed){int death=RunDeathProbe(random,ui);if(death){printf("DEATH_RESULT failed=%d\n",death);failed=true;}}
     delete runtime;return failed?5:0;

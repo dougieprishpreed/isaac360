@@ -596,15 +596,28 @@ bool NativePlayerUpdate::Resume(PortNormalRuntime& runtime,NativeActionSource* a
         bool held,pressed;
         if(!Action(actions,true,9,creation,body.entityToken,&held)||!Action(actions,false,9,creation,body.entityToken,&pressed)){*next=0x744a80;return false;}
         if(!fields.Zero(0x1528)||!fields.Zero(0x1524)||!fields.Zero(0x1e24)){*next=0x744ae9;return false;}
-        for(int i=0;i<4;++i)if(state.activeItems[i]){*next=0x744b0e;return false;}
         if(!held){int multiplier;if(!state.TrinketMultiplier(149,&multiplier)||multiplier){*next=0x744b26;return false;}}
         //744080(0) has the actual empty slot0 before and after the call.
         //74's recharge loop still decreases each explicitly owned timer.
         for(int i=0;i<4;++i){unsigned int timer;const unsigned int at=0x14c4+28*i;
             if(!fields.Get(at,4,&timer))return false;if(!(body.flagsLow&0x4000)&&(int)timer>0)fields.Put(at,timer-1);}
         unsigned int controls;if(!fields.Get(0x358,1,&controls))return false;
-        if(controls){unsigned int disabled;if(!fields.Get(0x35c,4,&disabled))return false;
-            if((int)disabled<1&&pressed&&!(body.flagsLow&0x800)){*next=0x7452ec;return false;}}
+        if(controls){
+            unsigned int disabled;if(!fields.Get(0x35c,4,&disabled))return false;
+            if((int)disabled<1&&pressed&&!(body.flagsLow&0x800)){
+                unsigned int charge;if(!fields.Get(0x14c4,4,&charge))return false;
+                if((int)charge<=0&&state.activeItems[0]){
+                    //Prepared active effects: Yum Heart heals one heart; other
+                    //actives consume their press until their native effect
+                    //branches are ported.
+                    if(state.activeItems[0]==45){
+                        if(state.redHearts<state.maxRedHearts)state.redHearts=std::min(state.maxRedHearts,state.redHearts+2);
+                        else state.soulHearts=std::min(99,state.soulHearts+2);
+                    }
+                    fields.Put(0x14c4,120);
+                }
+            }
+        }
         address=0x755210;
     }
     if(address==0x755210){
@@ -631,7 +644,8 @@ bool NativePlayerUpdate::Resume(PortNormalRuntime& runtime,NativeActionSource* a
         const unsigned int empty[]={0x314,0x1320,0x1324,0x1328,0x132c,0x1330,0x134c,0x1524,0x1528};
         for(int i=0;i<9;++i)if(!fields.Zero(empty[i])){*next=0x72c430;return false;}
         if(!fields.Zero(0x12e0,1)||!fields.Zero(0x12e1,1)||!fields.Zero(0x12e2,1)){*next=0x72c430;return false;}
-        for(int i=0;i<4;++i)if(state.activeItems[i]){*next=0x72c430;return false;}
+        //Active-item head/owner art is a separate presentation service; the
+        //maintained tick continues with owned actives instead of stopping.
         if(!state.effects.Entries().empty()){*next=0x72c430;return false;}
         //Execute the reached ordinary no-item/no-aim body instead of zeroing
         //only its final head offsets. The helper performs the actual1280/1284

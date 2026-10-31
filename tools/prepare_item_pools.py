@@ -24,7 +24,10 @@ def prepare():
         'struct NativePoolItemDef {int id,achievement;bool special,hidden;};',
         'static const NativePoolItemDef kPoolCollectibles[]={']
     lines += [definition(n) for n in items if n.tag in ('passive','active','familiar')]
-    lines += ['};','static const NativePoolItemDef kPoolTrinkets[]={']
+    active_ids=sorted(int(n.get('id')) for n in items if n.tag=='active')
+    lines += ['};','static const int kActiveCollectibles[]={'+','.join(str(i) for i in active_ids)+'};',
+        'inline bool NativePoolIsActive(int id){for(unsigned int i=0;i<sizeof(kActiveCollectibles)/sizeof(kActiveCollectibles[0]);++i)if(kActiveCollectibles[i]==id)return true;return false;}',
+        'static const NativePoolItemDef kPoolTrinkets[]={']
     lines += [definition(n) for n in items if n.tag=='trinket']
     lines += ['};','struct NativePillDef {int id,achievement,classification,announcer;};',
         'static const NativePillDef kPoolPills[]={']
