@@ -291,7 +291,8 @@ static void DrawRocks(){
             (float)(sheetY+sy),32,32,(float)kGameplayAtlasWidth,(float)kGameplayAtlasHeight);
     }
 }
-static bool EnemyWalkRect(int type,int variant,int* sx,int* sy,int* frames){
+static bool EnemyWalkRect(int type,int variant,int* sx,int* sy,int* frames,int* fw,int* fh){
+    *fw=*fh=64;
     if(type==10){*sx=kGameplayGaperwalkX;*sy=kGameplayGaperwalkY;*frames=kGameplayGaperwalkFrames;return true;}
     if(type==13){*sx=kGameplayFlywalkX;*sy=kGameplayFlywalkY;*frames=kGameplayFlywalkFrames;return true;}
     if(type==14){*sx=kGameplayPooterwalkX;*sy=kGameplayPooterwalkY;*frames=kGameplayPooterwalkFrames;return true;}
@@ -299,11 +300,40 @@ static bool EnemyWalkRect(int type,int variant,int* sx,int* sy,int* frames){
     if(type==226&&variant==0){*sx=kGameplaySkinnywalkX;*sy=kGameplaySkinnywalkY;*frames=kGameplaySkinnywalkFrames;return true;}
     if(type==226&&variant==1){*sx=kGameplayRottywalkX;*sy=kGameplayRottywalkY;*frames=kGameplayRottywalkFrames;return true;}
     if(type==284){*sx=kGameplayCyclopiawalkX;*sy=kGameplayCyclopiawalkY;*frames=kGameplayCyclopiawalkFrames;return true;}
+    if(type==217&&variant==1){*sx=kGameplayCornwalkX;*sy=kGameplayCornwalkY;*frames=kGameplayCornwalkFrames;return true;}
+    if(type==217&&variant==2){*sx=kGameplayBrowniecornwalkX;*sy=kGameplayBrowniecornwalkY;*frames=kGameplayBrowniecornwalkFrames;return true;}
+    if(type==217&&variant==3){*sx=kGameplayBigcornwalkX;*sy=kGameplayBigcornwalkY;*frames=kGameplayBigcornwalkFrames;return true;}
     if(type==217){*sx=kGameplayDipwalkX;*sy=kGameplayDipwalkY;*frames=kGameplayDipwalkFrames;return true;}
     if(type==256){*sx=kGameplayDartflywalkX;*sy=kGameplayDartflywalkY;*frames=kGameplayDartflywalkFrames;return true;}
     if(type==261&&variant==1){*sx=kGameplayDanglewalkX;*sy=kGameplayDanglewalkY;*frames=kGameplayDanglewalkFrames;return true;}
     if(type==261){*sx=kGameplayDinglewalkX;*sy=kGameplayDinglewalkY;*frames=kGameplayDinglewalkFrames;return true;}
+    if(type==18){*sx=kGameplayAttackflywalkX;*sy=kGameplayAttackflywalkY;*frames=kGameplayAttackflywalkFrames;return true;}
+    if(type==79){*sx=kGameplayGeminiwalkX;*sy=kGameplayGeminiwalkY;*frames=kGameplayGeminiwalkFrames;return true;}
+    if(type==237&&variant==2){*sx=kGameplayTurdlingwalkX;*sy=kGameplayTurdlingwalkY;*frames=kGameplayTurdlingwalkFrames;return true;}
+    if(type==237){*sx=kGameplayGurglingwalkX;*sy=kGameplayGurglingwalkY;*frames=kGameplayGurglingwalkFrames;return true;}
+    if(type==239){*sx=kGameplayGrubwalkX;*sy=kGameplayGrubwalkY;*frames=kGameplayGrubwalkFrames;return true;}
+    if(type==908){*sx=kGameplayPlumidleX;*sy=kGameplayPlumidleY;*frames=kGameplayPlumidleFrames;return true;}
+    if(type==19){*sx=kGameplayLarrywalkX;*sy=kGameplayLarrywalkY;*frames=kGameplayLarrywalkFrames;return true;}
+    if(type==20){*sx=kGameplayMonstrowalkX;*sy=kGameplayMonstrowalkY;*frames=kGameplayMonstrowalkFrames;*fw=*fh=128;return true;}
+    if(type==67){*sx=kGameplayDukewalkX;*sy=kGameplayDukewalkY;*frames=kGameplayDukewalkFrames;*fw=*fh=128;return true;}
+    if(type==260){*sx=kGameplayHauntidleX;*sy=kGameplayHauntidleY;*frames=kGameplayHauntidleFrames;*fw=*fh=128;return true;}
     return false;
+}
+static void DrawTrapdoor(){
+    if(!gGameplayAtlas||gNormalRuntime.world.currentList<0||gNormalRuntime.world.currentList>=kNativeWorldRoomLimit)return;
+    NativeWorldResident& live=gNormalRuntime.world.resident[gNormalRuntime.world.currentList];
+    if(!live.room||!live.view||!live.view->background.ready)return;
+    NativeRoomState* room=live.room;if(!room||room->trapdoorState==0)return;
+    const NativeRoomBackground& background=live.view->background;
+    const NativeRoomSpace& space=room->space;
+    const float roomW=background.right-background.left,worldW=space.right-space.left;
+    const float roomH=background.bottom-background.top,worldH=space.bottom-space.top;
+    if(worldW<=0||worldH<=0)return;
+    int frame=room->trapdoorState==1?room->trapdoorTimer/5:5;if(frame<0)frame=0;if(frame>5)frame=5;
+    const float px=background.left+(room->trapdoorX-space.left)*roomW/worldW;
+    const float py=background.top+(room->trapdoorY-space.top)*roomH/worldH;
+    TexRect(gGameplayAtlas,px-32,py-32,64,64,(float)(kGameplayTrapdooropenX+frame*64),(float)kGameplayTrapdooropenY,64,64,
+        (float)kGameplayAtlasWidth,(float)kGameplayAtlasHeight);
 }
 static void DrawEnemies(){
     if(!gGameplayAtlas||gNormalRuntime.world.currentList<0||gNormalRuntime.world.currentList>=kNativeWorldRoomLimit)return;
@@ -323,12 +353,12 @@ static void DrawEnemies(){
     for(int i=0;i<live.enemies.count;++i){
         NativeEnemy* enemy=live.enemies.entries[i];
         if(!enemy||!enemy->ready||enemy->dead)continue;
-        int sx=0,sy=0,frames=0;
-        if(!EnemyWalkRect(enemy->type,enemy->body.variant,&sx,&sy,&frames)||frames<=0)continue;
+        int sx=0,sy=0,frames=0,fw=64,fh=64;
+        if(!EnemyWalkRect(enemy->type,enemy->body.variant,&sx,&sy,&frames,&fw,&fh)||frames<=0)continue;
         const int frame=((int)(enemy->body.time/6))%frames;
         const float px=background.left+(enemy->body.position.x-space.left)*roomW/worldW;
         const float py=background.top+(enemy->body.position.y-space.top)*roomH/worldH;
-        TexRect(gGameplayAtlas,px-32,py-48,64,64,(float)(sx+frame*64),(float)sy,64,64,
+        TexRect(gGameplayAtlas,px-fw*0.5f,py-fh*0.75f,(float)fw,(float)fh,(float)(sx+frame*fw),(float)sy,(float)fw,(float)fh,
             (float)kGameplayAtlasWidth,(float)kGameplayAtlasHeight);
     }
 }
@@ -401,7 +431,7 @@ static void DrawHud(){
         (float)kGameplayAtlasWidth,(float)kGameplayAtlasHeight);
 }
 static void Gameplay(){
-    DrawBackground();DrawDoors();DrawRocks();DrawPickups();DrawEnemies();DrawPlayer();DrawProjectiles();DrawHud();
+    DrawBackground();DrawDoors();DrawRocks();DrawPickups();DrawTrapdoor();DrawEnemies();DrawPlayer();DrawProjectiles();DrawHud();
     gDevice->SetTexture(0,gAtlas);
 }
 static void Anim(int id,int frame,float x,float y,float scale=kFrontendScale,float angle=0,const int* itemIcon=0,DWORD tint=0xffffffff,bool flipX=false,const float* extraAdd=0) {
@@ -526,7 +556,7 @@ VOID __cdecl main() {
                 if(!runSeed)runSeed=GetTickCount();if(!runSeed)runSeed=1;
                 PortSessionStart start=PortGameSession(gMenuRandom,gUi).StartNormalCharacter(runSeed,gNormalRuntime);Log("PORT normal setup result=%d seed=%u player=%d",start.result,runSeed,start.player);}
             if(gUi.characterPending){const NormalRunFlow& run=gNormalRuntime.run;
-                NativeSceneFiles files={"game:\\game\\file_index.bin","game:\\game\\",run.context.stageType+1,run.context.nativeMode,0};
+                NativeSceneFiles files={"game:\\game\\file_index.bin","game:\\game\\",run.context.stage,run.context.nativeMode,0};
                 NormalRunResult result=PortGameSession(gMenuRandom,gUi).AdvanceNormalSetup(gNormalRuntime,files,&frameActions);
                 if(!gUi.characterPending){Log("PORT normal setup boundary phase=%d generation=%d result=%d resident=%d source=%d prerequisite=%08x",gNormalRuntime.phase,run.phase,result,gNormalRuntime.world.residentCount,gNormalRuntime.entryIssue.source,gNormalRuntime.missingNativePrerequisite);
                     if(gNormalRuntime.missingNativePrerequisite==0x6c8140&&gNormalRuntime.world.currentList>=0){NativeWorldResident& live=gNormalRuntime.world.resident[gNormalRuntime.world.currentList];
@@ -546,8 +576,13 @@ VOID __cdecl main() {
                             door.targetType,target?target->definition:-1,door.state);}
                     readyLogged=true;}
                 const NormalRunFlow& run=gNormalRuntime.run;
-                NativeSceneFiles files={"game:\\game\\file_index.bin","game:\\game\\",run.context.stageType+1,run.context.nativeMode,0};
+                NativeSceneFiles files={"game:\\game\\file_index.bin","game:\\game\\",run.context.stage,run.context.nativeMode,0};
                 NormalRunResult tick=PortGameSession(gMenuRandom,gUi).TickNormal(gNormalRuntime,files,&frameActions);
+                if(gNormalRuntime.descendRequested&&gNormalRuntime.phase==PNR_READY){
+                    if(PortGameSession(gMenuRandom,gUi).DescendNormal(gNormalRuntime,files,&frameActions))
+                        Log("PORT descend stage=%d room=%d",gNormalRuntime.run.context.stage,gNormalRuntime.world.currentList);
+                    else Log("PORT descend failed stage=%d",gNormalRuntime.run.context.stage);
+                }
                 static unsigned int lastTickPrerequisite=0;
                 if(tick==NFR_PENDING&&gNormalRuntime.missingNativePrerequisite&&gNormalRuntime.missingNativePrerequisite!=lastTickPrerequisite){
                     Log("PORT normal tick pending prerequisite=%08x",gNormalRuntime.missingNativePrerequisite);lastTickPrerequisite=gNormalRuntime.missingNativePrerequisite;
@@ -570,7 +605,7 @@ VOID __cdecl main() {
                 static bool dyingLogged=false;
                 if(!dyingLogged){Log("PORT normal death phase=%d hits=%u hp=%d/%d",gNormalRuntime.phase,gNormalRuntime.playerHits,gNormalRuntime.playerState.redHearts,gNormalRuntime.playerState.maxRedHearts);dyingLogged=true;}
                 const NormalRunFlow& run=gNormalRuntime.run;
-                NativeSceneFiles files={"game:\\game\\file_index.bin","game:\\game\\",run.context.stageType+1,run.context.nativeMode,0};
+                NativeSceneFiles files={"game:\\game\\file_index.bin","game:\\game\\",run.context.stage,run.context.nativeMode,0};
                 PortGameSession(gMenuRandom,gUi).TickNormal(gNormalRuntime,files,&frameActions);
             }
             if(action!=UI_NONE&&action!=UI_SELECT_SLOT&&action!=UI_DELETE_SLOT&&action!=UI_START_CHARACTER)Log("PORT pending native frontend destination=%d",action);

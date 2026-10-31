@@ -46,7 +46,11 @@ bool NativeProjectileSystem::Step(PortNormalRuntime& runtime,NativeActionSource*
             if(dx*dx+dy*dy<=radius*radius){
                 enemy->Damage(p.damage);hitEnemy=true;
                 if(enemy->dead){++enemyKills;++runtime.enemyKills;
-                    if(NativeBossEntityType(enemy->type,enemy->body.variant))runtime.bossDefeated=true;}
+                    if(NativeBossEntityType(enemy->type,enemy->body.variant)){
+                        runtime.bossDefeated=true;
+                        if(room->trapdoorState==0){room->trapdoorState=1;room->trapdoorTimer=0;
+                            room->trapdoorX=enemy->body.position.x;room->trapdoorY=enemy->body.position.y;}
+                    }}
                 break;
             }
         }

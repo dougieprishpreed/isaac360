@@ -23,9 +23,23 @@ const NativeEntityBodyProperties kEnemyBodies[]={
     {226,1,0,12,0.14f,1.0f,13.0f,1.0f,1.0f,1.0f,14.0f,16.0f,5.0f,"gfx/226.001_Rotty.anm2"},
     {284,0,0,12,0.14f,1.0f,13.0f,1.0f,1.0f,1.0f,5.0f,10.0f,0.0f,"gfx/284.000_Cyclopia.anm2"},
     {217,0,0,12,0.12f,1.0f,9.0f,1.0f,1.0f,1.0f,6.0f,3.0f,1.0f,"gfx/216.000_Dip.anm2"},
+    {217,1,0,12,0.12f,1.0f,9.0f,1.0f,1.0f,1.0f,6.0f,3.0f,1.0f,"gfx/216.001_Corn.anm2"},
+    {217,2,0,12,0.12f,1.0f,9.0f,1.0f,1.0f,1.0f,6.0f,3.0f,1.0f,"gfx/216.002_BrownieCorn.anm2"},
+    {217,3,0,12,0.12f,1.0f,9.0f,1.0f,1.0f,1.0f,6.0f,6.0f,1.0f,"gfx/216.003_Big Corn.anm2"},
     {256,0,0,4,0.11f,1.0f,17.0f,1.0f,1.0f,1.0f,3.0f,5.0f,0.0f,"gfx/256.000_DartFly.anm2"},
     {261,0,0,12,0.28f,1.0f,20.0f,1.0f,1.0f,1.0f,75.0f,300.0f,0.0f,"gfx/261.000_Dingle.anm2"},
-    {261,1,0,12,0.28f,1.0f,20.0f,1.0f,1.0f,1.0f,75.0f,375.0f,0.0f,"gfx/261.001_Dangle.anm2"}
+    {261,1,0,12,0.28f,1.0f,20.0f,1.0f,1.0f,1.0f,75.0f,375.0f,0.0f,"gfx/261.001_Dangle.anm2"},
+    {19,0,0,8,0.25f,1.0f,20.0f,1.0f,1.0f,1.0f,50.0f,22.0f,0.0f,"gfx/019.000_Larry Jr..anm2"},
+    {20,0,0,12,0.56f,1.0f,40.0f,1.0f,1.0f,1.0f,50.0f,250.0f,0.0f,"gfx/020.000_Monstro.anm2"},
+    {67,0,0,12,0.34f,1.0f,35.0f,1.0f,1.0f,1.0f,30.0f,110.0f,0.0f,"gfx/067.000_The Duke of Flies.anm2"},
+    {260,0,0,12,0.28f,1.0f,26.0f,1.0f,1.0f,2.0f,50.0f,200.0f,0.0f,"gfx/260.000_Haunt.anm2"},
+    {18,0,0,4,0.11f,1.0f,17.0f,1.0f,1.0f,1.0f,3.0f,5.0f,0.0f,"gfx/018.000_Attack Fly.anm2"},
+    {79,0,0,12,0.16f,1.0f,13.0f,1.0f,1.0f,1.0f,20.0f,140.0f,0.0f,"gfx/079.000_Gemini.anm2"},
+    {237,1,0,12,0.22f,1.0f,13.0f,1.0f,1.0f,1.0f,14.0f,60.0f,0.0f,"gfx/237.000_Gurgling.anm2"},
+    {237,2,0,12,0.22f,1.0f,13.0f,1.0f,1.0f,1.0f,14.0f,50.0f,0.0f,"gfx/237.002_Turdling.anm2"},
+    {237,0,0,12,0.22f,1.0f,13.0f,1.0f,1.0f,1.0f,14.0f,24.0f,0.0f,"gfx/237.000_Gurgling.anm2"},
+    {239,0,0,12,0.22f,1.0f,13.0f,1.0f,1.0f,1.0f,14.0f,10.0f,0.0f,"gfx/239.000_Grub.anm2"},
+    {908,0,0,12,0.30f,1.0f,20.0f,1.0f,1.0f,1.0f,20.0f,234.0f,0.0f,"gfx/908.000_baby plum.anm2"}
 };
 }
 const NativeEntityBodyProperties* NativePreparedEnemyBody(int type,int variant){
@@ -34,8 +48,17 @@ const NativeEntityBodyProperties* NativePreparedEnemyBody(int type,int variant){
     return 0;
 }
 bool NativeBossEntityType(int type,int variant){
-    //Dingle/Dangle are the first fully prepared floor boss family.
-    return type==261&&(variant==0||variant==1);
+    //Prepared floor-boss families. Variant coverage expands with each
+    //prepared body record.
+    if(type==261)return variant==0||variant==1;
+    if(type==19)return variant==0;
+    if(type==20)return variant==0;
+    if(type==67)return variant==0;
+    if(type==260)return variant==0;
+    if(type==79)return variant==0;
+    if(type==237)return variant==1||variant==2;
+    if(type==908)return variant==0;
+    return false;
 }
 const NativeEntityBodyProperties* NativePreparedPlayerBody(int variant){
     for(unsigned int i=0;i<sizeof(kNativePlayerBodies)/sizeof(kNativePlayerBodies[0]);++i)

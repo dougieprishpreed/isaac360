@@ -4,10 +4,11 @@ $projectRoot=(Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 Set-Location -LiteralPath $projectRoot
 $blocking=Get-Process -Name 'xenia*','MSBuild','cl','normal_flow_check','gameplay_smoke' -ErrorAction SilentlyContinue | Where-Object {
     #This maintained port only builds with VS2010/XDK. A known VS2022
-    #compiler belongs to another project; do not stop the user's unrelated
-    #work or mistake it for a second port worker. Unknown paths still block.
-    if($_.ProcessName -ne 'cl'){$true}
-    else {$compilerPath=$_.Path;!$compilerPath -or $compilerPath -notmatch '\\Microsoft Visual Studio\\2022\\'}
+    #compiler and the dotnet SDK's MSBuild belong to other projects; do not
+    #stop the user's unrelated work or mistake them for port workers.
+    if($_.ProcessName -eq 'cl'){$compilerPath=$_.Path;!$compilerPath -or $compilerPath -notmatch '\\Microsoft Visual Studio\\2022\\'}
+    elseif($_.ProcessName -eq 'MSBuild'){$buildPath=$_.Path;!$buildPath -or $buildPath -notmatch '\\dotnet\\'}
+    else {$true}
 }
 if($blocking){throw 'Stop the other port build/test/emulator worker first.'}
 $worker=[Diagnostics.Process]::GetCurrentProcess();$oldAffinity=$worker.ProcessorAffinity;$mask=$oldAffinity.ToInt64()

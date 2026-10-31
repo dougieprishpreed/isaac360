@@ -145,6 +145,14 @@ bool NativeRoomUpdate::TickSimulationTail(PortNormalRuntime& runtime,NativeActio
         }
     }
     if(!runtime.enemyShots.Step(runtime)){*next=0x61f6d0;return false;}
+    //Boss trapdoor: the opening animation lasts five ticks per original
+    //frame, then the hole is usable. Contact requests the maintained
+    //next-floor descent from the adapter/session owner.
+    if(room->trapdoorState==1){if(++room->trapdoorTimer>=30)room->trapdoorState=2;}
+    if(room->trapdoorState==2&&!runtime.playerDead){
+        float dx=runtime.playerBody.position.x-room->trapdoorX,dy=runtime.playerBody.position.y-room->trapdoorY;
+        if(dx*dx+dy*dy<=24.0f*24.0f)runtime.descendRequested=true;
+    }
     //Ordinary pickup contact. Hearts heal red health first then soul health;
     //coins/keys/bombs increment the native resource counters. Other type5
     //variants remain explicit identity owners until their services exist.

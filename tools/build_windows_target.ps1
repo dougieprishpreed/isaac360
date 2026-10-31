@@ -3,7 +3,9 @@ $ErrorActionPreference='Stop'
 $projectRoot=(Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 Set-Location -LiteralPath $projectRoot
 $blocking=Get-Process -Name 'xenia*','MSBuild','cl','normal_flow_check','gameplay_smoke' -ErrorAction SilentlyContinue | Where-Object {
-    if($_.ProcessName -ne 'cl'){$true}else{$compilerPath=$_.Path;!$compilerPath -or $compilerPath -notmatch '\\Microsoft Visual Studio\\2022\\'}
+    if($_.ProcessName -eq 'cl'){$compilerPath=$_.Path;!$compilerPath -or $compilerPath -notmatch '\\Microsoft Visual Studio\\2022\\'}
+    elseif($_.ProcessName -eq 'MSBuild'){$buildPath=$_.Path;!$buildPath -or $buildPath -notmatch '\\dotnet\\'}
+    else {$true}
 }
 if($blocking){throw 'Stop the other port build/test worker first.'}
 $worker=[Diagnostics.Process]::GetCurrentProcess();$old=$worker.ProcessorAffinity;$mask=$old.ToInt64()

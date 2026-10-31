@@ -58,7 +58,7 @@ struct PortNormalRuntime {
     unsigned int completeWholeGameplayTicks;
     unsigned int enemyKills,doorsOpened,roomTransitions;
     unsigned int playerHits,playerDeathTicks,doorsUnlocked,gameOverCount,pickupsCollected;int playerInvulnerable;
-    bool playerDead,bossDefeated;
+    bool playerDead,bossDefeated,descendRequested;
     int doorTransitionGrace;
     unsigned int tickFrame;
     //736d70's reached post-755870 presentation/effect state. The trail count
@@ -83,6 +83,10 @@ struct PortGameSession {
     //Game-over restart: rebuild the owned normal session and advance the new
     //run to its ready boundary. It does not replay the dead player's rng.
     PortSessionStart RestartNormal(unsigned int seed,PortNormalRuntime&,const NativeSceneFiles&,NativeActionSource* actions);
+    //Trapdoor descent: generate the next stage from the persisted run seeds,
+    //start its first room and place the surviving player. Player health,
+    //resources and items persist; only floor-local transient state resets.
+    bool DescendNormal(PortNormalRuntime&,NativeSceneFiles&,NativeActionSource* actions=0);
     NormalRunResult AdvanceNormalSetup(PortNormalRuntime&,const NativeSceneFiles&,NativeActionSource* actions=0);
     NormalRunResult TickNormal(PortNormalRuntime&,const NativeSceneFiles&,NativeActionSource* actions);
     NativeWorldResult PrepareNormalWorld(const NormalRunFlow&,NativeWorld&,const NativeSceneFiles&,NativeWorldIssue* issue=0);

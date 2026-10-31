@@ -17,48 +17,62 @@ ENEMY_SIZE=64
 ENEMY_ANCHOR=(32,48)
 
 IMAGES=[
-    ('backdrop1','gfx/backdrop/01_basement.png',(0,0)),
-    ('backdrop2','gfx/backdrop/02_cellar.png',(0,468)),
-    ('player','gfx/characters/costumes/character_001_isaac.png',(0,1024)),
-    ('hearts','gfx/ui/ui_hearts.png',(1544,512)),
-    ('tears','gfx/tears.png',(1544,600)),
-    ('bodies01','gfx/monsters/classic/monster_000_bodies01.png',(520,900)),
-    ('frowninggaper','gfx/monsters/classic/monster_024_frowninggaper.png',(1040,900)),
-    ('flysheet','gfx/monsters/classic/monster_010_fly.png',(520,1160)),
-    ('pootersheet','gfx/monsters/classic/monster_001_pooter.png',(780,1160)),
-    ('rocksbasement','gfx/grid/rocks_basement.png',(920,1160)),
-    ('doornormal','gfx/grid/door_01_normaldoor.png',(1060,1160)),
-    ('fattysheet','gfx/monsters/rebirth/monster_207_fatty.png',(520,1420)),
-    ('poopsheet','gfx/grid/grid_poop_1.png',(1200,1160)),
-    ('fireplacesheet','gfx/grid/grid_fireplace.png',(1200,1200)),
-    ('pickupheart','gfx/items/pick ups/pickup_001_heart.png',(1544,1000)),
-    ('pickupcoin','gfx/items/pick ups/pickup_002_coin.png',(1544,1200)),
-    ('pickupkey','gfx/items/pick ups/pickup_003_key.png',(1820,1000)),
-    ('pickupbomb','gfx/items/pick ups/pickup_016_bomb.png',(1820,1080)),
+    ('backdrop1','gfx/backdrop/01_basement.png'),
+    ('backdrop2','gfx/backdrop/02_cellar.png'),
+    ('player','gfx/characters/costumes/character_001_isaac.png'),
+    ('hearts','gfx/ui/ui_hearts.png'),
+    ('tears','gfx/tears.png'),
+    ('bodies01','gfx/monsters/classic/monster_000_bodies01.png'),
+    ('frowninggaper','gfx/monsters/classic/monster_024_frowninggaper.png'),
+    ('flysheet','gfx/monsters/classic/monster_010_fly.png'),
+    ('pootersheet','gfx/monsters/classic/monster_001_pooter.png'),
+    ('rocksbasement','gfx/grid/rocks_basement.png'),
+    ('doornormal','gfx/grid/door_01_normaldoor.png'),
+    ('fattysheet','gfx/monsters/rebirth/monster_207_fatty.png'),
+    ('poopsheet','gfx/grid/grid_poop_1.png'),
+    ('fireplacesheet','gfx/grid/grid_fireplace.png'),
+    ('pickupheart','gfx/items/pick ups/pickup_001_heart.png'),
+    ('pickupcoin','gfx/items/pick ups/pickup_002_coin.png'),
+    ('pickupkey','gfx/items/pick ups/pickup_003_key.png'),
+    ('pickupbomb','gfx/items/pick ups/pickup_016_bomb.png'),
 ]
 ACTORS=[
-    ('gaper','gfx/010.000_Frowning Gaper.anm2','WalkHori','Head',(1544,800)),
-    ('fly','gfx/013.000_Fly.anm2','Fly',None,(1616,800)),
-    ('pooter','gfx/014.000_Pooter.anm2','Fly','Attack',(1688,800)),
-    ('fatty','gfx/207.000_Fatty.anm2','WalkHori','AttackVert',(1760,800)),
-    ('skinny','gfx/226.000_Skinny.anm2','WalkHori','Head',(1544,864)),
-    ('rotty','gfx/226.001_Rotty.anm2','WalkHori','Head',(1616,864)),
-    ('cyclopia','gfx/284.000_Cyclopia.anm2','WalkHori','Head',(1688,864)),
+    ('gaper','gfx/010.000_Frowning Gaper.anm2','WalkHori','Head'),
+    ('fly','gfx/013.000_Fly.anm2','Fly',None),
+    ('pooter','gfx/014.000_Pooter.anm2','Fly','Attack'),
+    ('fatty','gfx/207.000_Fatty.anm2','WalkHori','AttackVert'),
+    ('skinny','gfx/226.000_Skinny.anm2','WalkHori','Head'),
+    ('rotty','gfx/226.001_Rotty.anm2','WalkHori','Head'),
+    ('cyclopia','gfx/284.000_Cyclopia.anm2','WalkHori','Head'),
 ]
-#Walk cycles packed as horizontal64x64 strips in the free band below the
-#existing entries. Frame counts come from the original ANM2 layer tracks.
+#Walk cycles packed as horizontal strips. The fifth value is the square cell
+#size; large bosses use128. Frame counts come from the original ANM2 tracks.
 ANIMATED=[
-    ('gaperwalk','gfx/010.000_Frowning Gaper.anm2','WalkHori','Head',(0,1760)),
-    ('flywalk','gfx/013.000_Fly.anm2','Fly',None,(512,1760)),
-    ('pooterwalk','gfx/014.000_Pooter.anm2','Fly','Attack',(1024,1760)),
-    ('fattywalk','gfx/207.000_Fatty.anm2','WalkHori','AttackVert',(1536,1760)),
-    ('skinnywalk','gfx/226.000_Skinny.anm2','WalkHori','Head',(0,1824)),
-    ('rottywalk','gfx/226.001_Rotty.anm2','WalkHori','Head',(512,1824)),
-    ('cyclopiawalk','gfx/284.000_Cyclopia.anm2','WalkHori','Head',(1024,1824)),
-    ('dinglewalk','gfx/261.000_Dingle.anm2','Slide',None,(1536,1824)),
-    ('dartflywalk','gfx/256.000_DartFly.anm2','Fly',None,(0,1888)),
-    ('dipwalk','gfx/216.000_Dip.anm2','Move',None,(512,1888)),
-    ('danglewalk','gfx/261.001_Dangle.anm2','Slide',None,(1024,1888)),
+    ('gaperwalk','gfx/010.000_Frowning Gaper.anm2','WalkHori','Head',64),
+    ('flywalk','gfx/013.000_Fly.anm2','Fly',None,64),
+    ('pooterwalk','gfx/014.000_Pooter.anm2','Fly','Attack',64),
+    ('fattywalk','gfx/207.000_Fatty.anm2','WalkHori','AttackVert',64),
+    ('skinnywalk','gfx/226.000_Skinny.anm2','WalkHori','Head',64),
+    ('rottywalk','gfx/226.001_Rotty.anm2','WalkHori','Head',64),
+    ('cyclopiawalk','gfx/284.000_Cyclopia.anm2','WalkHori','Head',64),
+    ('dinglewalk','gfx/261.000_Dingle.anm2','Slide',None,64),
+    ('dartflywalk','gfx/256.000_DartFly.anm2','Fly',None,64),
+    ('dipwalk','gfx/216.000_Dip.anm2','Move',None,64),
+    ('cornwalk','gfx/216.001_Corn.anm2','Move',None,64),
+    ('browniecornwalk','gfx/216.002_BrownieCorn.anm2','Move',None,64),
+    ('bigcornwalk','gfx/216.003_Big Corn.anm2','Move',None,64),
+    ('danglewalk','gfx/261.001_Dangle.anm2','Slide',None,64),
+    ('larrywalk','gfx/019.000_Larry Jr..anm2','WalkHeadHori',None,64),
+    ('monstrowalk','gfx/020.000_Monstro.anm2','Walk',None,128),
+    ('dukewalk','gfx/067.000_The Duke of Flies.anm2','Walk',None,128),
+    ('hauntidle','gfx/260.000_Haunt.anm2','IdleSkin',None,128),
+    ('trapdooropen','gfx/grid/Door_11_TrapDoor.anm2','Open Animation',None,64),
+    ('attackflywalk','gfx/018.000_Attack Fly.anm2','Fly',None,64),
+    ('geminiwalk','gfx/079.000_Gemini.anm2','WalkHori',None,64),
+    ('gurglingwalk','gfx/237.000_Gurgling.anm2','WalkLeft',None,64),
+    ('turdlingwalk','gfx/237.002_Turdling.anm2','WalkLeft',None,64),
+    ('grubwalk','gfx/239.000_Grub.anm2','WalkBodyHori',None,64),
+    ('plumidle','gfx/908.000_baby plum.anm2','Idle',None,64),
 ]
 ANIMATION_FRAME_LIMIT=8
 _sheet_cache={}
@@ -71,11 +85,11 @@ def tint(image,values):
     r=r.point(lambda v,rr=rr:v*rr//255);g=g.point(lambda v,gg=gg:v*gg//255)
     b=b.point(lambda v,bb=bb:v*bb//255);a=a.point(lambda v,aa=aa:v*aa//255)
     return Image.merge('RGBA',(r,g,b,a))
-def compose_actor(resources,request,primary,overlay,frame_index=0):
+def compose_actor(resources,request,primary,overlay,frame_index=0,size=ENEMY_SIZE):
     raw,entry=resources.read(request);root=ET.fromstring(raw)
     sheets={s.get('Id'):s.get('Path') for s in root.find('Content/Spritesheets')}
     animations={a.get('Name'):a for a in root.find('Animations')}
-    canvas=Image.new('RGBA',(ENEMY_SIZE,ENEMY_SIZE),(0,0,0,0))
+    anchor=(size//2,int(size*0.75));canvas=Image.new('RGBA',(size,size),(0,0,0,0))
     used=[]
     for layer in root.find('Content/Layers'):
         frame=None
@@ -90,20 +104,20 @@ def compose_actor(resources,request,primary,overlay,frame_index=0):
         if frame is None:continue
         sheet=sheets.get(layer.get('SpritesheetId'))
         if not sheet:raise ValueError('Missing sheet for '+request)
-        request_path='gfx/'+sheet.replace('\\','/')
+        request_path=request.replace('\\','/').rsplit('/',1)[0]+'/'+sheet.replace('\\','/')
         key=request_path.lower()
         if key not in _sheet_cache:_sheet_cache[key]=load_image(resources,request_path)[0]
         image=_sheet_cache[key]
-        crop=(int(frame.get('XCrop',0)),int(frame.get('YCrop',0)),
-              int(frame.get('Width',0)),int(frame.get('Height',0)))
+        crop=(int(float(frame.get('XCrop',0))),int(float(frame.get('YCrop',0))),
+              int(float(frame.get('Width',0))),int(float(frame.get('Height',0))))
         piece=image.crop((crop[0],crop[1],crop[0]+crop[2],crop[1]+crop[3]))
-        tint_values=tuple(int(frame.get(k,'255')) for k in ('RedTint','GreenTint','BlueTint','AlphaTint'))
+        tint_values=tuple(int(float(frame.get(k,'255'))) for k in ('RedTint','GreenTint','BlueTint','AlphaTint'))
         piece=tint(piece,tint_values)
-        scale_x=int(frame.get('XScale','100'))/100.0;scale_y=int(frame.get('YScale','100'))/100.0
+        scale_x=float(frame.get('XScale','100'))/100.0;scale_y=float(frame.get('YScale','100'))/100.0
         if abs(scale_x-1.0)>1e-6 or abs(scale_y-1.0)>1e-6:
             piece=piece.resize((max(1,int(piece.width*scale_x)),max(1,int(piece.height*scale_y))),Image.BILINEAR)
-        dest=(ENEMY_ANCHOR[0]+int(frame.get('XPosition','0'))-int(frame.get('XPivot','0')),
-              ENEMY_ANCHOR[1]+int(frame.get('YPosition','0'))-int(frame.get('YPivot','0')))
+        dest=(anchor[0]+int(float(frame.get('XPosition','0')))-int(float(frame.get('XPivot','0'))),
+              anchor[1]+int(float(frame.get('YPosition','0')))-int(float(frame.get('YPivot','0'))))
         canvas.alpha_composite(piece,dest)
     return canvas,raw,entry,used
 def animation_length(root,names):
@@ -119,31 +133,45 @@ def animation_length(root,names):
 
 def prepare():
     resources=OriginalResources(ROOT/'runtime/game')
-    atlas=Image.new('RGBA',(WIDTH,HEIGHT),(0,0,0,0))
-    manifest={'format':'gameplay-atlas-v2','width':WIDTH,'height':HEIGHT,'entries':[]}
-    for name,request,at in IMAGES:
+    items=[]
+    #Load every prepared image first, then shelf-pack by descending height.
+    for name,request in IMAGES:
         image,raw,entry=load_image(resources,request)
-        atlas.alpha_composite(image,at)
-        manifest['entries'].append(dict(name=name,request=request,package=entry['package'],
-            sha256=hashlib.sha256(raw).hexdigest(),x=at[0],y=at[1],width=image.width,height=image.height))
-    for name,request,primary,overlay,at in ACTORS:
+        items.append(dict(name=name,image=image,request=request,raw=raw,entry=entry,animated=False))
+    for name,request,primary,overlay in ACTORS:
         image,raw,entry,used=compose_actor(resources,request,primary,overlay)
-        atlas.alpha_composite(image,at)
-        manifest['entries'].append(dict(name=name,request=request,package=entry['package'],
-            sha256=hashlib.sha256(raw).hexdigest(),x=at[0],y=at[1],width=image.width,height=image.height,
+        items.append(dict(name=name,image=image,request=request,raw=raw,entry=entry,animated=True,
             composed='%s%s'%(primary,'/'+overlay if overlay else ''),tracks=used))
-    for name,request,primary,overlay,at in ANIMATED:
+    for name,request,primary,overlay,size in ANIMATED:
         raw,entry=resources.read(request);root=ET.fromstring(raw)
         frames=min(ANIMATION_FRAME_LIMIT,max(1,animation_length(root,(primary,overlay))))
-        strip=Image.new('RGBA',(ENEMY_SIZE*frames,ENEMY_SIZE),(0,0,0,0));used=[]
+        strip=Image.new('RGBA',(size*frames,size),(0,0,0,0));used=[]
         for index in range(frames):
-            image,_,_,used=compose_actor(resources,request,primary,overlay,index)
-            strip.alpha_composite(image,(index*ENEMY_SIZE,0))
-        atlas.alpha_composite(strip,at)
-        manifest['entries'].append(dict(name=name,request=request,package=entry['package'],
-            sha256=hashlib.sha256(raw).hexdigest(),x=at[0],y=at[1],width=strip.width,height=strip.height,
-            composed='%s%s'%(primary,'/'+overlay if overlay else ''),frames=frames,frameWidth=ENEMY_SIZE,
-            frameHeight=ENEMY_SIZE,tracks=used))
+            image,_,_,used=compose_actor(resources,request,primary,overlay,index,size)
+            strip.alpha_composite(image,(index*size,0))
+        items.append(dict(name=name,image=strip,request=request,raw=raw,entry=entry,animated=True,
+            composed='%s%s'%(primary,'/'+overlay if overlay else ''),tracks=used,frames=frames,
+            frameWidth=size,frameHeight=size))
+    items.sort(key=lambda it:(-it['image'].height,-it['image'].width,it['name']))
+    atlas=Image.new('RGBA',(WIDTH,HEIGHT),(0,0,0,0))
+    manifest={'format':'gameplay-atlas-v2','width':WIDTH,'height':HEIGHT,'entries':[]}
+    x=y=shelf=0
+    for it in items:
+        image=it['image'];w,h=image.width,image.height
+        if w>WIDTH or h>HEIGHT:raise ValueError('Atlas entry too large: '+it['name'])
+        if x+w>WIDTH:
+            y+=shelf;x=0;shelf=0
+        if y+h>HEIGHT:raise ValueError('Gameplay atlas overflow at '+it['name'])
+        atlas.alpha_composite(image,(x,y))
+        record=dict(name=it['name'],request=it['request'],package=it['entry']['package'],
+            sha256=hashlib.sha256(it['raw']).hexdigest(),x=x,y=y,width=w,height=h)
+        if it['animated']:
+            record.update(composed=it['composed'],tracks=it['tracks'])
+        if it.get('frames'):
+            record.update(frames=it['frames'],frameWidth=it['frameWidth'],frameHeight=it['frameHeight'])
+        manifest['entries'].append(record)
+        x+=w
+        if h>shelf:shelf=h
     output=ROOT/'runtime/port/gameplay'
     output.mkdir(parents=True,exist_ok=True)
     with (output/'atlas.bin').open('wb') as f:
@@ -158,7 +186,8 @@ def prepare():
         lines.append('static const int kGameplay%sX=%d,kGameplay%sY=%d,kGameplay%sW=%d,kGameplay%sH=%d;'%(
             name,entry['x'],name,entry['y'],name,entry['width'],name,entry['height']))
         if entry.get('frames'):
-            lines.append('static const int kGameplay%sFrames=%d;'%(name,entry['frames']))
+            lines.append('static const int kGameplay%sFrames=%d,kGameplay%sFrameW=%d,kGameplay%sFrameH=%d;'%(
+                name,entry['frames'],name,entry['frameWidth'],name,entry['frameHeight']))
     (ROOT/'build/generated/gameplay_atlas_data.h').write_text('\n'.join(lines)+'\n')
     print('Prepared gameplay atlas: %d entries, %dx%d'%(len(manifest['entries']),WIDTH,HEIGHT))
 

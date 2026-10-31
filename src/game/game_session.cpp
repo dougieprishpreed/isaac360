@@ -1,7 +1,7 @@
 #include "game_session.h"
 #include "native_room_update.h"
 #include <string.h>
-PortNormalRuntime::PortNormalRuntime():initialSaveFileWritten(false),phase(PNR_IDLE),missingNativePrerequisite(0),completePlayerInitializations(0),completePlayerTicks(0),completeWholeGameplayTicks(0),enemyKills(0),doorsOpened(0),roomTransitions(0),playerHits(0),playerDeathTicks(0),doorsUnlocked(0),gameOverCount(0),pickupsCollected(0),playerInvulnerable(0),playerDead(false),bossDefeated(false),doorTransitionGrace(0),tickFrame(0),playerTailTrailSegments(0),playerTailRenderCallbacks(0),playerTailTicks(0),roomEntryPrefixPrepared(false) {
+PortNormalRuntime::PortNormalRuntime():initialSaveFileWritten(false),phase(PNR_IDLE),missingNativePrerequisite(0),completePlayerInitializations(0),completePlayerTicks(0),completeWholeGameplayTicks(0),enemyKills(0),doorsOpened(0),roomTransitions(0),playerHits(0),playerDeathTicks(0),doorsUnlocked(0),gameOverCount(0),pickupsCollected(0),playerInvulnerable(0),playerDead(false),bossDefeated(false),descendRequested(false),doorTransitionGrace(0),tickFrame(0),playerTailTrailSegments(0),playerTailRenderCallbacks(0),playerTailTicks(0),roomEntryPrefixPrepared(false) {
     memset(&run,0,sizeof(run));memset(&entryIssue,0,sizeof(entryIssue));
     gameRandom.Default();
 }
@@ -50,7 +50,7 @@ PortSessionStart PortGameSession::StartNormalCharacter(unsigned int seed,PortNor
         //Virtual Init, the reached resource/callback services and manager
         //registration have returned before006b4b5e generation begins.
         runtime.missingNativePrerequisite=0;runtime.phase=PNR_GENERATING;runtime.tickFrame=0;
-        runtime.completePlayerInitializations=runtime.completePlayerTicks=0;runtime.completeWholeGameplayTicks=0;runtime.enemyKills=runtime.doorsOpened=runtime.roomTransitions=0;runtime.playerHits=runtime.playerDeathTicks=runtime.doorsUnlocked=runtime.gameOverCount=runtime.pickupsCollected=0;runtime.playerInvulnerable=0;runtime.playerDead=false;runtime.bossDefeated=false;runtime.doorTransitionGrace=0;
+        runtime.completePlayerInitializations=runtime.completePlayerTicks=0;runtime.completeWholeGameplayTicks=0;runtime.enemyKills=runtime.doorsOpened=runtime.roomTransitions=0;runtime.playerHits=runtime.playerDeathTicks=runtime.doorsUnlocked=runtime.gameOverCount=runtime.pickupsCollected=0;runtime.playerInvulnerable=0;runtime.playerDead=false;runtime.bossDefeated=false;runtime.descendRequested=false;runtime.doorTransitionGrace=0;
         runtime.playerTailTrailSegments=0;runtime.playerTailRenderCallbacks=0;runtime.playerTailTicks=0;}
     if(start.result==NPS_WORLD_PENDING)runtime.roomEntryPrefixPrepared=false;
     delete next;
@@ -66,6 +66,52 @@ PortSessionStart PortGameSession::RestartNormal(unsigned int seed,PortNormalRunt
         if(r==NFR_BAD_REQUEST)break;
     }
     return start;
+}
+bool PortGameSession::DescendNormal(PortNormalRuntime& runtime,NativeSceneFiles& files,NativeActionSource* actions){
+    (void)actions;
+    if(runtime.phase!=PNR_READY||runtime.playerDead)return false;
+    const int nextStage=(int)runtime.run.context.stage+1;
+    //Basement and Cellar are the prepared graphics; later stages keep their
+    //explicit unsupported-context boundary instead of substituting art.
+    if(nextStage<2||nextStage>2)return false;
+    NativeFloorContext context=runtime.run.context;
+    context.stage=nextStage;context.stageType=0;context.effectiveCurses=0;
+    context.challenge=false;context.gameFlags=0;context.runCounter=0;
+    context.held599=false;context.reservationProfileGate=false;
+    //The run loop returns to its floor-context staging point for the next
+    //floor; generation consumes the persisted seeds and boss sequence. Build
+    //the candidate flow separately so a failed generation leaves the active
+    //run and world untouched.
+    NormalRunFlow next=runtime.run;
+    next.phase=NRF_NEED_FLOOR_CONTEXT;next.result=NFR_OK;
+    NormalRunResult result=next.SupplyFloorContext(context);
+    if(result!=NFR_OK){runtime.missingNativePrerequisite=0x6401U|((unsigned int)result<<8)|((unsigned int)next.lastCode<<16);return false;}
+    int guard=0;
+    while(next.phase!=NRF_NEED_ROOM_ENTRY&&guard++<100000){
+        result=next.Step();
+        if(next.phase==NRF_BLOCKED){runtime.missingNativePrerequisite=0x6402U|((unsigned int)next.lastCode<<16);return false;}
+    }
+    if(next.phase!=NRF_NEED_ROOM_ENTRY){runtime.missingNativePrerequisite=0x6403;return false;}
+    files.backdrop=nextStage;
+    runtime.world.Reset();runtime.roomEntryPrefixPrepared=false;memset(&runtime.entryIssue,0,sizeof(runtime.entryIssue));
+    NativeWorldResult wr=PrepareNormalWorld(next,runtime.world,files,&runtime.entryIssue);
+    if(wr!=NWR_OK){runtime.missingNativePrerequisite=0x6404;return false;}
+    runtime.run=next;
+    NativeWorldResident& live=runtime.world.resident[runtime.world.currentList];
+    if(!live.doors&&runtime.world.PrepareDoorActors(globalRandom,files.frame)!=NDR_OK){runtime.missingNativePrerequisite=0x6405;return false;}
+    if(!live.perimeterReady&&runtime.world.PreparePerimeter(globalRandom,files.frame)!=NWR_OK){runtime.missingNativePrerequisite=0x6406;return false;}
+    NativeRoomState* room=runtime.world.Current();if(!room){runtime.missingNativePrerequisite=0x6407;return false;}
+    runtime.playerBody.position.x=(room->space.left+room->space.right)*0.5f;
+    runtime.playerBody.position.y=(room->space.top+room->space.bottom)*0.5f;
+    runtime.playerBody.previousPosition=runtime.playerBody.position;
+    runtime.playerBody.velocity.x=runtime.playerBody.velocity.y=0;
+    runtime.playerBody.removed=false;
+    runtime.playerInvulnerable=0;runtime.doorTransitionGrace=0;
+    runtime.projectiles.Reset();runtime.enemyShots.Clear();
+    runtime.descendRequested=false;runtime.bossDefeated=false;
+    runtime.roomTransitions=0;runtime.missingNativePrerequisite=0;
+    runtime.phase=PNR_READY;
+    return true;
 }
 NormalRunResult PortGameSession::AdvanceNormalSetup(PortNormalRuntime& runtime,const NativeSceneFiles& files,NativeActionSource* actions) {
     if(runtime.phase==PNR_READY)return NFR_PENDING; //Initialized resident; ticks own subsequent frames.
@@ -187,7 +233,9 @@ NativeWorldResult PortGameSession::PrepareNormalWorld(const NormalRunFlow& flow,
         files.nativeMode!=flow.context.nativeMode)return NWR_BAD_REQUEST;
     //This caller currently enters only the confirmed first ordinary chapter.
     //Backdrop6's option and alternate-stage flags require their actual inputs.
-    if(flow.context.stage!=1||flow.context.stageType<0||flow.context.stageType>2||files.backdrop!=flow.context.stageType+1)return NWR_BAD_REQUEST;
+    //The first two standard floor graphics are prepared (basement, cellar).
+    //Later stages retain their explicit unsupported-context boundary.
+    if(flow.context.stage<1||flow.context.stage>2||flow.context.stageType<0||flow.context.stageType>2||files.backdrop!=flow.context.stage)return NWR_BAD_REQUEST;
     NativeRoomSetupContext setup={files.backdrop,flow.floor.plan.configStage,false,0};
     return world.Start(flow.layout,flow.currentGrid,flow.placement.dimension,files,issue,&setup);
 }

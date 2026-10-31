@@ -9,7 +9,7 @@ namespace {
 unsigned int RunMovementTicks(PortGameSession& session,PortNormalRuntime& runtime,float x,float y,unsigned int count){
     unsigned int done=0;
     for(unsigned int i=0;i<count;++i){
-        NativeSceneFiles files={"runtime/game/file_index.bin","runtime/game/",runtime.run.context.stageType+1,runtime.run.context.nativeMode,0};
+        NativeSceneFiles files={"runtime/game/file_index.bin","runtime/game/",runtime.run.context.stage,runtime.run.context.nativeMode,0};
         NativeActionFrame frame;frame.Clear(runtime.playerCreation.native153c,runtime.playerBody.entityToken,files.frame+i);
         frame.SupplyConnection(true);frame.SupplyDrop(false);
         for(int action=0;action<12;++action){frame.SupplyHeld(action,false);frame.SupplyPressed(action,false);}
@@ -25,7 +25,7 @@ unsigned int RunMovementTicks(PortGameSession& session,PortNormalRuntime& runtim
 unsigned int RunProjectileTicks(PortGameSession& session,PortNormalRuntime& runtime,int shootA,int shootB,unsigned int count){
     unsigned int done=0;
     for(unsigned int i=0;i<count;++i){
-        NativeSceneFiles files={"runtime/game/file_index.bin","runtime/game/",runtime.run.context.stageType+1,runtime.run.context.nativeMode,0};
+        NativeSceneFiles files={"runtime/game/file_index.bin","runtime/game/",runtime.run.context.stage,runtime.run.context.nativeMode,0};
         NativeActionFrame frame;frame.Clear(runtime.playerCreation.native153c,runtime.playerBody.entityToken,files.frame+i);
         frame.SupplyConnection(true);frame.SupplyDrop(false);
         for(int action=0;action<12;++action){frame.SupplyHeld(action,false);frame.SupplyPressed(action,false);}
@@ -41,7 +41,7 @@ unsigned int RunProjectileTicks(PortGameSession& session,PortNormalRuntime& runt
 unsigned int AdvanceToBoundary(PortGameSession& session,PortNormalRuntime& runtime){
     unsigned int steps=0;
     while(runtime.phase==PNR_GENERATING||runtime.phase==PNR_ROOM_COMPONENTS){
-        NativeSceneFiles files={"runtime/game/file_index.bin","runtime/game/",runtime.run.context.stageType+1,runtime.run.context.nativeMode,0};
+        NativeSceneFiles files={"runtime/game/file_index.bin","runtime/game/",runtime.run.context.stage,runtime.run.context.nativeMode,0};
         //An explicit connected virtual device with released buttons. This
         //supplies only external input; initialized gameplay state is owned
         //and produced by the shared New Run, not by the host adapter.
@@ -90,7 +90,7 @@ int RunDeathProbe(NativeMt& random,PortFrontend& ui){
     const NativePlacedRoom* target=0;
     for(int i=0;i<runtime->world.layout.count;++i)if(runtime->world.layout.rooms[i].definition==268500997){target=&runtime->world.layout.rooms[i];break;}
     if(!target)return 42;
-    NativeSceneFiles files={"runtime/game/file_index.bin","runtime/game/",runtime->run.context.stageType+1,runtime->run.context.nativeMode,0};
+    NativeSceneFiles files={"runtime/game/file_index.bin","runtime/game/",runtime->run.context.stage,runtime->run.context.nativeMode,0};
     NativeRoomSetupContext setup={files.backdrop,runtime->run.floor.plan.configStage,false,0};NativeWorldIssue issue;
     if(runtime->world.Enter(target->gridIndex,target->dimension,files,&issue,&setup)!=NWR_OK)return 43;
     NativeWorldResident& live=runtime->world.resident[runtime->world.currentList];
@@ -156,7 +156,7 @@ int RunEncounterProbe(NativeMt& random,PortFrontend& ui){
     const NativePlacedRoom* target=0;
     for(int i=0;i<runtime->world.layout.count;++i)if(runtime->world.layout.rooms[i].definition==268500997){target=&runtime->world.layout.rooms[i];break;}
     if(!target)return 23;
-    NativeSceneFiles files={"runtime/game/file_index.bin","runtime/game/",runtime->run.context.stageType+1,runtime->run.context.nativeMode,0};
+    NativeSceneFiles files={"runtime/game/file_index.bin","runtime/game/",runtime->run.context.stage,runtime->run.context.nativeMode,0};
     NativeRoomSetupContext setup={files.backdrop,runtime->run.floor.plan.configStage,false,0};NativeWorldIssue issue;
     if(runtime->world.Enter(target->gridIndex,target->dimension,files,&issue,&setup)!=NWR_OK)return 24;
     if(runtime->world.PrepareDoorActors(random,files.frame)!=NDR_OK)return 30;
@@ -185,6 +185,35 @@ int RunEncounterProbe(NativeMt& random,PortFrontend& ui){
         targetKills,runtime->enemyKills,live.enemies.count,room->clear?1:0,attached,openDoors,runtime->doorsOpened,runtime->projectiles.spawned);
     bool ok=spawned==targetKills&&runtime->enemyKills>=(unsigned int)targetKills&&live.enemies.count==0&&room->clear&&runtime->doorsOpened>0;
     delete runtime;return ok?0:29;
+}
+int RunDescendProbe(NativeMt& random,PortFrontend& ui){
+    PortNormalRuntime* runtime=new PortNormalRuntime;PortGameSession session(random,ui);
+    PortSessionStart start=session.StartNormalCharacter(1,*runtime);
+    if(start.result!=NPS_WORLD_PENDING){delete runtime;return 60;}
+    if(!AdvanceToBoundary(session,*runtime)||runtime->phase!=PNR_READY){delete runtime;return 61;}
+    int grid=-1,dimension=0;
+    for(int i=0;i<runtime->world.layout.count;++i){const NativePlacedRoom& p=runtime->world.layout.rooms[i];
+        const NativeRoomDef* d=NativeRoom(p.definition);if(d&&d->type==5){grid=p.gridIndex;dimension=p.dimension;break;}}
+    if(grid<0){delete runtime;return 62;}
+    NativeSceneFiles files={"runtime/game/file_index.bin","runtime/game/",runtime->run.context.stage,runtime->run.context.nativeMode,0};
+    NativeWorldIssue issue;
+    if(runtime->world.Enter(grid,dimension,files,&issue,0)!=NWR_OK){delete runtime;return 63;}
+    NativeRoomState* room=runtime->world.Current();if(!room){delete runtime;return 64;}
+    room->trapdoorState=2;room->trapdoorTimer=30;
+    room->trapdoorX=(room->space.left+room->space.right)*0.5f;
+    room->trapdoorY=(room->space.top+room->space.bottom)*0.5f;
+    runtime->playerBody.position.x=room->trapdoorX;runtime->playerBody.position.y=room->trapdoorY;
+    runtime->playerBody.previousPosition=runtime->playerBody.position;
+    if(!RunProjectileTicks(session,*runtime,-1,-1,1)){delete runtime;return 65;}
+    if(!runtime->descendRequested){delete runtime;return 66;}
+    const int red=runtime->playerState.redHearts,soul=runtime->playerState.soulHearts;
+    if(!session.DescendNormal(*runtime,files)){delete runtime;return 67;}
+    if(runtime->run.context.stage!=2||!runtime->world.Current()||runtime->phase!=PNR_READY){delete runtime;return 68;}
+    if(runtime->playerState.redHearts!=red||runtime->playerState.soulHearts!=soul){delete runtime;return 69;}
+    printf("DESCEND from=1 to=%d room=%d definition=%d hp=%d/%d soul=%d\n",runtime->run.context.stage,
+        runtime->world.currentList,runtime->world.CurrentDescriptor()?runtime->world.CurrentDescriptor()->definition:-1,
+        runtime->playerState.redHearts,runtime->playerState.maxRedHearts,runtime->playerState.soulHearts);
+    delete runtime;return 0;
 }
 int main(int argc,char** argv){
     unsigned int seed=argc>1?(unsigned int)strtoul(argv[1],0,0):1;
@@ -249,7 +278,7 @@ int main(int argc,char** argv){
             (unsigned int)live.persistent->entities.size(),(unsigned int)c.state.descriptors.size());
         const NativeRoomState* room=runtime->world.Current();NativeMt before=random;
         unsigned int callbackCount=runtime->playerManager.roomInitCallbacks;
-        NativeSceneFiles files={"runtime/game/file_index.bin","runtime/game/",runtime->run.context.stageType+1,runtime->run.context.nativeMode,0};
+        NativeSceneFiles files={"runtime/game/file_index.bin","runtime/game/",runtime->run.context.stage,runtime->run.context.nativeMode,0};
         if(session.AdvanceNormalSetup(*runtime,files)!=NFR_PENDING||room!=runtime->world.Current()||
            memcmp(&before,&random,sizeof(random))||callbackCount!=runtime->playerManager.roomInitCallbacks||!runtime->checkpoints[0].valid){delete runtime;return 12;}
         printf("RESUME residentRetained=1 RNGretained=1 roomCallbacks=%u next=%08x\n",callbackCount,runtime->missingNativePrerequisite);
@@ -361,6 +390,7 @@ int main(int argc,char** argv){
     if(!failed){int encounter=RunEncounterProbe(random,ui);if(encounter){printf("ENCOUNTER_RESULT failed=%d\n",encounter);failed=true;}}
     if(!failed){int transition=RunTransitionProbe(random,ui);if(transition){printf("TRANSITION_RESULT failed=%d\n",transition);failed=true;}}
     if(!failed){int locks=RunLockProbe(random,ui);if(locks){printf("LOCK_RESULT failed=%d\n",locks);failed=true;}}
+    if(!failed){int descend=RunDescendProbe(random,ui);if(descend){printf("DESCEND_RESULT failed=%d\n",descend);failed=true;}}
     if(!failed){int death=RunDeathProbe(random,ui);if(death){printf("DEATH_RESULT failed=%d\n",death);failed=true;}}
     delete runtime;return failed?5:0;
 }

@@ -18,6 +18,7 @@ def main():
     encounter=re.search(r'^ENCOUNTER seed=(\d+) room=(\d+) enemies=(\d+) kills=(\d+) remaining=(\d+) clear=(\d+) doors=(\d+) open=(\d+) doorsOpened=(\d+) projectiles=(\d+)',log,re.M)
     transition=re.search(r'^TRANSITION seed=(\d+) from=(-?\d+) slot=(\d+) to=(-?\d+) definition=(-?\d+) room=(\d+) enemies=(\d+) transitions=(\d+)',log,re.M)
     death=re.search(r'^DEATH seed=(\d+) room=(\d+) hits=(\d+) hp=(-?\d+)/(-?\d+) soul=(-?\d+) dead=(\d+) ticks=(\d+) enemies=(\d+)',log,re.M)
+    descend=re.search(r'^DESCEND from=(\d+) to=(\d+) room=(-?\d+) definition=(-?\d+) hp=(-?\d+)/(-?\d+) soul=(-?\d+)',log,re.M)
     deathflow=re.search(r'^DEATH_FLOW dyingTicks=(\d+) gameOver=(\d+) restartResult=(\d+) restartPhase=(\d+) restartHP=(-?\d+)/(-?\d+)',log,re.M)
     lock=re.search(r'^LOCK treasureSlot=(\d+) noKeyClosed=(\d+) keyOpened=(\d+) keysLeft=(-?\d+) doorsUnlocked=(\d+) bossOpenWithoutDefeat=(\d+) bossDefeated=(\d+)',log,re.M)
     paths=set()
@@ -61,6 +62,10 @@ def main():
             'lock_keys_left':int(lock.group(4)) if lock else -1,
             'boss_door_open_without_defeat':bool(int(lock.group(6))) if lock else False,
             'boss_defeated_flag':bool(int(lock.group(7))) if lock else False,
+            'descend_from':int(descend.group(1)) if descend else 0,
+            'descend_to':int(descend.group(2)) if descend else 0,
+            'descend_room':int(descend.group(3)) if descend else -1,
+            'descend_definition':int(descend.group(4)) if descend else -1,
             'dying_ticks':int(deathflow.group(1)) if deathflow else 0,
             'game_over':bool(int(deathflow.group(2))) if deathflow else False,
             'restart_ready':bool(deathflow and int(deathflow.group(4))==5) if deathflow else False,

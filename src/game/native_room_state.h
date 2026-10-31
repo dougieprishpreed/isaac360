@@ -22,5 +22,9 @@ struct NativeRoomState {
     bool encounter; //A resolved actor set owns clear state.
     bool particlesEnabled; //7971dc, Room1798+8;8d8470's initial early return.
     unsigned int native7628[8]; //797840.. constructors; optional door effect references.
+    //Boss-room trapdoor. The original spawns the grid actor on boss death;
+    //state1 is the opening animation, state2 is usable.
+    int trapdoorState,trapdoorTimer;
+    float trapdoorX,trapdoorY;
 };
 #endif

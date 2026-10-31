@@ -37,7 +37,7 @@ void NativeEnemy::Update(const NativeRoomState& room,const NativeEntityBody& pla
     const int phase=(int)body.time;
     const unsigned int salt=seed&63U;
     float vx=0.0f,vy=0.0f;
-    if(type==13){
+    if(type==13||type==18){
         //Fly: fast erratic drift with a per-entity phase offset.
         const float wobble=sinf(phase*0.45f+(float)salt*0.19f);
         const float sway=cosf(phase*0.37f+(float)salt*0.11f);
@@ -59,7 +59,7 @@ void NativeEnemy::Update(const NativeRoomState& room,const NativeEntityBody& pla
         if(cycle==0&&distance>0.0f){vx=dx*2.4f;vy=dy*2.4f;}
         else if(cycle<18){vx=body.velocity.x*0.92f;vy=body.velocity.y*0.92f;}
         else{vx=dx*0.30f;vy=dy*0.30f;}
-    }else if(type==226){
+    }else if(type==226||type==237){
         //Skinny/Rotty: charge windows separated by short recovery.
         const int cycle=phase%70;const float speed=body.variant==1?1.55f:1.10f;
         if(cycle>=16&&cycle<46){vx=dx*speed;vy=dy*speed;}
@@ -73,6 +73,36 @@ void NativeEnemy::Update(const NativeRoomState& room,const NativeEntityBody& pla
     }else if(type==256){
         //Dart Fly: committed fast dart toward the player.
         vx=dx*1.05f;vy=dy*1.05f;
+    }else if(type==20){
+        //Monstro: slow walk with a committed jump and a five-tear spread.
+        const int cycle=phase%180;
+        if(cycle>=70&&cycle<92){vx=dx*2.2f;vy=dy*2.2f;}
+        else{vx=dx*0.38f;vy=dy*0.38f;}
+        if(shots&&distance<540.0f&&cycle==130){
+            const float px=-dy,py=dx;
+            for(int k=-2;k<=2;++k){
+                NativePoint origin={body.position.x+dx*28.0f+px*(float)k*12.0f,body.position.y+dy*28.0f+py*(float)k*12.0f};
+                shots->Fire(origin,dx*3.0f+px*(float)k*0.55f,dy*3.0f+py*(float)k*0.55f,1.0f,8.0f,240,body.entityToken);
+            }
+        }
+    }else if(type==19){
+        //Larry Jr.: committed charges separated by recovery.
+        const int cycle=phase%90;
+        if(cycle<42){vx=dx*0.95f;vy=dy*0.95f;}
+        else{vx=dx*0.25f;vy=dy*0.25f;}
+        if(shots&&distance<520.0f&&cycle==62)
+            shots->Fire(body.position,dx*3.2f,dy*3.2f,1.0f,8.0f,240,body.entityToken);
+    }else if(type==67||type==260||type==79||type==908){
+        //Duke/Haunt: floating boss with a periodic spread volley.
+        const int cycle=phase%150;
+        vx=dx*0.32f;vy=dy*0.32f;
+        if(shots&&distance<540.0f&&cycle==90){
+            const float px=-dy,py=dx;
+            for(int k=-1;k<=2;++k){
+                NativePoint origin={body.position.x+dx*24.0f+px*(float)k*12.0f,body.position.y+dy*24.0f+py*(float)k*12.0f};
+                shots->Fire(origin,dx*2.9f+px*(float)k*0.7f,dy*2.9f+py*(float)k*0.7f,1.0f,8.0f,240,body.entityToken);
+            }
+        }
     }else if(type==261){
         //Dingle/Dangle: slide toward the player, then spit a three-tear
         //spread before recovering.

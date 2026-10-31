@@ -160,7 +160,8 @@ static void DrawPickups(){
         float px=bg.left+(p->position.x-space.left)*rw/ww,py=bg.top+(p->position.y-space.top)*rh/wh;
         TexRect(px-8,py-8,16,16,(float)sx,(float)sy,32,32);}
 }
-static bool EnemyWalkRect(int type,int variant,int* sx,int* sy,int* frames){
+static bool EnemyWalkRect(int type,int variant,int* sx,int* sy,int* frames,int* fw,int* fh){
+    *fw=*fh=64;
     if(type==10){*sx=kGameplayGaperwalkX;*sy=kGameplayGaperwalkY;*frames=kGameplayGaperwalkFrames;return true;}
     if(type==13){*sx=kGameplayFlywalkX;*sy=kGameplayFlywalkY;*frames=kGameplayFlywalkFrames;return true;}
     if(type==14){*sx=kGameplayPooterwalkX;*sy=kGameplayPooterwalkY;*frames=kGameplayPooterwalkFrames;return true;}
@@ -168,11 +169,34 @@ static bool EnemyWalkRect(int type,int variant,int* sx,int* sy,int* frames){
     if(type==226&&variant==0){*sx=kGameplaySkinnywalkX;*sy=kGameplaySkinnywalkY;*frames=kGameplaySkinnywalkFrames;return true;}
     if(type==226&&variant==1){*sx=kGameplayRottywalkX;*sy=kGameplayRottywalkY;*frames=kGameplayRottywalkFrames;return true;}
     if(type==284){*sx=kGameplayCyclopiawalkX;*sy=kGameplayCyclopiawalkY;*frames=kGameplayCyclopiawalkFrames;return true;}
+    if(type==217&&variant==1){*sx=kGameplayCornwalkX;*sy=kGameplayCornwalkY;*frames=kGameplayCornwalkFrames;return true;}
+    if(type==217&&variant==2){*sx=kGameplayBrowniecornwalkX;*sy=kGameplayBrowniecornwalkY;*frames=kGameplayBrowniecornwalkFrames;return true;}
+    if(type==217&&variant==3){*sx=kGameplayBigcornwalkX;*sy=kGameplayBigcornwalkY;*frames=kGameplayBigcornwalkFrames;return true;}
     if(type==217){*sx=kGameplayDipwalkX;*sy=kGameplayDipwalkY;*frames=kGameplayDipwalkFrames;return true;}
     if(type==256){*sx=kGameplayDartflywalkX;*sy=kGameplayDartflywalkY;*frames=kGameplayDartflywalkFrames;return true;}
     if(type==261&&variant==1){*sx=kGameplayDanglewalkX;*sy=kGameplayDanglewalkY;*frames=kGameplayDanglewalkFrames;return true;}
     if(type==261){*sx=kGameplayDinglewalkX;*sy=kGameplayDinglewalkY;*frames=kGameplayDinglewalkFrames;return true;}
+    if(type==18){*sx=kGameplayAttackflywalkX;*sy=kGameplayAttackflywalkY;*frames=kGameplayAttackflywalkFrames;return true;}
+    if(type==79){*sx=kGameplayGeminiwalkX;*sy=kGameplayGeminiwalkY;*frames=kGameplayGeminiwalkFrames;return true;}
+    if(type==237&&variant==2){*sx=kGameplayTurdlingwalkX;*sy=kGameplayTurdlingwalkY;*frames=kGameplayTurdlingwalkFrames;return true;}
+    if(type==237){*sx=kGameplayGurglingwalkX;*sy=kGameplayGurglingwalkY;*frames=kGameplayGurglingwalkFrames;return true;}
+    if(type==239){*sx=kGameplayGrubwalkX;*sy=kGameplayGrubwalkY;*frames=kGameplayGrubwalkFrames;return true;}
+    if(type==908){*sx=kGameplayPlumidleX;*sy=kGameplayPlumidleY;*frames=kGameplayPlumidleFrames;return true;}
+    if(type==19){*sx=kGameplayLarrywalkX;*sy=kGameplayLarrywalkY;*frames=kGameplayLarrywalkFrames;return true;}
+    if(type==20){*sx=kGameplayMonstrowalkX;*sy=kGameplayMonstrowalkY;*frames=kGameplayMonstrowalkFrames;*fw=*fh=128;return true;}
+    if(type==67){*sx=kGameplayDukewalkX;*sy=kGameplayDukewalkY;*frames=kGameplayDukewalkFrames;*fw=*fh=128;return true;}
+    if(type==260){*sx=kGameplayHauntidleX;*sy=kGameplayHauntidleY;*frames=kGameplayHauntidleFrames;*fw=*fh=128;return true;}
     return false;
+}
+static void DrawTrapdoor(){
+    NativeWorldResident& live=gRuntime->world.resident[gRuntime->world.currentList];
+    if(!live.room||!live.view||!live.view->background.ready)return;
+    NativeRoomState* room=live.room;if(!room||room->trapdoorState==0)return;
+    const NativeRoomBackground& bg=live.view->background;const NativeRoomSpace& space=room->space;
+    float rw=bg.right-bg.left,rh=bg.bottom-bg.top,ww=space.right-space.left,wh=space.bottom-space.top;if(ww<=0||wh<=0)return;
+    int frame=room->trapdoorState==1?room->trapdoorTimer/5:5;if(frame<0)frame=0;if(frame>5)frame=5;
+    float px=bg.left+(room->trapdoorX-space.left)*rw/ww,py=bg.top+(room->trapdoorY-space.top)*rh/wh;
+    TexRect(px-32,py-32,64,64,(float)(kGameplayTrapdooropenX+frame*64),(float)kGameplayTrapdooropenY,64,64);
 }
 static void DrawEnemies(){
     NativeWorldResident& live=gRuntime->world.resident[gRuntime->world.currentList];
@@ -180,10 +204,10 @@ static void DrawEnemies(){
     const NativeRoomBackground& bg=live.view->background;const NativeRoomSpace& space=live.room->space;
     float rw=bg.right-bg.left,rh=bg.bottom-bg.top,ww=space.right-space.left,wh=space.bottom-space.top;if(ww<=0||wh<=0)return;
     for(int i=0;i<live.enemies.count;++i){NativeEnemy* e=live.enemies.entries[i];if(!e||!e->ready||e->dead)continue;
-        int sx=0,sy=0,frames=0;if(!EnemyWalkRect(e->type,e->body.variant,&sx,&sy,&frames)||frames<=0)continue;
+        int sx=0,sy=0,frames=0,fw=64,fh=64;if(!EnemyWalkRect(e->type,e->body.variant,&sx,&sy,&frames,&fw,&fh)||frames<=0)continue;
         int frame=((int)(e->body.time/6))%frames;
         float px=bg.left+(e->body.position.x-space.left)*rw/ww,py=bg.top+(e->body.position.y-space.top)*rh/wh;
-        TexRect(px-32,py-48,64,64,(float)(sx+frame*64),(float)sy,64,64);}
+        TexRect(px-fw*0.5f,py-fh*0.75f,(float)fw,(float)fh,(float)(sx+frame*fw),(float)sy,(float)fw,(float)fh);}
 }
 static void DrawPlayer(){
     if(gRuntime->playerBody.removed||!gRuntime->playerSprites.bodyReady)return;
@@ -229,7 +253,7 @@ static void Render(){
     gDevice->SetTextureStageState(0,D3DTSS_COLOROP,D3DTOP_SELECTARG1);gDevice->SetTextureStageState(0,D3DTSS_COLORARG1,D3DTA_TEXTURE);
     gDevice->SetTextureStageState(0,D3DTSS_ALPHAOP,D3DTOP_SELECTARG1);gDevice->SetTextureStageState(0,D3DTSS_ALPHAARG1,D3DTA_TEXTURE);
     gDevice->SetTexture(0,gAtlas);
-    DrawBackground();DrawDoors();DrawRocks();DrawPickups();DrawEnemies();DrawPlayer();DrawProjectiles();DrawHud();
+    DrawBackground();DrawDoors();DrawRocks();DrawPickups();DrawTrapdoor();DrawEnemies();DrawPlayer();DrawProjectiles();DrawHud();
     gDevice->EndScene();
 }
 static bool SaveBMP(const char* path){
@@ -300,7 +324,7 @@ int main(int argc,char** argv){
     if(!gUi.music.StartCharacter(gUi.characterPage)){Log("WIN character music stinger failed");return 5;}
     PortSessionStart start=session.StartNormalCharacter(seed?seed:1,runtime);
     Log("WIN start result=%d seed=%u player=%d",start.result,seed,start.player);if(start.result!=NPS_WORLD_PENDING)return 3;
-    NativeSceneFiles files={"runtime/game/file_index.bin","runtime/game/",runtime.run.context.stageType+1,runtime.run.context.nativeMode,0};
+    NativeSceneFiles files={"runtime/game/file_index.bin","runtime/game/",runtime.run.context.stage,runtime.run.context.nativeMode,0};
     int setup=0;bool held[12];NativeActionFrame af;NativeFrameActions fa(af);
     for(int i=0;i<12;++i)held[i]=false;
     //One setup call runs the complete reached boundary; continue only while
@@ -340,9 +364,14 @@ int main(int argc,char** argv){
                 Log("WIN teleport frame=%d pickup=%d variant=%d",frame,index,tr.pickups.entries[index]->variant);}}
         if(runtime.phase==PNR_READY||runtime.phase==PNR_DYING||runtime.phase==PNR_GAME_OVER)session.TickNormal(runtime,files,&fa);
         if(invulnerable&&runtime.phase==PNR_READY)runtime.playerInvulnerable=30;
+        if(runtime.descendRequested&&runtime.phase==PNR_READY){
+            if(session.DescendNormal(runtime,files,&fa))
+                Log("WIN descend stage=%d room=%d def=%d",runtime.run.context.stage,runtime.world.currentList,runtime.world.CurrentDescriptor()?runtime.world.CurrentDescriptor()->definition:-1);
+            else{runtime.descendRequested=false;Log("WIN descend failed stage=%d prerequisite=%08x",runtime.run.context.stage,runtime.missingNativePrerequisite);}
+        }
         if(frame%30==0){NativeWorldResident& live=runtime.world.resident[runtime.world.currentList];const NativePlacedRoom* d=runtime.world.CurrentDescriptor();
-            Log("WIN tick=%d phase=%d room=%d list=%d act=%u pos=(%.2f,%.2f) hp=%d/%d soul=%d enemies=%d shots=%u fired=%u wall=%u hits=%u pickups=%d collected=%u coins=%d keys=%d bombs=%d transitions=%u boss=%d",
-                frame,runtime.phase,d?d->definition:-1,runtime.world.currentList,live.activations,runtime.playerBody.position.x,runtime.playerBody.position.y,runtime.playerState.redHearts,runtime.playerState.maxRedHearts,runtime.playerState.soulHearts,
+            Log("WIN tick=%d phase=%d stage=%d room=%d list=%d act=%u pos=(%.2f,%.2f) hp=%d/%d soul=%d enemies=%d shots=%u fired=%u wall=%u hits=%u pickups=%d collected=%u coins=%d keys=%d bombs=%d transitions=%u boss=%d",
+                frame,runtime.phase,runtime.run.context.stage,d?d->definition:-1,runtime.world.currentList,live.activations,runtime.playerBody.position.x,runtime.playerBody.position.y,runtime.playerState.redHearts,runtime.playerState.maxRedHearts,runtime.playerState.soulHearts,
                 live.enemies.count,(unsigned int)runtime.enemyShots.active.size(),(unsigned int)runtime.enemyShots.spawned,(unsigned int)runtime.enemyShots.wallHits,runtime.playerHits,live.pickups.count,runtime.pickupsCollected,runtime.playerState.coins,runtime.playerState.keys,runtime.playerState.bombs,runtime.roomTransitions,runtime.bossDefeated?1:0);}
         Render();
         if(frame==shotFrame){bool ok=windowShot?SaveWindowBMP(shotFile):SaveBMP(shotFile);Log("WIN screenshot frame=%d file=%s ok=%d",frame,shotFile,ok?1:0);}
