@@ -15,6 +15,8 @@ struct NativeSaveSummary {
     std::vector<int> collectibles;
     std::vector<unsigned char> trinkets;
     int activeItems[4],heldTrinkets[2],heldCard,heldPill;
+    bool hasExtras;
+    float positionX,positionY,fireDelay,damage,moveSpeed,luck;
     NativeItemPoolSnapshot pools;
     NativeSaveSummary();
 };

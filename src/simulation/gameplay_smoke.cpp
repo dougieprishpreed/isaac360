@@ -401,6 +401,10 @@ int RunBombProbe(NativeMt& random,PortFrontend& ui){
     first->playerState.maxRedHearts=10;first->playerState.redHearts=5;first->playerState.soulHearts=2;
     first->playerState.keys=42;first->playerState.bombs=3;first->playerState.coins=17;
     first->playerState.heldCard=9;first->playerState.heldPill=7;
+    first->playerBody.position.x=333.0f;first->playerBody.position.y=444.0f;
+    first->playerBody.previousPosition=first->playerBody.position;
+    first->playerState.stats.fireDelay=8.5f;first->playerState.stats.damage=7.25f;
+    first->playerState.stats.baseDamage=7.25f;first->playerState.stats.moveSpeed=1.4f;first->playerState.stats.luck=3.0f;
     const int poolItem=first->itemPools.SelectCollectible(0);
     const unsigned int poolCounter=first->itemPools.pools[0].counter;
     if(poolItem<=0){delete first;return 152;}
@@ -418,11 +422,17 @@ int RunBombProbe(NativeMt& random,PortFrontend& ui){
     bool owned=false;
     if(!second->playerState.HasCollectible(1,&owned)||!owned||!second->playerState.HasCollectible(25,&owned)||!owned){delete second;return 156;}
     if(second->itemPools.pools[0].counter!=poolCounter){delete second;return 157;}
-    if(!RunProjectileTicks(resumed,*second,-1,-1,2)){delete second;return 158;}
-    printf("NATIVE_CURRENT stage=%d hp=%d/%d soul=%d keys=%d bombs=%d coins=%d active=%d card=%d pill=%d poolCounter=%u\n",
+    if(fabs(second->playerBody.position.x-333.0f)>0.01f||fabs(second->playerBody.position.y-444.0f)>0.01f||
+       fabs(second->playerState.stats.fireDelay-8.5f)>0.01f||fabs(second->playerState.stats.damage-7.25f)>0.01f||
+       fabs(second->playerState.stats.moveSpeed-1.4f)>0.01f||fabs(second->playerState.stats.luck-3.0f)>0.01f){delete second;return 159;}
+    printf("NATIVE_CURRENT stage=%d hp=%d/%d soul=%d keys=%d bombs=%d coins=%d active=%d card=%d pill=%d poolCounter=%u pos=(%.1f,%.1f) fd=%.2f dmg=%.2f spd=%.2f luck=%.1f\n",
         second->run.context.stage,second->playerState.redHearts,second->playerState.maxRedHearts,second->playerState.soulHearts,
         second->playerState.keys,second->playerState.bombs,second->playerState.coins,second->playerState.activeItems[0],
-        second->playerState.heldCard,second->playerState.heldPill,second->itemPools.pools[0].counter);
+        second->playerState.heldCard,second->playerState.heldPill,second->itemPools.pools[0].counter,
+        second->playerBody.position.x,second->playerBody.position.y,second->playerState.stats.fireDelay,
+        second->playerState.stats.damage,second->playerState.stats.moveSpeed,second->playerState.stats.luck);
+    if(!RunProjectileTicks(resumed,*second,-1,-1,2)){delete second;return 158;}
+    printf("NATIVE_CURRENT_TICK pos=(%.1f,%.1f) ticks=2\n",second->playerBody.position.x,second->playerBody.position.y);
     delete second;return 0;
 }int RunStatProbe(NativeMt& random,PortFrontend& ui){
     PortNormalRuntime* runtime=new PortNormalRuntime;PortGameSession session(random,ui);

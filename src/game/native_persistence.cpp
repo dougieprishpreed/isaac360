@@ -32,6 +32,7 @@ bool NativeUnwrittenPlayerByte(unsigned int at){
 std::vector<unsigned int> Words(const std::vector<int>& v){
     std::vector<unsigned int> output;for(unsigned int i=0;i<v.size();++i)output.push_back((unsigned int)v[i]);return output;
 }
+unsigned int FloatBits(float value){unsigned int n;memcpy(&n,&value,4);return n;}
 }
 bool NativePlayerPersistent::CaptureInitial(const NativePlayerState& state,const NativePlayerStartup& startup,const NativePlayerCreation& creation,const NativeEntityBody& body,unsigned int* next){
     return CaptureState(state,startup,creation,body,false,false,next);
@@ -144,6 +145,16 @@ bool NativePlayerPersistent::CaptureState(const NativePlayerState& state,const N
         fields.Put(0x548,(unsigned int)(state.heldPill>=0?state.heldPill:0xffff),2);
         fields.Put(0x538,state.heldCard>0?1:0,1);
         fields.Put(0x539,state.heldPill>=0?1:0,1);
+        //The 1dc..1ff slots are obsolete in the native player schema. The port
+        //reuses seven of them for exact current position/stats; the marker
+        //keeps older native files (no marker) on the native placement path.
+        fields.Put(0x1dc,0x424F4933U);
+        fields.Put(0x1f4,FloatBits(state.stats.luck));
+        fields.Put(0x1e0,FloatBits(body.position.x));
+        fields.Put(0x1e4,FloatBits(body.position.y));
+        fields.Put(0x1e8,FloatBits(state.stats.fireDelay));
+        fields.Put(0x1ec,FloatBits(state.stats.damage));
+        fields.Put(0x1f0,FloatBits(state.stats.moveSpeed));
     }
     captured=true;if(next)*next=0;return true;
 }

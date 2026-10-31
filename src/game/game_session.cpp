@@ -480,7 +480,15 @@ bool PortGameSession::ContinueNativeSave(const char* path,PortNormalRuntime& run
         if(runtime.world.Enter(summary.currentGrid,summary.dimension,files,&issue,&setup)!=NWR_OK)return false;
     }
     NativeRoomState* room=runtime.world.Current();
-    if(room){
+    if(summary.hasExtras){
+        runtime.playerBody.position.x=summary.positionX;runtime.playerBody.position.y=summary.positionY;
+        runtime.playerBody.previousPosition=runtime.playerBody.position;
+        runtime.playerBody.velocity.x=runtime.playerBody.velocity.y=0;runtime.playerBody.removed=false;
+        runtime.playerState.stats.fireDelay=summary.fireDelay;
+        runtime.playerState.stats.damage=summary.damage;runtime.playerState.stats.baseDamage=summary.damage;
+        runtime.playerState.stats.moveSpeed=summary.moveSpeed;runtime.playerState.stats.luck=summary.luck;
+        runtime.playerState.stats.dirty=0xffffU;
+    }else if(room){
         NativePoint at={(room->space.left+room->space.right)*0.5f,(room->space.top+room->space.bottom)*0.5f};
         runtime.playerBody.position=at;runtime.playerBody.previousPosition=at;
         runtime.playerBody.velocity.x=runtime.playerBody.velocity.y=0;runtime.playerBody.removed=false;
@@ -502,7 +510,6 @@ bool PortGameSession::SaveNativeContinue(const char* path,PortNormalRuntime& run
     size_t wrote=writer.data.empty()?0:fwrite(&writer.data[0],1,writer.data.size(),file);
     bool closed=fclose(file)==0;
     return wrote==writer.data.size()&&closed;
-    return true;
 }
 
 namespace {
