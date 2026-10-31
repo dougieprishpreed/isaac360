@@ -5,6 +5,38 @@
 #include "native_player_collision.h"
 #include "native_audio.h"
 #include <algorithm>
+#include <math.h>
+#include <string.h>
+namespace {
+//Maintained walk-cycle selection. The native sprites are already bound to the
+//original Walk/Head clips; this drives the body state from the evaluated
+//velocity and leaves the actual frame advance to EntityBody::UpdateUnmodified.
+void StepPlayerWalkAnimation(PortNormalRuntime& runtime){
+    NativePlayerSprites& sprites=runtime.playerSprites;
+    if(!sprites.bodyReady)return;
+    NativeSprite& sprite=sprites.sprites[0];
+    if(!sprite.asset)return;
+    const float vx=runtime.playerBody.velocity.x,vy=runtime.playerBody.velocity.y;
+    const float speed=(float)sqrt((double)(vx*vx+vy*vy));
+    const char* walk;
+    const char* head;
+    if(fabsf(vx)>fabsf(vy)){
+        walk=vx>0.0f?"WalkRight":"WalkLeft";
+        head=vx>0.0f?"HeadRight":"HeadLeft";
+    }else{
+        walk=vy>0.0f?"WalkDown":"WalkUp";
+        head=vy>0.0f?"HeadDown":"HeadUp";
+    }
+    if(speed>0.03f){
+        if(!sprite.mainState.clip||strcmp(sprite.mainState.clip->name,walk)!=0||!sprite.mainState.playing)
+            sprite.Play(walk,true);
+        if(!sprite.overlayState.clip||strcmp(sprite.overlayState.clip->name,head)!=0)
+            sprite.SetFrame(head,0,true);
+    }else{
+        if(sprite.mainState.playing)sprite.mainState.playing=false;
+    }
+}
+}
 NativeRoomUpdate::NativeRoomUpdate(unsigned int frame):enteredFrame(frame),address(0x7ae620),gridCursor(0),active(false),native7114(false),native764c(false),native7648(0),native717c(-1),native7120(0),actorStage(0),actorCursor(0){
     //7a02e2,7a03a6,7a0e07.7a03ac..3cd clears the pending-grid tree.
 }
@@ -241,12 +273,14 @@ bool NativeRoomUpdate::TickSimulationTail(PortNormalRuntime& runtime,NativeActio
         NativeDoorActor& door=live.doors->actors[slot];
         if(door.state!=1)continue;
         if(door.targetType==1||door.targetType==5){door.previousState=door.state;door.state=2;++runtime.doorsOpened;openedThisTick[slot]=true;
+            if(live.doorVisuals&&live.doorVisuals[slot].ready)live.doorVisuals[slot].Open(door);
             if(runtime.audio)runtime.audio->PlaySfx("resources/sfx/v2/metaldooropen.wav",0.5f);continue;}
         float px,py;if(!room->geometry.Position(door.grid,&px,&py))continue;px+=20.0f;py+=20.0f;
         float dx=runtime.playerBody.position.x-px,dy=runtime.playerBody.position.y-py;
         bool near=dx*dx+dy*dy<=60.0f*60.0f;
         if(door.targetType==10&&near&&runtime.playerState.keys>0){
             --runtime.playerState.keys;door.previousState=door.state;door.state=2;++runtime.doorsUnlocked;openedThisTick[slot]=true;
+            if(live.doorVisuals&&live.doorVisuals[slot].ready)live.doorVisuals[slot].Open(door);
             if(runtime.audio)runtime.audio->PlaySfx("resources/sfx/feedback/door heavy open.wav",0.55f);
         }
     }
@@ -294,6 +328,7 @@ bool NativeRoomUpdate::TickActors(PortNormalRuntime& runtime,NativeActionSource*
     runtime.playerCreation.constructorFields.AssignScalar(0x35c,0);
     runtime.playerUpdate.Begin();
     if(!runtime.playerUpdate.Resume(runtime,actions,next))return false;
+    StepPlayerWalkAnimation(runtime);
     body.flagsLow|=0x4000U;
     const bool collided=NativePlayerGridCollision(runtime,false,next);
     body.flagsLow&=~0x4000U;

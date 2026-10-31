@@ -2,6 +2,7 @@
 #include "../game/native_room_effects.h"
 #include "../game/native_room_view.h"
 #include "../game/native_audio.h"
+#include "../game/native_door_resources.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -469,6 +470,39 @@ int RunBombProbe(NativeMt& random,PortFrontend& ui){
     printf("AUDIO device=%d sfx=%u loaded=%u music=%u music_frames=%u sfx_frames=%u rms=%.4f gameplay_sfx=%u\n",
         audio.deviceReady?1:0,audio.sfxStarted,audio.sfxLoaded,audio.musicStarted,
         audio.musicFrames,audio.sfxFrames,audio.LastRms(),audio.sfxStarted-before);
+    delete runtime;return 0;
+}int RunDoorVisualProbe(NativeMt& random,PortFrontend& ui){
+    ui.characterPage=0;ui.characterChoice=1;ui.characterMode=0;
+    PortNormalRuntime* runtime=new PortNormalRuntime;PortGameSession session(random,ui);
+    PortSessionStart start=session.StartNormalCharacter(1,*runtime);
+    if(start.result!=NPS_WORLD_PENDING||!AdvanceToBoundary(session,*runtime)||runtime->phase!=PNR_READY){delete runtime;return 222;}
+    if(!RunMovementTicks(session,*runtime,0.0f,0.0f,1)){delete runtime;return 223;}
+    NativeWorldResident& live=runtime->world.resident[runtime->world.currentList];
+    if(!live.doorVisuals||!live.doors){delete runtime;return 224;}
+    int opened=0,locked=0;
+    for(int slot=0;slot<8;++slot)if(live.doors->attached&(1U<<slot)){
+        NativeDoorVisual& visual=live.doorVisuals[slot];
+        if(!visual.ready||!visual.main.mainState.clip)continue;
+        const char* clip=visual.main.mainState.clip->name;
+        if((live.doors->actors[slot].targetType==1||live.doors->actors[slot].targetType==5)&&strcmp(clip,"Opened")==0)++opened;
+        if(live.doors->actors[slot].targetType==10&&strcmp(clip,"KeyClosed")==0)++locked;
+    }
+    if(!opened){delete runtime;return 225;}
+    printf("DOORVIS opened=%d locked=%d\n",opened,locked);
+    delete runtime;return 0;
+}int RunWalkAnimationProbe(NativeMt& random,PortFrontend& ui){
+    ui.characterPage=0;ui.characterChoice=1;ui.characterMode=0;
+    PortNormalRuntime* runtime=new PortNormalRuntime;PortGameSession session(random,ui);
+    PortSessionStart start=session.StartNormalCharacter(1,*runtime);
+    if(start.result!=NPS_WORLD_PENDING||!AdvanceToBoundary(session,*runtime)||runtime->phase!=PNR_READY){delete runtime;return 216;}
+    NativeSprite& sprite=runtime->playerSprites.sprites[0];
+    if(!runtime->playerSprites.bodyReady||!sprite.mainState.clip){delete runtime;return 217;}
+    if(!RunMovementTicks(session,*runtime,1.0f,0.0f,12)){delete runtime;return 218;}
+    if(!sprite.mainState.clip||strcmp(sprite.mainState.clip->name,"WalkRight")!=0||sprite.mainState.frame<0.5f){delete runtime;return 219;}
+    const float movingFrame=sprite.mainState.frame;
+    if(!RunMovementTicks(session,*runtime,0.0f,0.0f,120)){delete runtime;return 220;}
+    if(sprite.mainState.playing){delete runtime;return 221;}
+    printf("WALKANIM clip=WalkRight frame=%.1f stopped=1\n",movingFrame);
     delete runtime;return 0;
 }int RunBlackHeartProbe(NativeMt& random,PortFrontend& ui){
     ui.characterPage=0;ui.characterChoice=1;ui.characterMode=0;
@@ -952,6 +986,8 @@ int main(int argc,char** argv){
     if(!failed){int bossAttacks=RunBossAttackProbe(random,ui);if(bossAttacks){printf("BOSS_ATTACKS_RESULT failed=%d\n",bossAttacks);failed=true;}}
     if(!failed){int audioProbe=RunAudioProbe(random,ui);if(audioProbe){printf("AUDIO_RESULT failed=%d\n",audioProbe);failed=true;}}
     if(!failed){int blackHeart=RunBlackHeartProbe(random,ui);if(blackHeart){printf("BLACKHEART_RESULT failed=%d\n",blackHeart);failed=true;}}
+    if(!failed){int doorVis=RunDoorVisualProbe(random,ui);if(doorVis){printf("DOORVIS_RESULT failed=%d\n",doorVis);failed=true;}}
+    if(!failed){int walkAnim=RunWalkAnimationProbe(random,ui);if(walkAnim){printf("WALKANIM_RESULT failed=%d\n",walkAnim);failed=true;}}
     if(!failed){int familiar=RunFamiliarProbe(random,ui);if(familiar){printf("FAMILIAR_RESULT failed=%d\n",familiar);failed=true;}}
     if(!failed){int cont=RunContinueProbe(random,ui);if(cont){printf("CONTINUE_RESULT failed=%d\n",cont);failed=true;}}
     if(!failed){int nativeCont=RunNativeContinueProbe(random,ui);if(nativeCont){printf("NATIVE_CONTINUE_RESULT failed=%d\n",nativeCont);failed=true;}}

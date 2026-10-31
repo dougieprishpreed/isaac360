@@ -39,6 +39,10 @@ IMAGES=[
     ('pootersheet','gfx/monsters/classic/monster_001_pooter.png'),
     ('rocksbasement','gfx/grid/rocks_basement.png'),
     ('doornormal','gfx/grid/door_01_normaldoor.png'),
+    ('doorcellar','gfx/grid/door_12_cellardoor.png'),
+    ('doorshop','gfx/grid/door_00_shopdoor.png'),
+    ('doortreasure','gfx/grid/door_02_treasureroomdoor.png'),
+    ('doorsacrifice','gfx/grid/door_04_selfsacrificeroomdoor.png'),
     ('fattysheet','gfx/monsters/rebirth/monster_207_fatty.png'),
     ('poopsheet','gfx/grid/grid_poop_1.png'),
     ('fireplacesheet','gfx/grid/grid_fireplace.png'),
@@ -46,6 +50,9 @@ IMAGES=[
     ('pickupcoin','gfx/items/pick ups/pickup_002_coin.png'),
     ('pickupkey','gfx/items/pick ups/pickup_003_key.png'),
     ('pickupbomb','gfx/items/pick ups/pickup_016_bomb.png'),
+    ('minimap1','gfx/ui/minimap1.png'),
+    ('minimap2','gfx/ui/minimap2.png'),
+    ('minimapicons','gfx/ui/minimap_icons.png'),
 ]
 ACTORS=[
     ('gaper','gfx/010.000_Frowning Gaper.anm2','WalkHori','Head'),

@@ -13,7 +13,12 @@ struct NativeDoorVisual {
     //and per-frame door update are separate lifecycle operations.
     bool BindFresh(NativeDoorActor&,int backdrop,unsigned int sourceFlags,unsigned int targetFlags,const NativePlayerState&);
     bool UpdateInitialClosed(NativeDoorActor&,const NativeRoomState&,unsigned int targetFlags,unsigned int effectiveCurses,const NativeEntityBody&,const NativePlayerState&,unsigned int* next);
+    bool Open(NativeDoorActor&);
 };
+//Original closed/open clip for each reached target kind. Normal and boss
+//doors use the plain door frames; treasure/sacrifice doors keep the key lock.
+const char* NativeDoorClosedAnimation(int targetType);
+const char* NativeDoorOpenAnimation(int targetType);
 const NativeSpriteAsset* NativePreparedDoorSprite(unsigned int);
 const NativeSpriteSheet* NativePreparedDoorSheet(unsigned int);
 #endif

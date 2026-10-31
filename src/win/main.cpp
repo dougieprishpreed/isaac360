@@ -120,6 +120,47 @@ static void TexRect(float x,float y,float w,float h,float sx,float sy,float sw,f
     const float uv[8]={sx,sy,sx+sw,sy,sx,sy+sh,sx+sw,sy+sh};
     TexQuad(xy,uv,(float)kGameplayAtlasWidth,(float)kGameplayAtlasHeight,color);
 }
+static void TexRectRotated(float cx,float cy,float x,float y,float w,float h,float sx,float sy,float sw,float sh,float degrees,DWORD color=0xffffffff){
+    const float radians=degrees*3.14159265f/180.0f;const float c=cosf(radians),s=sinf(radians);
+    const float corners[8]={x,y,x+w,y,x,y+h,x+w,y+h};
+    float xy[8];
+    for(int i=0;i<4;++i){
+        const float dx=corners[i*2]-cx,dy=corners[i*2+1]-cy;
+        xy[i*2]=cx+dx*c-dy*s;xy[i*2+1]=cy+dx*s+dy*c;
+    }
+    const float uv[8]={sx,sy,sx+sw,sy,sx,sy+sh,sx+sw,sy+sh};
+    TexQuad(xy,uv,(float)kGameplayAtlasWidth,(float)kGameplayAtlasHeight,color);
+}
+static bool DoorAtlasRect(const std::string& path,int* ox,int* oy){
+    const char* p=path.c_str();
+    if(strstr(p,"door_12_cellardoor")){*ox=kGameplayDoorcellarX;*oy=kGameplayDoorcellarY;return true;}
+    if(strstr(p,"door_00_shopdoor")){*ox=kGameplayDoorshopX;*oy=kGameplayDoorshopY;return true;}
+    if(strstr(p,"door_02_treasureroomdoor")){*ox=kGameplayDoortreasureX;*oy=kGameplayDoortreasureY;return true;}
+    if(strstr(p,"door_04_selfsacrificeroomdoor")){*ox=kGameplayDoorsacrificeX;*oy=kGameplayDoorsacrificeY;return true;}
+    if(strstr(p,"door_01_normaldoor")){*ox=kGameplayDoornormalX;*oy=kGameplayDoornormalY;return true;}
+    return false;
+}
+static bool MinimapAtlasRect(const NativeSpriteAsset* asset,int* ox,int* oy){
+    if(!asset||!asset->sheetCount||!asset->sheets)return false;
+    const char* p=asset->sheets[0].path;
+    if(strstr(p,"minimap1.png")){*ox=kGameplayMinimap1X;*oy=kGameplayMinimap1Y;return true;}
+    if(strstr(p,"minimap2.png")){*ox=kGameplayMinimap2X;*oy=kGameplayMinimap2Y;return true;}
+    if(strstr(p,"minimap_icons.png")){*ox=kGameplayMinimapiconsX;*oy=kGameplayMinimapiconsY;return true;}
+    return false;
+}
+static const NativeSpriteFrame* MinimapFrame(const NativeSpriteAsset* asset,const char* animation,int frame){
+    if(!asset||!animation)return 0;
+    for(unsigned int i=0;i<asset->clipCount;++i){
+        const NativeSpriteClip& clip=asset->clips[i];if(strcmp(clip.name,animation)!=0)continue;
+        for(unsigned int j=0;j<clip.layerCount;++j){
+            const NativeSpriteTrack& track=clip.layers[j];if(!track.count||!track.frames)continue;
+            int at=frame;if(at<0)at=0;if((unsigned int)at>=track.count)at=(int)track.count-1;
+            return track.frames+at;
+        }
+        return 0;
+    }
+    return 0;
+}
 static bool BackdropAtlasRect(int id,int* ox,int* oy){
     if(id==1){*ox=kGameplayBackdrop1X;*oy=kGameplayBackdrop1Y;return true;}
     if(id==2){*ox=kGameplayBackdrop2X;*oy=kGameplayBackdrop2Y;return true;}
@@ -156,15 +197,17 @@ static void DrawDoors(){
     const NativeRoomBackground& bg=live.view->background;const NativeRoomSpace& space=live.room->space;
     float rw=bg.right-bg.left,rh=bg.bottom-bg.top,ww=space.right-space.left,wh=space.bottom-space.top;if(ww<=0||wh<=0)return;
     for(int slot=0;slot<8;++slot){if(!(live.doors->attached&(1U<<slot)))continue;NativeDoorVisual& v=live.doorVisuals[slot];
-        if(!v.ready||!v.main.asset||v.main.layerSheets.empty()||strstr(v.main.layerSheets[0].path.c_str(),"door_01_normaldoor")==0)continue;
+        if(!v.ready||!v.main.asset||v.main.layerSheets.empty())continue;
+        int ax=0,ay=0;if(!DoorAtlasRect(v.main.layerSheets[0].path,&ax,&ay))continue;
         float wx,wy;if(!live.room->geometry.Position(live.doors->actors[slot].grid,&wx,&wy))continue;
-        float px=bg.left+(wx+20-space.left)*rw/ww,py=bg.top+(wy+20-space.top)*rh/wh;
+        float px=bg.left+(wx+20-space.left)*rw/ww+v.main.offset.x;
+        float py=bg.top+(wy+20-space.top)*rh/wh+v.main.offset.y;
         for(unsigned int i=0;i<v.main.asset->layerCount;++i){const NativeSpriteFrame* f=v.main.LayerFrame(v.main.asset->layers[i].id);
             if(!f||!f->visible)continue;float cx=Bits(f->geometry[0]),cy=Bits(f->geometry[1]),w=Bits(f->geometry[2]),h=Bits(f->geometry[3]);
             float ox=Bits(f->geometry[4]),oy=Bits(f->geometry[5]),sx=Bits(f->geometry[6]),sy=Bits(f->geometry[7]);
             float pvx=Bits(f->geometry[8]),pvy=Bits(f->geometry[9]);if(w<=0||h<=0)continue;if(sx==0||sy==0)sx=sy=1;
             float x=px+(ox-pvx)*fabsf(sx),y=py+(oy-pvy)*fabsf(sy);
-            TexRect(x,y,w*fabsf(sx),h*fabsf(sy),cx+kGameplayDoornormalX,cy+kGameplayDoornormalY,w,h);}
+            TexRectRotated(px,py,x,y,w*fabsf(sx),h*fabsf(sy),cx+ax,cy+ay,w,h,v.main.rotation);}
     }
 }
 static void DrawRocks(){
@@ -292,6 +335,37 @@ static void DrawHud(){
     int soul=gRuntime->playerState.soulHearts;for(int i=0;i<soul/2;++i){TexRect(x,y,16,16,(float)kGameplayHeartsX,(float)(kGameplayHeartsY+16),16,16);x+=16;}
     if(soul&1)TexRect(x,y,16,16,(float)(kGameplayHeartsX+16),(float)(kGameplayHeartsY+16),16,16);
 }
+static void DrawMinimap(){
+    if(!gRuntime->minimaps.ready)return;
+    NativeMinimap& map=gRuntime->minimaps.maps[0];
+    if(!map.ready||map.draws.empty()||map.textureWidth<=0||map.textureHeight<=0)return;
+    const float scale=1.2f;
+    const float baseX=480.0f-map.textureWidth*scale-8.0f,baseY=8.0f;
+    const NativeSpriteFrame* panel=MinimapFrame(map.sprite.asset,"Frame",0);
+    if(panel){
+        int ax=0,ay=0;
+        if(MinimapAtlasRect(map.sprite.asset,&ax,&ay)){
+            const float px=Bits(panel->geometry[0]),py=Bits(panel->geometry[1]);
+            const float pw=Bits(panel->geometry[2]),ph=Bits(panel->geometry[3]);
+            if(pw>0&&ph>0)TexRect(baseX,baseY,pw*scale,ph*scale,px+ax,py+ay,pw,ph,0xff000000);
+        }
+    }
+    for(unsigned int i=0;i<map.draws.size();++i){
+        const NativeMinimapDraw& draw=map.draws[i];
+        const NativeSpriteFrame* f=MinimapFrame(draw.asset,draw.animation,draw.frame);
+        if(!f||!f->visible)continue;
+        int ax=0,ay=0;if(!MinimapAtlasRect(draw.asset,&ax,&ay))continue;
+        const float cropX=Bits(f->geometry[0]),cropY=Bits(f->geometry[1]);
+        const float w=Bits(f->geometry[2]),h=Bits(f->geometry[3]);
+        const float offX=Bits(f->geometry[4]),offY=Bits(f->geometry[5]);
+        float sx=Bits(f->geometry[6]),sy=Bits(f->geometry[7]);
+        const float pivotX=Bits(f->geometry[8]),pivotY=Bits(f->geometry[9]);
+        if(w<=0||h<=0)continue;if(sx==0||sy==0)sx=sy=1;
+        const float x=baseX+(draw.position.x+(offX-pivotX)*fabsf(sx))*scale;
+        const float y=baseY+(draw.position.y+(offY-pivotY)*fabsf(sy))*scale;
+        TexRect(x,y,w*fabsf(sx)*scale,h*fabsf(sy)*scale,cropX+ax,cropY+ay,w,h);
+    }
+}
 static void Render(){
     IDirect3DSurface9* back=0;if(gDevice->GetBackBuffer(0,0,D3DBACKBUFFER_TYPE_MONO,&back)!=D3D_OK)return;
     gDevice->SetRenderTarget(0,back);back->Release();
@@ -301,7 +375,7 @@ static void Render(){
     gDevice->SetTextureStageState(0,D3DTSS_COLOROP,D3DTOP_SELECTARG1);gDevice->SetTextureStageState(0,D3DTSS_COLORARG1,D3DTA_TEXTURE);
     gDevice->SetTextureStageState(0,D3DTSS_ALPHAOP,D3DTOP_SELECTARG1);gDevice->SetTextureStageState(0,D3DTSS_ALPHAARG1,D3DTA_TEXTURE);
     gDevice->SetTexture(0,gAtlas);
-    DrawBackground();DrawDoors();DrawRocks();DrawPickups();DrawTrapdoor();DrawEnemies();DrawDeathFx();DrawFamiliars();DrawPlayer();DrawProjectiles();DrawHud();
+    DrawBackground();DrawDoors();DrawRocks();DrawPickups();DrawTrapdoor();DrawEnemies();DrawDeathFx();DrawFamiliars();DrawPlayer();DrawProjectiles();DrawHud();DrawMinimap();
     gDevice->EndScene();
 }
 static bool SaveBMP(const char* path){
@@ -435,6 +509,7 @@ int main(int argc,char** argv){
                 Log("WIN descend stage=%d room=%d def=%d",runtime.run.context.stage,runtime.world.currentList,runtime.world.CurrentDescriptor()?runtime.world.CurrentDescriptor()->definition:-1);
             else{runtime.descendRequested=false;Log("WIN descend failed stage=%d prerequisite=%08x",runtime.run.context.stage,runtime.missingNativePrerequisite);}
         }
+        if(frame<3)Log("WIN input frame=%d W=%d S=%d A=%d D=%d vel=(%.2f,%.2f) tick=%d flags=%08x",frame,held[2]?1:0,held[3]?1:0,held[0]?1:0,held[1]?1:0,runtime.playerBody.velocity.x,runtime.playerBody.velocity.y,(int)tickResult,runtime.playerBody.flagsLow);
         if(frame%30==0){NativeWorldResident& live=runtime.world.resident[runtime.world.currentList];const NativePlacedRoom* d=runtime.world.CurrentDescriptor();
             static int loggedDoorList=-1;
             if(loggedDoorList!=runtime.world.currentList&&live.doors){loggedDoorList=runtime.world.currentList;

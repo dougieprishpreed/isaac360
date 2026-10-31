@@ -34,6 +34,8 @@ def main():
     bossFlags=bossAttacks.group(1) if bossAttacks else ''
     audio=re.search(r'^AUDIO device=(\d+) sfx=(\d+) loaded=(\d+) music=(\d+) music_frames=(\d+) sfx_frames=(\d+) rms=(-?[0-9.]+) gameplay_sfx=(\d+)',log,re.M)
     blackheart=re.search(r'^BLACKHEART absorbed=(\d+) soul=(\d+) red=(\d+) mask=(\d+)',log,re.M)
+    walkanim=re.search(r'^WALKANIM clip=([A-Za-z]+) frame=(-?[0-9.]+) stopped=(\d+)',log,re.M)
+    doorvis=re.search(r'^DOORVIS opened=(\d+) locked=(\d+)',log,re.M)
     pocket=re.search(r'^POCKET hp=(-?\d+)/(-?\d+) bombs=(-?\d+) keys=(-?\d+) coins=(-?\d+)',log,re.M)
     active=re.search(r'^ACTIVE id=(\d+) hp=(-?\d+)/(-?\d+)',log,re.M)
     familiar=re.search(r'^FAMILIAR spawned=(\d+) shots=(\d+) hits=(\d+) enemies=(\d+)',log,re.M)
@@ -173,6 +175,11 @@ def main():
             'blackheart_absorbed':int(blackheart.group(1)) if blackheart else 0,
             'blackheart_soul':int(blackheart.group(2)) if blackheart else -1,
             'blackheart_red':int(blackheart.group(3)) if blackheart else -1,
+            'walkanim_clip':walkanim.group(1) if walkanim else '',
+            'walkanim_frame':float(walkanim.group(2)) if walkanim else 0.0,
+            'walkanim_stopped':int(walkanim.group(3)) if walkanim else 0,
+            'doorvis_opened':int(doorvis.group(1)) if doorvis else 0,
+            'doorvis_locked':int(doorvis.group(2)) if doorvis else 0,
             'pocket_hp':int(pocket.group(1)) if pocket else -1,
             'pocket_max_hp':int(pocket.group(2)) if pocket else -1,
             'pocket_bombs':int(pocket.group(3)) if pocket else -1,

@@ -7,7 +7,7 @@ bool NativeDoorVisual::UpdateInitialClosed(NativeDoorActor& door,const NativeRoo
        (door.targetType!=1&&door.targetType!=2&&door.targetType!=4&&door.targetType!=10))return false;
     //The closed branch writes3c=4. The opening event query cannot reach
     //frame2 from the actual freshly selected KeyClosed frame0.
-    if(!main.mainState.clip||main.mainState.frame!=0||!main.IsPlaying("KeyClosed"))return false;
+    if(!main.mainState.clip||main.mainState.frame!=0||!main.IsPlaying(NativeDoorClosedAnimation(door.targetType)))return false;
     if(door.targetType==2||door.targetType==4){bool held;if(!state.HasCollectible(380,&held)||held){*next=0x6cbf46;return false;}}
     const bool cursedCorridor=(curses&16)&&door.sourceType==1&&door.targetType==1;
     if((door.flags&4)&&door.direction>=0&&door.direction<4&&door.auxiliary==0){
