@@ -40,6 +40,7 @@ def main():
     greed=re.search(r'^GREED start wave=(\d+)/(\d+) room=(\d+) type=(\d+) variant=(\d+) enemies=(\d+)',log,re.M)
     greedDone=re.search(r'^GREED complete waves=(\d+) next=(\d+) room=(\d+)',log,re.M)
     greedBoss=re.search(r'^GREED boss room=(\d+) type=(\d+) variant=(\d+) enemies=(\d+) ultraGreed=(\d+)',log,re.M)
+    greedBossShots=re.search(r'^GREED boss attack shots=(\d+)',log,re.M)
     greedContinue=re.search(r'^GREED continue wave=(\d+) room=(\d+) count=(\d+)',log,re.M)
     greedNative=re.search(r'^GREED native continue wave=(\d+) room=(\d+) count=(\d+)',log,re.M)
     deathflow=re.search(r'^DEATH_FLOW dyingTicks=(\d+) gameOver=(\d+) restartResult=(\d+) restartPhase=(\d+) restartHP=(-?\d+)/(-?\d+)',log,re.M)
@@ -173,6 +174,7 @@ def main():
             'greed_complete':bool(greedDone),
             'greed_boss_room':int(greedBoss.group(1)) if greedBoss else -1,
             'greed_boss_ultra':int(greedBoss.group(5)) if greedBoss else 0,
+            'greed_boss_shots':int(greedBossShots.group(1)) if greedBossShots else 0,
             'greed_continue_wave':int(greedContinue.group(1)) if greedContinue else -1,
             'greed_continue_room':int(greedContinue.group(2)) if greedContinue else -1,
             'native_greed_continue_wave':int(greedNative.group(1)) if greedNative else -1,

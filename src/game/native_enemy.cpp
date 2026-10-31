@@ -92,6 +92,30 @@ void NativeEnemy::Update(const NativeRoomState& room,const NativeEntityBody& pla
         else{vx=dx*0.25f;vy=dy*0.25f;}
         if(shots&&distance<520.0f&&cycle==62)
             shots->Fire(body.position,dx*3.2f,dy*3.2f,1.0f,8.0f,240,body.entityToken);
+    }else if(type==406){
+        //Ultra Greed: slow chase, committed dash, radial coin burst and an
+        //aimed spread. The prepared coin actor is not spawned yet, so these
+        //are the boss's hostile shot owners.
+        const bool greedier=body.variant==1;
+        const int cycle=phase%240;
+        if(cycle>=60&&cycle<96){vx=dx*(greedier?2.8f:2.4f);vy=dy*(greedier?2.8f:2.4f);}
+        else{vx=dx*(greedier?0.42f:0.35f);vy=dy*(greedier?0.42f:0.35f);}
+        if(shots&&distance<620.0f){
+            if(cycle==120){
+                for(int k=0;k<8;++k){
+                    const float angle=(float)(6.283185307179586*(double)k/8.0);
+                    shots->Fire(body.position,(float)cos((double)angle)*3.0f,(float)sin((double)angle)*3.0f,
+                        greedier?1.5f:1.0f,8.0f,300,body.entityToken);
+                }
+            }else if(cycle==190){
+                const float px=-dy,py=dx;
+                for(int k=-1;k<=1;++k){
+                    NativePoint origin={body.position.x+dx*30.0f,body.position.y+dy*30.0f};
+                    shots->Fire(origin,dx*3.4f+px*(float)k*0.8f,dy*3.4f+py*(float)k*0.8f,
+                        greedier?2.0f:1.5f,8.0f,300,body.entityToken);
+                }
+            }
+        }
     }else if(type==67||type==260||type==79||type==908||type==28||type==36||type==62||type==68||type==71||type==99||type==262||type==264||type==916||type==72||type==43||type==45||type==263||type==265||type==900||type==75||type==76||type==78||type==266||type==270||type==74||type==81||type==50||type==52||type==69||type==84||type==100||type==102||type==273||type==412||type==267||type==268||type==269){
         //Duke/Haunt: floating boss with a periodic spread volley.
         const int cycle=phase%150;

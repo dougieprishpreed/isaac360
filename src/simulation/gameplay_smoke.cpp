@@ -575,6 +575,11 @@ int RunBombProbe(NativeMt& random,PortFrontend& ui){
     if(!runtime->world.Current()||bossCount!=1){delete runtime;return 181;}
     printf("GREED boss room=%d type=%d variant=%d enemies=%d ultraGreed=%d\n",runtime->world.currentGrid,
         runtime->world.Current()->type,runtime->world.Current()->variant,bossLive.enemies.count,bossCount);
+    runtime->playerInvulnerable=1000;
+    const unsigned int bossShots0=runtime->enemyShots.spawned;
+    if(!RunProjectileTicks(session,*runtime,-1,-1,140)){delete runtime;return 189;}
+    if(runtime->enemyShots.spawned<=bossShots0){delete runtime;return 190;}
+    printf("GREED boss attack shots=%u\n",runtime->enemyShots.spawned-bossShots0);
     runtime->world.Current()->clear=true;
     if(!session.AdvanceGreedWave(*runtime,files)||!runtime->greedComplete){delete runtime;return 182;}
     printf("GREED complete waves=%d next=%d room=%d\n",runtime->greedWaveCount,runtime->greedWave+1,runtime->world.currentGrid);
