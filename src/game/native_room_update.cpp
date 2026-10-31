@@ -3,6 +3,7 @@
 #include "native_room_effects.h"
 #include "native_door_resources.h"
 #include "native_player_collision.h"
+#include "native_audio.h"
 #include <algorithm>
 NativeRoomUpdate::NativeRoomUpdate(unsigned int frame):enteredFrame(frame),address(0x7ae620),gridCursor(0),active(false),native7114(false),native764c(false),native7648(0),native717c(-1),native7120(0),actorStage(0),actorCursor(0){
     //7a02e2,7a03a6,7a0e07.7a03ac..3cd clears the pending-grid tree.
@@ -218,7 +219,15 @@ bool NativeRoomUpdate::TickSimulationTail(PortNormalRuntime& runtime,NativeActio
                 taken=true;
             }
         }
-        if(taken){p->collected=true;++runtime.pickupsCollected;}
+        if(taken){p->collected=true;++runtime.pickupsCollected;
+            if(runtime.audio){
+                if(p->variant==10)runtime.audio->PlaySfx("resources/sfx/heartin.wav",0.55f);
+                else if(p->variant==20)runtime.audio->PlaySfx("resources/sfx/feedback/penny pickup 1.wav",0.5f);
+                else if(p->variant==30)runtime.audio->PlaySfx("resources/sfx/feedback/golden key.wav",0.55f);
+                else if(p->variant==40)runtime.audio->PlaySfx("resources/sfx/v2/pickup_lucky_02.wav",0.5f);
+                else runtime.audio->PlaySfx("resources/sfx/feedback/chest open 1.wav",0.55f);
+            }
+        }
     }
     //Primary weapon/projectile lifecycle follows the room simulation owner.
     if(!runtime.projectiles.Step(runtime,actions,runtime.tickFrame,next)){
@@ -231,12 +240,14 @@ bool NativeRoomUpdate::TickSimulationTail(PortNormalRuntime& runtime,NativeActio
     if(room->clear&&live.doors)for(int slot=0;slot<8;++slot)if(live.doors->attached&(1U<<slot)){
         NativeDoorActor& door=live.doors->actors[slot];
         if(door.state!=1)continue;
-        if(door.targetType==1||door.targetType==5){door.previousState=door.state;door.state=2;++runtime.doorsOpened;openedThisTick[slot]=true;continue;}
+        if(door.targetType==1||door.targetType==5){door.previousState=door.state;door.state=2;++runtime.doorsOpened;openedThisTick[slot]=true;
+            if(runtime.audio)runtime.audio->PlaySfx("resources/sfx/v2/metaldooropen.wav",0.5f);continue;}
         float px,py;if(!room->geometry.Position(door.grid,&px,&py))continue;px+=20.0f;py+=20.0f;
         float dx=runtime.playerBody.position.x-px,dy=runtime.playerBody.position.y-py;
         bool near=dx*dx+dy*dy<=60.0f*60.0f;
         if(door.targetType==10&&near&&runtime.playerState.keys>0){
             --runtime.playerState.keys;door.previousState=door.state;door.state=2;++runtime.doorsUnlocked;openedThisTick[slot]=true;
+            if(runtime.audio)runtime.audio->PlaySfx("resources/sfx/feedback/door heavy open.wav",0.55f);
         }
     }
     //Interactive passage on a cleared normal door. The target resident is

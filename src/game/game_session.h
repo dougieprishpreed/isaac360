@@ -19,6 +19,7 @@
 #include "native_pause_ui.h"
 #include "native_player_update.h"
 #include "native_projectile.h"
+class NativeAudio;
 struct PortSessionStart {NativePlayerStartResult result;int choice,player;};
 enum PortNormalPhase { PNR_IDLE,PNR_GENERATING,PNR_NEED_CURSES,PNR_ROOM_COMPONENTS,PNR_NEED_NATIVE_INIT,PNR_READY,PNR_DYING,PNR_GAME_OVER,PNR_FACTORY_GAP,PNR_SOURCE_ERROR,PNR_ERROR };
 //One owned creation/generation/world lifetime for both adapters. Normal start
@@ -29,6 +30,7 @@ struct PortNormalRuntime {
     NativeRng gameRandom;
     NativeItemPools itemPools;
     NativeSoundState sounds;
+    NativeAudio* audio;
     NativeNightmares nightmares;
     NativeRunHistory history;
     NativeRunCheckpoint checkpoints[2];

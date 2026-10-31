@@ -24,13 +24,14 @@
     <Link><AdditionalDependencies>d3d9.lib;d3dx9.lib;xgraphics.lib;xapilib.lib;xaudio2.lib;xmcore.lib;xboxkrnl.lib;xbdm.lib;%(AdditionalDependencies)</AdditionalDependencies><GenerateDebugInformation>true</GenerateDebugInformation><OutputFile>$(OutDir)GenericPort.exe</OutputFile><ProgramDatabaseFile>$(OutDir)GenericPort.pdb</ProgramDatabaseFile></Link>
     <ImageXex><TitleID>0xFFFE07D1</TitleID><InputFile>$(OutputFile)</InputFile></ImageXex>
   </ItemDefinitionGroup>
-  <ItemGroup><ClCompile Include="main.cpp" /><ClCompile Include="..\content\*.cpp" /><ClCompile Include="..\game\*.cpp" /></ItemGroup>
+  <ItemGroup><ClCompile Include="main.cpp" /><ClCompile Include="audio_xbox.cpp" /><ClCompile Include="..\content\*.cpp" /><ClCompile Include="..\game\*.cpp" /></ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <Target Name="PreparePresentation" BeforeTargets="PrepareForBuild">
     <Exec Command="python tools\prepare_native_data.py" WorkingDirectory="$(ProjectDir)..\.." />
     <Exec Command="python tools\prepare_boss_data.py" WorkingDirectory="$(ProjectDir)..\.." />
     <Exec Command="python tools\prepare_frontend.py" WorkingDirectory="$(ProjectDir)..\.." />
     <Exec Command="python tools\prepare_gameplay_atlas.py" WorkingDirectory="$(ProjectDir)..\.." />
+    <Exec Command="python tools\prepare_audio.py" WorkingDirectory="$(ProjectDir)..\.." />
     <Exec Command="&quot;$(XEDK)\bin\win32\fxc.exe&quot; /nologo /T vs_3_0 /E VSMain /VnSpriteVS /Fhbuild\generated\sprite_vs.h src\xbox\sprite.hlsl" WorkingDirectory="$(ProjectDir)..\.." />
     <Exec Command="&quot;$(XEDK)\bin\win32\fxc.exe&quot; /nologo /T ps_3_0 /E PSMain /VnSpritePS /Fhbuild\generated\sprite_ps.h src\xbox\sprite.hlsl" WorkingDirectory="$(ProjectDir)..\.." />
   </Target>

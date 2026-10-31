@@ -14,11 +14,15 @@
 #include "../game/native_room_view.h"
 #include "../game/native_room_background.h"
 #include "../game/native_door_resources.h"
+#include "../game/native_audio.h"
 #include "gameplay_atlas_data.h"
+const NativeAudioBackend* NativeWindowsAudioBackend();
 
 static PortFrontend gUi;
 static NativeMt gRandom;
 static PortNormalRuntime* gRuntime=0;
+static NativeAudio gAudio;
+static int gLastMusicTrack=-1;
 static FILE* gLog=0;
 static IDirect3D9* gD3D=0;
 static IDirect3DDevice9* gDevice=0;
@@ -31,6 +35,25 @@ static const float kScale=kWidth/480.0f;
 static void Log(const char* fmt,...){
     char line[1024];va_list args;va_start(args,fmt);_vsnprintf(line,sizeof(line)-2,fmt,args);va_end(args);
     line[sizeof(line)-2]=0;strcat(line,"\n");fputs(line,stdout);fflush(stdout);if(gLog){fputs(line,gLog);fflush(gLog);}
+}
+static void SyncMusic(){
+    if(!gAudio.initialized)return;
+    if(gUi.music.queuedTrack>0){
+        gUi.music.currentTrack=gUi.music.queuedTrack;
+        gUi.music.queuedTrack=0;
+    }
+    const int track=gUi.music.currentTrack;
+    if(track!=gLastMusicTrack){
+        gLastMusicTrack=track;
+        const NativeMusicDef* definition=NativeMusicDefinition(track);
+        if(definition&&definition->path&&*definition->path){
+            if(gAudio.PlayMusic(definition->path,definition->loop,gUi.music.volume*1.6f))
+                Log("WIN music track=%d path=%s",track,definition->path);
+            else Log("WIN music failed track=%d path=%s",track,definition->path);
+        }else gAudio.StopMusic();
+    }
+    gAudio.SetMusicVolume(gUi.music.volume*1.6f);
+    gAudio.Update();
 }
 static unsigned int LE32(const unsigned char* p){return (unsigned int)p[0]|((unsigned int)p[1]<<8)|((unsigned int)p[2]<<16)|((unsigned int)p[3]<<24);}
 static bool LoadFileBytes(const char* path,unsigned char** data,unsigned int* size){
@@ -347,8 +370,14 @@ int main(int argc,char** argv){
     std::vector<Segment> script;if(scriptText)ParseScript(scriptText,script);
     if(!CreateHiddenWindow(hidden)||!InitD3D())return 2;
     LoadAtlas();gUi.Init(false);gUi.BindSaveDirectory("build/windows/profile/");memset(&gUi.profile,0,sizeof(gUi.profile));gUi.characterPage=0;gUi.characterChoice=1;gUi.characterMode=0;
-    gRandom.Seed(seed?seed:1);PortNormalRuntime runtime;gRuntime=&runtime;PortGameSession session(gRandom,gUi);
+    if(gAudio.Initialize("runtime/port/audio")){
+        const NativeAudioBackend* backend=NativeWindowsAudioBackend();
+        if(backend)gAudio.SetBackend(backend,backend->user);
+        Log("WIN audio initialized device=%d",gAudio.deviceReady?1:0);
+    }else Log("WIN audio pack unavailable");
+    gRandom.Seed(seed?seed:1);PortNormalRuntime runtime;gRuntime=&runtime;runtime.audio=&gAudio;PortGameSession session(gRandom,gUi);
     if(!gUi.music.StartCharacter(gUi.characterPage)){Log("WIN character music stinger failed");return 5;}
+    SyncMusic();
     PortSessionStart start;
     NativeSceneFiles startFiles={"runtime/game/file_index.bin","runtime/game/",1,2,0};
     if(greed){gUi.characterMode=2;start=session.StartGreedCharacter(seed?seed:1,runtime,startFiles);}
@@ -398,6 +427,7 @@ int main(int argc,char** argv){
                 Log("WIN teleport frame=%d pickup=%d variant=%d",frame,index,tr.pickups.entries[index]->variant);}}
         NormalRunResult tickResult=NFR_PENDING;
         if(runtime.phase==PNR_READY||runtime.phase==PNR_DYING||runtime.phase==PNR_GAME_OVER)tickResult=session.TickNormal(runtime,files,&fa);
+        SyncMusic();
         if(tickResult!=NFR_OK){static unsigned int lastPrerequisite=0;if(runtime.missingNativePrerequisite&&runtime.missingNativePrerequisite!=lastPrerequisite){lastPrerequisite=runtime.missingNativePrerequisite;Log("WIN tick result=%d prerequisite=%08x room=%d type=%u variant=%u",tickResult,runtime.missingNativePrerequisite,runtime.world.currentList,runtime.entryIssue.construction.type,runtime.entryIssue.construction.variant);}}
         if(invulnerable&&runtime.phase==PNR_READY)runtime.playerInvulnerable=30;
         if(runtime.descendRequested&&runtime.phase==PNR_READY){
@@ -426,5 +456,9 @@ int main(int argc,char** argv){
         const bool maintainedSaved=session.SaveContinue(continueFile,runtime);
         Log("WIN save native=%d maintained=%d nativeFile=%s maintainedFile=%s",nativeSaved?1:0,maintainedSaved?1:0,nativeContinueFile,continueFile);
     }
-    Log("WIN done frames=%d phase=%d",frame,runtime.phase);if(gLog)fclose(gLog);return 0;
+    Log("WIN done frames=%d phase=%d",frame,runtime.phase);
+    Log("WIN audio summary device=%d submits=%u mixed=%u sfx=%u music_frames=%u sfx_frames=%u loaded=%u",
+        gAudio.deviceReady?1:0,gAudio.deviceSubmits,gAudio.framesMixed,gAudio.sfxStarted,
+        gAudio.musicFrames,gAudio.sfxFrames,gAudio.sfxLoaded);
+    if(gLog)fclose(gLog);return 0;
 }

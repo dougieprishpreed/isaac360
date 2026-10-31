@@ -12,6 +12,7 @@ const NativeMusicDef* Definition(int id){
     return 0;
 }
 }
+const NativeMusicDef* NativeMusicDefinition(int id){return Definition(id);}
 void NativeMusicState::Begin(){
     memset(this,0,sizeof(*this));
     //8997db..9981a and78e6d0. Options MusicVolume default86e1fe.

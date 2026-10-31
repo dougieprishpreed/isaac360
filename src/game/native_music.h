@@ -26,4 +26,6 @@ struct NativeMusicState {
     bool StartCharacter(int page); //896bfd/8ce325 ->791210.
     bool EnterStartingRoom(const NormalRunFlow&,const NativeWorld&,const NativePlayerState&,unsigned int* next);
 };
+//Resolved original stream identity for the platform audio adapter.
+const NativeMusicDef* NativeMusicDefinition(int id);
 #endif

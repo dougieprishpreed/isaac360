@@ -9,10 +9,12 @@
 #include "../game/native_room_view.h"
 #include "../game/native_room_background.h"
 #include "../game/native_door_resources.h"
+#include "../game/native_audio.h"
 #include "frontend_assets.h"
 #include "gameplay_atlas_data.h"
 #include "sprite_vs.h"
 #include "sprite_ps.h"
+const NativeAudioBackend* NativeXboxAudioBackend();
 static FILE* gTrace=0;
 static IDirect3DDevice9* gDevice=0;
 static IDirect3DTexture9* gAtlas=0;
@@ -23,6 +25,8 @@ static PortFrontend gUi;
 static NativeMt gMenuRandom;
 static PortNormalRuntime gNormalRuntime;
 static NativeProfile gProfiles[3];
+static NativeAudio gAudio;
+static int gLastMusicTrack=-1;
 static bool gPrevActions[12]={false,false,false,false,false,false,false,false,false,false,false,false};
 static bool PreviousAction(int action){return action>=0&&action<12?gPrevActions[action]:false;}
 static float Axis(float value){const float dead=0.25f;float v=value/32767.0f;return fabsf(v)<dead?0.0f:v;}
@@ -49,6 +53,25 @@ static void Log(const char* fmt,...) {
     line[sizeof(line)-2]=0; strcat(line,"\n");
     OutputDebugStringA(line);
     if(gTrace) { fputs(line,gTrace); fflush(gTrace); }
+}
+static void SyncMusic() {
+    if(!gAudio.initialized) return;
+    if(gUi.music.queuedTrack>0) {
+        gUi.music.currentTrack=gUi.music.queuedTrack;
+        gUi.music.queuedTrack=0;
+    }
+    const int track=gUi.music.currentTrack;
+    if(track!=gLastMusicTrack) {
+        gLastMusicTrack=track;
+        const NativeMusicDef* definition=NativeMusicDefinition(track);
+        if(definition && definition->path && *definition->path) {
+            if(gAudio.PlayMusic(definition->path,definition->loop,gUi.music.volume*1.6f))
+                Log("PORT music track=%d path=%s",track,definition->path);
+            else Log("PORT music failed track=%d path=%s",track,definition->path);
+        } else gAudio.StopMusic();
+    }
+    gAudio.SetMusicVolume(gUi.music.volume*1.6f);
+    gAudio.Update();
 }
 static unsigned int LE32(const unsigned char* p) {
     return (unsigned int)p[0]|((unsigned int)p[1]<<8)|((unsigned int)p[2]<<16)|((unsigned int)p[3]<<24);
@@ -555,6 +578,12 @@ VOID __cdecl main() {
     gTrace=fopen("game:\\port\\trace.log","wt");
     if(!InitGraphics())for(;;)Sleep(1000);
     bool ready=LoadAtlas()&&CheckOriginalBindings();LoadGameplayAtlas();gUi.Init(false);
+    gNormalRuntime.audio=&gAudio;
+    if(gAudio.Initialize("game:\\port\\audio")) {
+        const NativeAudioBackend* backend=NativeXboxAudioBackend();
+        if(backend)gAudio.SetBackend(backend,backend->user);
+        Log("PORT audio initialized device=%d",gAudio.deviceReady?1:0);
+    } else Log("PORT audio pack unavailable");
     //Console-writable local save root. e:\ is the normal writable console
     //storage; a devkit/emulator without e:\ falls back to its game:// scratch.
     bool saveBound=false;
@@ -576,6 +605,10 @@ VOID __cdecl main() {
                 (p.wButtons&XINPUT_GAMEPAD_X)!=0,(p.wButtons&XINPUT_GAMEPAD_Y)!=0};
             PortAction action=UI_NONE;
             if(!GameplayVisible())action=gUi.Step(input);
+            if(gAudio.initialized&&action!=UI_NONE&&action!=UI_CONTINUE_RUN){
+                if(action==UI_START_CHARACTER)gAudio.PlaySfx("resources/sfx/feedback/character select right.wav",0.5f);
+                else gAudio.PlaySfx("resources/sfx/v2/menu_scroll.wav",0.35f);
+            }
             //The native player update requests its own connected action owner.
             //Supply the real pad frame to the same shared runtime the host uses.
             static unsigned int actionFrameNumber=0;
@@ -671,6 +704,7 @@ VOID __cdecl main() {
             }
             if(action!=UI_NONE&&action!=UI_SELECT_SLOT&&action!=UI_DELETE_SLOT&&action!=UI_START_CHARACTER)Log("PORT pending native frontend destination=%d",action);
         }
+        SyncMusic();
         Render(ready);
     }
 }

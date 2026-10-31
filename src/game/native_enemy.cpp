@@ -167,6 +167,151 @@ void NativeEnemy::Update(const NativeRoomState& room,const NativeEntityBody& pla
                 shots->Fire(origin,dx*3.1f+px*(float)k*0.7f,dy*3.1f+py*(float)k*0.7f,1.0f,8.0f,300,body.entityToken);
             }
         }
+    }else if(type==67){
+        //Duke of Flies: slow float with a four-way cross and a wider ring.
+        const int cycle=phase%160;
+        vx=dx*0.30f;vy=dy*0.30f;
+        if(shots&&distance<560.0f){
+            if(cycle==70){
+                const float px=-dy,py=dx;
+                for(int k=-1;k<=1;k+=2){
+                    NativePoint origin={body.position.x+px*(float)k*14.0f,body.position.y+py*(float)k*14.0f};
+                    shots->Fire(origin,px*(float)k*3.0f,py*(float)k*3.0f,1.0f,8.0f,260,body.entityToken);
+                    shots->Fire(origin,dx*3.0f,dy*3.0f,1.0f,8.0f,260,body.entityToken);
+                }
+            }else if(cycle==122){
+                for(int k=0;k<6;++k){
+                    const float angle=(float)(6.283185307179586*(double)k/6.0);
+                    shots->Fire(body.position,(float)cos((double)angle)*2.6f,(float)sin((double)angle)*2.6f,1.0f,8.0f,260,body.entityToken);
+                }
+            }
+        }
+    }else if(type==260){
+        //Haunt: fade in, ghost dash, then spectral spread and aimed burst.
+        const int cycle=phase%190;
+        if(cycle>=60&&cycle<92){vx=dx*2.35f;vy=dy*2.35f;}
+        else{vx=dx*0.34f;vy=dy*0.34f;}
+        if(shots&&distance<600.0f){
+            if(cycle==122){
+                const float px=-dy,py=dx;
+                for(int k=-2;k<=2;++k){
+                    NativePoint origin={body.position.x+dx*26.0f,body.position.y+dy*26.0f};
+                    shots->Fire(origin,dx*2.9f+px*(float)k*0.62f,dy*2.9f+py*(float)k*0.62f,1.0f,8.0f,260,body.entityToken);
+                }
+            }else if(cycle==160){
+                for(int k=-1;k<=1;++k){
+                    const float px=-dy,py=dx;
+                    NativePoint origin={body.position.x+dx*20.0f,body.position.y+dy*20.0f};
+                    shots->Fire(origin,dx*3.3f+px*(float)k*0.9f,dy*3.3f+py*(float)k*0.9f,1.0f,8.0f,260,body.entityToken);
+                }
+            }
+        }
+    }else if(type==79){
+        //Gemini: close contact charge with a short spread recovery.
+        const int cycle=phase%120;
+        if(cycle>=22&&cycle<58){vx=dx*1.75f;vy=dy*1.75f;}
+        else{vx=dx*0.42f;vy=dy*0.42f;}
+        if(shots&&distance<460.0f&&cycle==82){
+            const float px=-dy,py=dx;
+            for(int k=-1;k<=1;++k){
+                NativePoint origin={body.position.x+dx*18.0f,body.position.y+dy*18.0f};
+                shots->Fire(origin,dx*3.0f+px*(float)k*0.8f,dy*3.0f+py*(float)k*0.8f,1.0f,7.0f,220,body.entityToken);
+            }
+        }
+    }else if(type==28){
+        //Chub: charge, recovery, then a radial burst.
+        const int cycle=phase%170;
+        if(cycle>=42&&cycle<86){vx=dx*1.95f;vy=dy*1.95f;}
+        else{vx=dx*0.24f;vy=dy*0.24f;}
+        if(shots&&distance<560.0f&&cycle==112){
+            for(int k=0;k<8;++k){
+                const float angle=(float)(6.283185307179586*(double)k/8.0);
+                shots->Fire(body.position,(float)cos((double)angle)*2.55f,(float)sin((double)angle)*2.55f,1.0f,8.0f,260,body.entityToken);
+            }
+        }
+    }else if(type==99){
+        //Gurdy Jr.: bouncing charge with a six-way ring.
+        const int cycle=phase%140;
+        vx=dx*0.55f+sinf(phase*0.23f+(float)salt*0.08f)*0.75f;
+        vy=dy*0.55f+cosf(phase*0.19f+(float)salt*0.06f)*0.75f;
+        if(shots&&distance<560.0f&&cycle==96){
+            for(int k=0;k<6;++k){
+                const float angle=(float)(6.283185307179586*(double)k/6.0);
+                shots->Fire(body.position,(float)cos((double)angle)*2.8f,(float)sin((double)angle)*2.8f,1.0f,8.0f,260,body.entityToken);
+            }
+        }
+    }else if(type==264){
+        //Mega Fatty: crouch, committed leap, then an aimed five-tear fan.
+        const int cycle=phase%210;
+        if(cycle<55){vx=dx*0.16f;vy=dy*0.16f;}
+        else if(cycle<102){vx=dx*2.3f;vy=dy*2.3f;}
+        else{vx=dx*0.28f;vy=dy*0.28f;}
+        if(shots&&distance<620.0f&&cycle==142){
+            const float px=-dy,py=dx;
+            for(int k=-2;k<=2;++k){
+                NativePoint origin={body.position.x+dx*30.0f,body.position.y+dy*30.0f};
+                shots->Fire(origin,dx*3.1f+px*(float)k*0.68f,dy*3.1f+py*(float)k*0.68f,1.0f,8.0f,280,body.entityToken);
+            }
+        }
+    }else if(type==916){
+        //Bumbino: short charge and a staggered three-shot fan.
+        const int cycle=phase%190;
+        if(cycle>=30&&cycle<82){vx=dx*1.85f;vy=dy*1.85f;}
+        else{vx=dx*0.38f;vy=dy*0.38f;}
+        if(shots&&distance<560.0f){
+            if(cycle==120){
+                const float px=-dy,py=dx;
+                for(int k=-1;k<=1;++k){
+                    NativePoint origin={body.position.x+dx*24.0f,body.position.y+dy*24.0f};
+                    shots->Fire(origin,dx*3.2f+px*(float)k*0.8f,dy*3.2f+py*(float)k*0.8f,1.0f,8.0f,260,body.entityToken);
+                }
+            }else if(cycle==158){
+                for(int k=-1;k<=1;k+=2){
+                    const float px=-dy,py=dx;
+                    NativePoint origin={body.position.x+px*(float)k*16.0f,body.position.y+py*(float)k*16.0f};
+                    shots->Fire(origin,px*(float)k*2.7f,py*(float)k*2.7f,1.0f,8.0f,260,body.entityToken);
+                }
+            }
+        }
+    }else if(type==908){
+        //Baby Plum: short hops, a radial burst and a returning spread.
+        const int cycle=phase%160;
+        if(cycle<14){vx=dx*1.45f;vy=dy*1.45f;}
+        else{vx=dx*0.30f;vy=dy*0.30f;}
+        if(shots&&distance<560.0f){
+            if(cycle==70){
+                for(int k=0;k<6;++k){
+                    const float angle=(float)(6.283185307179586*(double)k/6.0);
+                    shots->Fire(body.position,(float)cos((double)angle)*2.65f,(float)sin((double)angle)*2.65f,1.0f,7.0f,240,body.entityToken);
+                }
+            }else if(cycle==122){
+                const float px=-dy,py=dx;
+                for(int k=-1;k<=1;++k){
+                    NativePoint origin={body.position.x+dx*22.0f,body.position.y+dy*22.0f};
+                    shots->Fire(origin,dx*3.0f+px*(float)k*0.75f,dy*3.0f+py*(float)k*0.75f,1.0f,7.0f,240,body.entityToken);
+                }
+            }
+        }
+    }else if(type==69){
+        //Loki: quick dash, a four-way cross, then an aimed three-shot fan.
+        const int cycle=phase%180;
+        if(cycle>=40&&cycle<72){vx=dx*2.05f;vy=dy*2.05f;}
+        else{vx=dx*0.32f;vy=dy*0.32f;}
+        if(shots&&distance<580.0f){
+            if(cycle==100){
+                const float px=-dy,py=dx;
+                shots->Fire(body.position,dx*3.1f,dy*3.1f,1.0f,8.0f,260,body.entityToken);
+                shots->Fire(body.position,-dx*3.1f,-dy*3.1f,1.0f,8.0f,260,body.entityToken);
+                shots->Fire(body.position,px*3.1f,py*3.1f,1.0f,8.0f,260,body.entityToken);
+                shots->Fire(body.position,-px*3.1f,-py*3.1f,1.0f,8.0f,260,body.entityToken);
+            }else if(cycle==150){
+                const float px=-dy,py=dx;
+                for(int k=-1;k<=1;++k){
+                    NativePoint origin={body.position.x+dx*24.0f,body.position.y+dy*24.0f};
+                    shots->Fire(origin,dx*3.2f+px*(float)k*0.85f,dy*3.2f+py*(float)k*0.85f,1.0f,8.0f,260,body.entityToken);
+                }
+            }
+        }
     }else if(type==406){
         //Ultra Greed: slow chase, committed dash, radial coin burst and an
         //aimed spread. The prepared coin actor is not spawned yet, so these

@@ -1,6 +1,7 @@
 #include "../game/game_session.h"
 #include "../game/native_room_effects.h"
 #include "../game/native_room_view.h"
+#include "../game/native_audio.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -420,8 +421,8 @@ int RunBombProbe(NativeMt& random,PortFrontend& ui){
     PortSessionStart start=session.StartNormalCharacter(1,*runtime);
     if(start.result!=NPS_WORLD_PENDING||!AdvanceToBoundary(session,*runtime)||runtime->phase!=PNR_READY){delete runtime;return 194;}
     NativeWorldResident& live=runtime->world.resident[runtime->world.currentList];
-    const int types[5]={36,62,68,71,262};
-    for(int t=0;t<5;++t){
+    const int types[16]={36,62,68,71,262,20,19,67,260,79,28,99,264,916,908,69};
+    for(int t=0;t<16;++t){
         for(int i=0;i<live.enemies.count;++i)delete live.enemies.entries[i];
         live.enemies.count=0;if(live.room){live.room->clear=false;}
         runtime->enemyShots.Clear();runtime->playerInvulnerable=1000;
@@ -429,7 +430,7 @@ int RunBombProbe(NativeMt& random,PortFrontend& ui){
         NativeEnemy* enemy=new NativeEnemy;
         if(!enemy->Begin(types[t],0,700U+(unsigned int)t*37U,at,0,1)){delete enemy;delete runtime;return 195;}
         live.enemies.entries[live.enemies.count++]=enemy;
-        if(!RunProjectileTicks(session,*runtime,-1,-1,200)){delete runtime;return 196;}
+        if(!RunProjectileTicks(session,*runtime,-1,-1,260)){delete runtime;return 196;}
         if(runtime->enemyShots.spawned==0){delete runtime;return 197;}
     }
     for(int i=0;i<live.enemies.count;++i)delete live.enemies.entries[i];
@@ -444,7 +445,30 @@ int RunBombProbe(NativeMt& random,PortFrontend& ui){
     if(runtime->deathFx.spawned<=fx0){delete runtime;return 200;}
     if(!RunProjectileTicks(session,*runtime,-1,-1,35)){delete runtime;return 201;}
     if(!runtime->deathFx.active.empty()){delete runtime;return 202;}
-    printf("BOSS_ATTACKS gurdy=1 pin=1 peep=1 fistula=1 megamaw=1 deathfx=1\n");
+    printf("BOSS_ATTACKS gurdy=1 pin=1 peep=1 fistula=1 megamaw=1 monstro=1 larry=1 duke=1 haunt=1 gemini=1 chub=1 gurdyjr=1 megafatty=1 bumbino=1 plum=1 loki=1 deathfx=1\n");
+    delete runtime;return 0;
+}int RunAudioProbe(NativeMt& random,PortFrontend& ui){
+    ui.characterPage=0;ui.characterChoice=1;ui.characterMode=0;
+    NativeAudio audio;
+    if(!audio.Initialize("runtime/port/audio"))return 203;
+    short pcm[4096*2];
+    if(!audio.PlaySfx("resources/sfx/tear fire 4.wav",0.8f))return 204;
+    audio.Mix(pcm,1024);
+    if(audio.sfxStarted!=1||audio.sfxFrames==0||audio.LastRms()<=0.0001f)return 205;
+    if(!audio.PlayMusic("resources/music/diptera sonata(basement).ogg",true,0.7f))return 206;
+    audio.Mix(pcm,4096);
+    if(audio.musicStarted!=1||audio.musicFrames==0)return 207;
+    PortNormalRuntime* runtime=new PortNormalRuntime;PortGameSession session(random,ui);
+    PortSessionStart start=session.StartNormalCharacter(1,*runtime);
+    if(start.result!=NPS_WORLD_PENDING||!AdvanceToBoundary(session,*runtime)||runtime->phase!=PNR_READY){delete runtime;return 208;}
+    runtime->audio=&audio;
+    const unsigned int before=audio.sfxStarted;
+    if(!RunProjectileTicks(session,*runtime,5,-1,8)){delete runtime;return 209;}
+    const bool gameplaySfx=audio.sfxStarted>before;
+    if(!gameplaySfx){delete runtime;return 210;}
+    printf("AUDIO device=%d sfx=%u loaded=%u music=%u music_frames=%u sfx_frames=%u rms=%.4f gameplay_sfx=%u\n",
+        audio.deviceReady?1:0,audio.sfxStarted,audio.sfxLoaded,audio.musicStarted,
+        audio.musicFrames,audio.sfxFrames,audio.LastRms(),audio.sfxStarted-before);
     delete runtime;return 0;
 }int RunFamiliarProbe(NativeMt& random,PortFrontend& ui){
     PortNormalRuntime* runtime=new PortNormalRuntime;PortGameSession session(random,ui);
@@ -913,6 +937,7 @@ int main(int argc,char** argv){
     if(!failed){int bossAward=RunBossAwardProbe(random,ui);if(bossAward){printf("BOSS_AWARD_RESULT failed=%d\n",bossAward);failed=true;}}
     if(!failed){int reroll=RunRerollCacheProbe(random,ui);if(reroll){printf("REROLL_RESULT failed=%d\n",reroll);failed=true;}}
     if(!failed){int bossAttacks=RunBossAttackProbe(random,ui);if(bossAttacks){printf("BOSS_ATTACKS_RESULT failed=%d\n",bossAttacks);failed=true;}}
+    if(!failed){int audioProbe=RunAudioProbe(random,ui);if(audioProbe){printf("AUDIO_RESULT failed=%d\n",audioProbe);failed=true;}}
     if(!failed){int familiar=RunFamiliarProbe(random,ui);if(familiar){printf("FAMILIAR_RESULT failed=%d\n",familiar);failed=true;}}
     if(!failed){int cont=RunContinueProbe(random,ui);if(cont){printf("CONTINUE_RESULT failed=%d\n",cont);failed=true;}}
     if(!failed){int nativeCont=RunNativeContinueProbe(random,ui);if(nativeCont){printf("NATIVE_CONTINUE_RESULT failed=%d\n",nativeCont);failed=true;}}

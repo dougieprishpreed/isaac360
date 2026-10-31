@@ -30,7 +30,9 @@ def main():
     reroll=re.search(r'^REROLL purity=(\d+) treatment=(\d+) d8=(\d+) missing=(\d+) damage=(-?[0-9.]+) range=(-?[0-9.]+)',log,re.M)
     bossAward=re.search(r'^BOSS_AWARD identity=(\d+) achievement=(\d+) persisted=(\d+)',log,re.M)
     trigger=re.search(r'^NATIVE_CURRENT_TRIGGER perm_damage=(-?[0-9.]+) perm_range=(-?[0-9.]+) purity=(\d+) active=(\d+) stacks=(\d+) crown_disabled=(\d+)',log,re.M)
-    bossAttacks=re.search(r'^BOSS_ATTACKS gurdy=(\d+) pin=(\d+) peep=(\d+) fistula=(\d+) megamaw=(\d+) deathfx=(\d+)',log,re.M)
+    bossAttacks=re.search(r'^BOSS_ATTACKS (.+)$',log,re.M)
+    bossFlags=bossAttacks.group(1) if bossAttacks else ''
+    audio=re.search(r'^AUDIO device=(\d+) sfx=(\d+) loaded=(\d+) music=(\d+) music_frames=(\d+) sfx_frames=(\d+) rms=(-?[0-9.]+) gameplay_sfx=(\d+)',log,re.M)
     pocket=re.search(r'^POCKET hp=(-?\d+)/(-?\d+) bombs=(-?\d+) keys=(-?\d+) coins=(-?\d+)',log,re.M)
     active=re.search(r'^ACTIVE id=(\d+) hp=(-?\d+)/(-?\d+)',log,re.M)
     familiar=re.search(r'^FAMILIAR spawned=(\d+) shots=(\d+) hits=(\d+) enemies=(\d+)',log,re.M)
@@ -142,12 +144,31 @@ def main():
             'native_trigger_active':int(trigger.group(4)) if trigger else 0,
             'native_trigger_stacks':int(trigger.group(5)) if trigger else 0,
             'native_trigger_crown_disabled':int(trigger.group(6)) if trigger else 0,
-            'boss_attack_gurdy':int(bossAttacks.group(1)) if bossAttacks else 0,
-            'boss_attack_pin':int(bossAttacks.group(2)) if bossAttacks else 0,
-            'boss_attack_peep':int(bossAttacks.group(3)) if bossAttacks else 0,
-            'boss_attack_fistula':int(bossAttacks.group(4)) if bossAttacks else 0,
-            'boss_attack_megamaw':int(bossAttacks.group(5)) if bossAttacks else 0,
-            'death_fx':int(bossAttacks.group(6)) if bossAttacks else 0,
+            'boss_attack_gurdy':1 if 'gurdy=1' in bossFlags else 0,
+            'boss_attack_pin':1 if 'pin=1' in bossFlags else 0,
+            'boss_attack_peep':1 if 'peep=1' in bossFlags else 0,
+            'boss_attack_fistula':1 if 'fistula=1' in bossFlags else 0,
+            'boss_attack_megamaw':1 if 'megamaw=1' in bossFlags else 0,
+            'boss_attack_monstro':1 if 'monstro=1' in bossFlags else 0,
+            'boss_attack_larry':1 if 'larry=1' in bossFlags else 0,
+            'boss_attack_duke':1 if 'duke=1' in bossFlags else 0,
+            'boss_attack_haunt':1 if 'haunt=1' in bossFlags else 0,
+            'boss_attack_gemini':1 if 'gemini=1' in bossFlags else 0,
+            'boss_attack_chub':1 if 'chub=1' in bossFlags else 0,
+            'boss_attack_gurdyjr':1 if 'gurdyjr=1' in bossFlags else 0,
+            'boss_attack_megafatty':1 if 'megafatty=1' in bossFlags else 0,
+            'boss_attack_bumbino':1 if 'bumbino=1' in bossFlags else 0,
+            'boss_attack_plum':1 if 'plum=1' in bossFlags else 0,
+            'boss_attack_loki':1 if 'loki=1' in bossFlags else 0,
+            'death_fx':1 if 'deathfx=1' in bossFlags else 0,
+            'audio_device':int(audio.group(1)) if audio else 0,
+            'audio_sfx':int(audio.group(2)) if audio else 0,
+            'audio_loaded':int(audio.group(3)) if audio else 0,
+            'audio_music':int(audio.group(4)) if audio else 0,
+            'audio_music_frames':int(audio.group(5)) if audio else 0,
+            'audio_sfx_frames':int(audio.group(6)) if audio else 0,
+            'audio_rms':float(audio.group(7)) if audio else 0.0,
+            'audio_gameplay_sfx':int(audio.group(8)) if audio else 0,
             'pocket_hp':int(pocket.group(1)) if pocket else -1,
             'pocket_max_hp':int(pocket.group(2)) if pocket else -1,
             'pocket_bombs':int(pocket.group(3)) if pocket else -1,

@@ -1,6 +1,7 @@
 #include "native_projectile.h"
 #include "game_session.h"
 #include "native_player_input.h"
+#include "native_audio.h"
 #include <math.h>
 #include <string.h>
 namespace {
@@ -45,9 +46,12 @@ bool NativeProjectileSystem::Step(PortNormalRuntime& runtime,NativeActionSource*
             float radius=enemy->body.collision.radius+4.0f;
             if(dx*dx+dy*dy<=radius*radius){
                 enemy->Damage(p.damage);hitEnemy=true;
+                if(runtime.audio)runtime.audio->PlaySfx("resources/sfx/v2/meat impact.wav",0.45f);
                 if(enemy->dead){++enemyKills;++runtime.enemyKills;
+                    if(runtime.audio)runtime.audio->PlaySfx("resources/sfx/death burst small.wav",0.55f);
                     if(NativeBossEntityType(enemy->type,enemy->body.variant)){
                         runtime.bossDefeated=true;
+                        if(runtime.audio)runtime.audio->PlaySfx("resources/sfx/death_burst_large_0.wav",0.7f);
                         if(room->trapdoorState==0){room->trapdoorState=1;room->trapdoorTimer=0;
                             room->trapdoorX=enemy->body.position.x;room->trapdoorY=enemy->body.position.y;}
                     }}
@@ -75,6 +79,7 @@ bool NativeProjectileSystem::Step(PortNormalRuntime& runtime,NativeActionSource*
         p.velocity.x=shot.x/length*speed;p.velocity.y=shot.y/length*speed;
         p.damage=state.stats.damage;p.travelled=0;p.range=state.stats.range;p.owner=body.entityToken;
         active.push_back(p);++spawned;
+        if(runtime.audio)runtime.audio->PlaySfx("resources/sfx/tear fire 4.wav",0.42f);
         float delay=state.stats.fireDelay;if(delay<1.0f)delay=1.0f;cooldown=delay;
     }
     if(next)*next=0;return true;
@@ -107,6 +112,7 @@ bool NativeEnemyShotSystem::Step(PortNormalRuntime& runtime){
                 if(runtime.playerInvulnerable<=0){
                     bool dead=runtime.playerState.Damage((int)shot.damage);
                     ++runtime.playerHits;runtime.playerInvulnerable=30;
+                    if(runtime.audio)runtime.audio->PlaySfx("resources/sfx/player/hurt grunt 1.wav",0.7f);
                     if(dead){runtime.playerDead=true;runtime.playerBody.removed=true;runtime.phase=PNR_DYING;runtime.playerDeathTicks=0;}
                 }
             }
@@ -186,6 +192,7 @@ bool NativeBombSystem::Step(PortNormalRuntime& runtime){
         }
         if(live.enemies.count==0)room->clear=true;
         ++explosions;
+        if(runtime.audio)runtime.audio->PlaySfx("resources/sfx/explosion_strong1.wav",0.65f);
         active.erase(active.begin()+i);
     }
     return true;
