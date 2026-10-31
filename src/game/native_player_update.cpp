@@ -4,6 +4,7 @@
 #include "native_room_effects.h"
 #include "native_room_update.h"
 #include <algorithm>
+#include <math.h>
 #include <string.h>
 namespace {
 //Read only bytes actually written by the constructor/Init or this call.
@@ -616,6 +617,28 @@ bool NativePlayerUpdate::Resume(PortNormalRuntime& runtime,NativeActionSource* a
                     case 45: //Yum Heart
                         if(state.redHearts<state.maxRedHearts)state.redHearts=std::min(state.maxRedHearts,state.redHearts+2);
                         else state.soulHearts=std::min(99,state.soulHearts+2);break;
+                    case 34: //Book of Belial: +2 damage for the room
+                        state.roomDamageBonus+=2.0f;state.stats.RecomputeCache(state);break;
+                    case 37:{ //Mr. Boom: a free placed bomb
+                        int saved=state.bombs;if(state.bombs<1)state.bombs=1;
+                        if(runtime.bombs.Place(runtime)){}state.bombs=saved;break;}
+                    case 38:{ //Tammy's Head: ten radial tears
+                        const int count=10;const float speed=state.stats.shotSpeed*10.0f;
+                        for(int k=0;k<count;++k){
+                            const float angle=(float)(6.283185307179586*(double)k/(double)count);
+                            NativeProjectile p;p.position=runtime.playerBody.position;
+                            p.velocity.x=(float)cos((double)angle)*speed;
+                            p.velocity.y=(float)sin((double)angle)*speed;
+                            p.damage=state.stats.damage;p.travelled=0;p.range=state.stats.range;
+                            p.owner=runtime.playerBody.entityToken;
+                            runtime.projectiles.active.push_back(p);++runtime.projectiles.spawned;
+                        }break;}
+                    case 58: //Book of Shadows: ten seconds of invulnerability
+                        runtime.playerInvulnerable=300;break;
+                    case 83: //The Nail: room damage/speed; black-heart part remains explicit
+                        state.roomDamageBonus+=2.0f;state.roomSpeedBonus-=0.18f;state.stats.RecomputeCache(state);break;
+                    case 126: //Razor Blade: self-damage then room damage
+                        state.Damage(1);state.roomDamageBonus+=1.2f;state.stats.RecomputeCache(state);break;
                     case 35: //Necronomicon
                         DamageAllEnemies(runtime,40.0f);break;
                     case 40: //Kamikaze

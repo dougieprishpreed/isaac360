@@ -263,6 +263,7 @@ bool NativeRoomUpdate::TickSimulationTail(PortNormalRuntime& runtime,NativeActio
                 }}
             }
             runtime.projectiles.Reset();runtime.enemyShots.Clear();runtime.bombs.Clear();runtime.familiars.Clear();runtime.doorTransitionGrace=30;++runtime.roomTransitions;
+            runtime.playerState.ResetRoomConditionalCache();
             return true;
         }
     }

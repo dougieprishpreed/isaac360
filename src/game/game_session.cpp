@@ -175,6 +175,7 @@ bool PortGameSession::AdvanceGreedWave(PortNormalRuntime& runtime,const NativeSc
         runtime.playerBody.velocity.x=runtime.playerBody.velocity.y=0;runtime.playerBody.removed=false;
     }
     runtime.projectiles.Reset();runtime.enemyShots.Clear();runtime.bombs.Clear();runtime.familiars.Clear();
+    runtime.playerState.ResetRoomConditionalCache();
     runtime.doorTransitionGrace=0;
     return true;
 }
@@ -233,6 +234,7 @@ bool PortGameSession::DescendNormal(PortNormalRuntime& runtime,NativeSceneFiles&
     runtime.playerBody.removed=false;
     runtime.playerInvulnerable=0;runtime.doorTransitionGrace=0;
     runtime.projectiles.Reset();runtime.enemyShots.Clear();runtime.bombs.Clear();runtime.familiars.Clear();
+    runtime.playerState.ResetFloorConditionalCache();
     runtime.descendRequested=false;runtime.bossDefeated=false;
     runtime.roomTransitions=0;runtime.missingNativePrerequisite=0;
     runtime.phase=PNR_READY;

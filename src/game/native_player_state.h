@@ -21,6 +21,14 @@ public:
     int keys,bombs,coins; //12a4,12ac,12b0.
     bool resourcesReady,runInitializing; //Shared New Run lifecycle's native243378.
     bool native1734,playerTearsEnabled; //709ed1=false;709ad7's1335=true.
+    //Conditional cache owners for Bloody Lust/Bloody Gust (shared hit count)
+    //and Crown of Light's per-room disable. Reset by floor/room transitions.
+    int damageTakenThisFloor;bool crownOfLightDisabled;
+    //Blood Oath's floor-owned drained-health bonuses. The effect persists even
+    //if the item is removed, until the next floor start.
+    float bloodOathDamage,bloodOathSpeed;
+    //Current-room active-item buffs (Book of Belial, The Nail, Razor Blade).
+    float roomDamageBonus,roomSpeedBonus;
     int boneHearts,boneMask,brokenHearts,rottenHearts,storedHearts,bombReserve;
     short healthItemSlots,healthItemRemainder;bool changingHealthItems;
     int activeItems[4],temporaryCollectible;
@@ -59,6 +67,10 @@ public:
     bool HeartLimit(bool ignoreBroken,int* result) const;
     bool BeginFresh(const NativeRunStart&,NativePlayerStartup&,NativeEntityBody&);
     bool FullHealth() const; //Per ordinary player in00908b40 /0078bb50.
+    //Conditional cache room/floor boundaries. The rage counter is per floor;
+    //Crown of Light's deactivation is per room.
+    void ResetRoomConditionalCache();
+    void ResetFloorConditionalCache();
     bool AddHeartContainers(int halfHearts){if(!AddMaxHearts(halfHearts))return false;redHearts+=halfHearts;if(redHearts>maxRedHearts)redHearts=maxRedHearts;return true;}
     bool LowHealth() const;
     void Swap(NativePlayerState&);

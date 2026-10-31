@@ -157,6 +157,33 @@ bool NativePlayerStats::RecomputeCache(const NativePlayerState& state){
  //Cricket's Head, Magic Mushroom and the Blood of the Martyr/Book of Belial
  //pair share one1.5x damage multiplier instead of stacking.
  if(sharedDamage15)damageMul=Mul(damageMul,1.5f);
+ //Conditional cache owners. The hit counter is shared by Bloody Lust and
+ //Bloody Gust and resets on floor descent; Crown of Light's disable resets on
+ //room entry. Adrenaline and Dark Prince's Crown are derived from health.
+ const int rage=std::min(state.damageTakenThisFloor,6);
+ const bool hasLust=157<state.collectibleCounts.size()&&state.collectibleCounts[157]>0;
+ const bool hasGust=695<state.collectibleCounts.size()&&state.collectibleCounts[695]>0;
+ if(hasLust){
+  float bonus=0;for(int i=0;i<rage;++i)bonus=Add(bonus,Add(0.5f,Mul(0.2f,(float)i)));
+  damageAdd=Add(damageAdd,bonus);
+ }
+ if(hasGust){
+  for(int i=0;i<rage;++i){speedAdd=Add(speedAdd,Add(0.07f,Mul(0.04f,(float)i)));
+   fireAdd=Add(fireAdd,Add(0.25f,Mul(0.1f,(float)i)));}
+ }
+ if(493<state.collectibleCounts.size()&&state.collectibleCounts[493]>0){
+  const int missing=(state.maxRedHearts-state.redHearts)/2;
+  if(missing>0){volatile float gain=(float)pow((double)(2*missing),1.6)*0.1f;damageAdd=Add(damageAdd,gain);}
+ }
+ if(442<state.collectibleCounts.size()&&state.collectibleCounts[442]>0&&state.redHearts==2){
+  fireAdd=Add(fireAdd,2.0f);rangeAdd=Add(rangeAdd,1.5f);shotAdd=Add(shotAdd,0.2f);
+ }
+ if(415<state.collectibleCounts.size()&&state.collectibleCounts[415]>0&&!state.crownOfLightDisabled&&
+    state.maxRedHearts>0&&state.redHearts>=state.maxRedHearts){
+  damageMul=Mul(damageMul,2.0f);shotAdd=Add(shotAdd,-0.3f);
+ }
+ damageAdd=Add(damageAdd,state.bloodOathDamage);speedAdd=Add(speedAdd,state.bloodOathSpeed);
+ damageAdd=Add(damageAdd,state.roomDamageBonus);speedAdd=Add(speedAdd,state.roomSpeedBonus);
  //Temporary pill/card/active layer is added after the collectible cache.
  tears=Add(tears,bonusTears);fireAdd=Add(fireAdd,bonusFireRate);
  damage=Mul(Add(Add(baseDamage,damageAdd),bonusDamage),damageMul);

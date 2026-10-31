@@ -333,6 +333,33 @@ int RunBombProbe(NativeMt& random,PortFrontend& ui){
     if(runtime->playerState.redHearts!=std::min(maxHp,6)){delete runtime;return 126;}
     printf("ACTIVE id=%d hp=%d/%d\n",runtime->playerState.activeItems[0],runtime->playerState.redHearts,runtime->playerState.maxRedHearts);
     delete runtime;return 0;
+}int RunActiveBatchProbe(NativeMt& random,PortFrontend& ui){
+    PortNormalRuntime* runtime=new PortNormalRuntime;PortGameSession session(random,ui);
+    PortSessionStart start=session.StartNormalCharacter(1,*runtime);
+    if(start.result!=NPS_WORLD_PENDING||!AdvanceToBoundary(session,*runtime)||runtime->phase!=PNR_READY){delete runtime;return 162;}
+    NativePlayerState& state=runtime->playerState;
+    if(!state.GrantCollectible(34)||!state.GrantCollectible(38)||!state.GrantCollectible(58)||!state.GrantCollectible(37)){delete runtime;return 163;}
+    state.activeItems[0]=34;state.activeItems[1]=38;state.activeItems[2]=58;state.activeItems[3]=37;
+    const float damage0=state.stats.damage;
+    if(!RunActionPress(session,*runtime,9,1)){delete runtime;return 164;}
+    if(fabs(state.stats.damage-(damage0+2.0f))>0.001f){delete runtime;return 165;} //Book of Belial
+    if(!RunProjectileTicks(session,*runtime,-1,-1,121)){delete runtime;return 166;}
+    const unsigned int shots0=runtime->projectiles.spawned;
+    state.activeItems[0]=38;
+    if(!RunActionPress(session,*runtime,9,1)){delete runtime;return 167;}
+    if(runtime->projectiles.spawned<shots0+10){delete runtime;return 168;} //Tammy's Head
+    if(!RunProjectileTicks(session,*runtime,-1,-1,121)){delete runtime;return 169;}
+    state.activeItems[0]=58;
+    if(!RunActionPress(session,*runtime,9,1)){delete runtime;return 170;}
+    const bool shadowsOk=runtime->playerInvulnerable>=299;
+    if(!shadowsOk){delete runtime;return 171;} //Book of Shadows
+    if(!RunProjectileTicks(session,*runtime,-1,-1,121)){delete runtime;return 172;}
+    const int bombs0=state.bombs;const unsigned int placed0=runtime->bombs.placed;
+    state.activeItems[0]=37;
+    if(!RunActionPress(session,*runtime,9,1)){delete runtime;return 173;}
+    if(state.bombs!=bombs0||runtime->bombs.placed!=placed0+1){delete runtime;return 174;} //Mr. Boom is free
+    printf("ACTIVE_BATCH belial=%d tammy=10 shadows=%d mrboom=1\n",(int)(state.roomDamageBonus),shadowsOk?1:0);
+    delete runtime;return 0;
 }int RunFamiliarProbe(NativeMt& random,PortFrontend& ui){
     PortNormalRuntime* runtime=new PortNormalRuntime;PortGameSession session(random,ui);
     PortSessionStart start=session.StartNormalCharacter(1,*runtime);
@@ -519,6 +546,37 @@ int RunBombProbe(NativeMt& random,PortFrontend& ui){
     printf("STAT order=1 resource_hp=%d/%d cache_damage=%.3f cache_speed=%.3f\n",reverse->playerState.redHearts,reverse->playerState.maxRedHearts,
         reverse->playerState.stats.damage,reverse->playerState.stats.moveSpeed);
     delete reverse;return 0;
+}int RunConditionalCacheProbe(NativeMt& random,PortFrontend& ui){
+    (void)random;ui.characterPage=0;ui.characterChoice=1;ui.characterMode=0;
+    PortNormalRuntime* runtime=new PortNormalRuntime;PortGameSession session(random,ui);
+    PortSessionStart start=session.StartNormalCharacter(1,*runtime);
+    if(start.result!=NPS_WORLD_PENDING||!AdvanceToBoundary(session,*runtime)||runtime->phase!=PNR_READY||!runtime->playerState.stats.ready){delete runtime;return 113;}
+    NativePlayerState& state=runtime->playerState;
+    const float baseDamage=state.stats.damage,baseShot=state.stats.shotSpeed;
+    if(!state.GrantCollectible(415)){delete runtime;return 114;} //Crown of Light
+    if(state.stats.damage<baseDamage*1.9f||state.stats.shotSpeed>=baseShot){delete runtime;return 115;}
+    if(!state.Damage(1)){}
+    if(fabs(state.stats.damage-baseDamage)>0.01f){delete runtime;return 116;} //crown disabled for room
+    state.damageTakenThisFloor=0; //isolate the rage tests; crown stays disabled
+    if(!state.GrantCollectible(157)||!state.GrantCollectible(695)){delete runtime;return 117;} //Bloody Lust/Gust
+    state.redHearts=state.maxRedHearts;state.stats.RecomputeCache(state);
+    const float lust0=state.stats.damage,gust0=state.stats.moveSpeed,fd0=state.stats.fireDelay;
+    if(!state.Damage(1)){}
+    if(fabs(state.stats.damage-(lust0+0.5f))>0.001f||fabs(state.stats.moveSpeed-(gust0+0.07f))>0.001f||!(state.stats.fireDelay<fd0)){delete runtime;return 118;}
+    const float lust1=state.stats.damage,gust1=state.stats.moveSpeed;
+    if(!state.Damage(1)){}
+    if(fabs(state.stats.damage-(lust1+0.7f))>0.001f||fabs(state.stats.moveSpeed-(gust1+0.11f))>0.001f){delete runtime;return 119;}
+    state.redHearts=2;if(state.maxRedHearts<2)state.maxRedHearts=2;state.stats.RecomputeCache(state);
+    const float range0=state.stats.range,shot0=state.stats.shotSpeed,fd1=state.stats.fireDelay;
+    if(!state.GrantCollectible(442)){delete runtime;return 120;} //Dark Prince's Crown
+    if(fabs(state.stats.range-(range0+1.5f))>0.001f||fabs(state.stats.shotSpeed-(shot0+0.2f))>0.001f||!(state.stats.fireDelay<fd1)){delete runtime;return 121;}
+    state.soulHearts=0;state.blackHeartMask=0;state.boneHearts=0;state.redHearts=state.maxRedHearts;
+    if(!state.GrantCollectible(569)){delete runtime;return 122;} //Blood Oath
+    state.ResetFloorConditionalCache();
+    if(state.redHearts!=1||fabs(state.bloodOathDamage-0.9375f)>0.001f||fabs(state.bloodOathSpeed-0.25f)>0.001f||state.damageTakenThisFloor!=5){delete runtime;return 123;}
+    printf("CONDITIONAL crown=1 disabled=1 lust=2 gust=2 dprince=1 blood_oath=1 hp=%d/%d oath_damage=%.3f oath_speed=%.3f damage=%.3f speed=%.3f\n",
+        state.redHearts,state.maxRedHearts,state.bloodOathDamage,state.bloodOathSpeed,state.stats.damage,state.stats.moveSpeed);
+    delete runtime;return 0;
 }int RunHardModeProbe(NativeMt& random,PortFrontend& ui){
     (void)random;(void)ui;
     PortFrontend local;local.Init(false);
@@ -747,8 +805,10 @@ int main(int argc,char** argv){
     if(!failed){int bomb=RunBombProbe(random,ui);if(bomb){printf("BOMB_RESULT failed=%d\n",bomb);failed=true;}}
     if(!failed){int hard=RunHardModeProbe(random,ui);if(hard){printf("HARD_RESULT failed=%d\n",hard);failed=true;}}
     if(!failed){int stat=RunStatProbe(random,ui);if(stat){printf("STAT_RESULT failed=%d\n",stat);failed=true;}}
+    if(!failed){int cond=RunConditionalCacheProbe(random,ui);if(cond){printf("CONDITIONAL_RESULT failed=%d\n",cond);failed=true;}}
     if(!failed){int pocket=RunPocketProbe(random,ui);if(pocket){printf("POCKET_RESULT failed=%d\n",pocket);failed=true;}}
     if(!failed){int active=RunActiveProbe(random,ui);if(active){printf("ACTIVE_RESULT failed=%d\n",active);failed=true;}}
+    if(!failed){int activeBatch=RunActiveBatchProbe(random,ui);if(activeBatch){printf("ACTIVE_BATCH_RESULT failed=%d\n",activeBatch);failed=true;}}
     if(!failed){int familiar=RunFamiliarProbe(random,ui);if(familiar){printf("FAMILIAR_RESULT failed=%d\n",familiar);failed=true;}}
     if(!failed){int cont=RunContinueProbe(random,ui);if(cont){printf("CONTINUE_RESULT failed=%d\n",cont);failed=true;}}
     if(!failed){int nativeCont=RunNativeContinueProbe(random,ui);if(nativeCont){printf("NATIVE_CONTINUE_RESULT failed=%d\n",nativeCont);failed=true;}}

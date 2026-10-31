@@ -25,6 +25,8 @@ def main():
     hard=re.search(r'^HARD mode=(\d+) phase=(\d+) player=(\d+) hp=(-?\d+)/(-?\d+)',log,re.M)
     stat=re.search(r'^STAT fd=(-?[0-9.]+) damage=(-?[0-9.]+) speed=(-?[0-9.]+) luck=(-?[0-9.]+)',log,re.M)
     statOrder=re.search(r'^STAT order=(\d+) resource_hp=(-?\d+)/(-?\d+) cache_damage=(-?[0-9.]+) cache_speed=(-?[0-9.]+)',log,re.M)
+    conditional=re.search(r'^CONDITIONAL crown=(\d+) disabled=(\d+) lust=(\d+) gust=(\d+) dprince=(\d+) blood_oath=(\d+) hp=(-?\d+)/(-?\d+) oath_damage=(-?[0-9.]+) oath_speed=(-?[0-9.]+)',log,re.M)
+    activeBatch=re.search(r'^ACTIVE_BATCH belial=(\d+) tammy=(\d+) shadows=(\d+) mrboom=(\d+)',log,re.M)
     pocket=re.search(r'^POCKET hp=(-?\d+)/(-?\d+) bombs=(-?\d+) keys=(-?\d+) coins=(-?\d+)',log,re.M)
     active=re.search(r'^ACTIVE id=(\d+) hp=(-?\d+)/(-?\d+)',log,re.M)
     familiar=re.search(r'^FAMILIAR spawned=(\d+) shots=(\d+) hits=(\d+) enemies=(\d+)',log,re.M)
@@ -109,6 +111,18 @@ def main():
             'stat_resource_hp':int(statOrder.group(2)) if statOrder else -1,
             'stat_cache_damage':float(statOrder.group(4)) if statOrder else 0.0,
             'stat_cache_speed':float(statOrder.group(5)) if statOrder else 0.0,
+            'conditional_crown':int(conditional.group(1)) if conditional else 0,
+            'conditional_crown_disabled':int(conditional.group(2)) if conditional else 0,
+            'conditional_lust':int(conditional.group(3)) if conditional else 0,
+            'conditional_gust':int(conditional.group(4)) if conditional else 0,
+            'conditional_dprince':int(conditional.group(5)) if conditional else 0,
+            'conditional_blood_oath':int(conditional.group(6)) if conditional else 0,
+            'conditional_oath_damage':float(conditional.group(9)) if conditional else 0.0,
+            'conditional_oath_speed':float(conditional.group(10)) if conditional else 0.0,
+            'active_batch_belial':int(activeBatch.group(1)) if activeBatch else 0,
+            'active_batch_tammy':int(activeBatch.group(2)) if activeBatch else 0,
+            'active_batch_shadows':int(activeBatch.group(3)) if activeBatch else 0,
+            'active_batch_mrboom':int(activeBatch.group(4)) if activeBatch else 0,
             'pocket_hp':int(pocket.group(1)) if pocket else -1,
             'pocket_max_hp':int(pocket.group(2)) if pocket else -1,
             'pocket_bombs':int(pocket.group(3)) if pocket else -1,
