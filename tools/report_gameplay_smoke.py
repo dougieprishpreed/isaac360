@@ -27,6 +27,7 @@ def main():
     pocket=re.search(r'^POCKET hp=(-?\d+)/(-?\d+) bombs=(-?\d+) keys=(-?\d+) coins=(-?\d+)',log,re.M)
     active=re.search(r'^ACTIVE id=(\d+) hp=(-?\d+)/(-?\d+)',log,re.M)
     familiar=re.search(r'^FAMILIAR spawned=(\d+) shots=(\d+) hits=(\d+) enemies=(\d+)',log,re.M)
+    cont=re.search(r'^CONTINUE stage=(\d+) hp=(-?\d+)/(-?\d+) keys=(-?\d+) card=(-?\d+) pill=(-?\d+) items=(\d+)',log,re.M)
     deathflow=re.search(r'^DEATH_FLOW dyingTicks=(\d+) gameOver=(\d+) restartResult=(\d+) restartPhase=(\d+) restartHP=(-?\d+)/(-?\d+)',log,re.M)
     lock=re.search(r'^LOCK treasureSlot=(\d+) noKeyClosed=(\d+) keyOpened=(\d+) keysLeft=(-?\d+) doorsUnlocked=(\d+) bossOpenWithoutDefeat=(\d+) bossDefeated=(\d+)',log,re.M)
     paths=set()
@@ -103,6 +104,9 @@ def main():
             'familiar_spawned':int(familiar.group(1)) if familiar else 0,
             'familiar_shots':int(familiar.group(2)) if familiar else 0,
             'familiar_hits':int(familiar.group(3)) if familiar else 0,
+            'continue_stage':int(cont.group(1)) if cont else -1,
+            'continue_hp':int(cont.group(2)) if cont else -1,
+            'continue_keys':int(cont.group(4)) if cont else -1,
             'dying_ticks':int(deathflow.group(1)) if deathflow else 0,
             'game_over':bool(int(deathflow.group(2))) if deathflow else False,
             'restart_ready':bool(deathflow and int(deathflow.group(4))==5) if deathflow else False,

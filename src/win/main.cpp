@@ -315,14 +315,16 @@ static void BuildActions(const bool* held,unsigned int frame,NativeActionFrame* 
     for(int i=0;i<12;++i)gPrev[i]=held[i];
 }
 int main(int argc,char** argv){
-    unsigned int seed=1;int frames=0,shotFrame=-1,descendTimes=0;bool hidden=false,fast=false,interactive=true,teleport=false,rewardTest=false,windowShot=false,layoutDump=false,bossEnter=false,invulnerable=false;const char* scriptText=0;const char* shotFile="build/windows/frame.bmp";
+    unsigned int seed=1;int frames=0,shotFrame=-1,descendTimes=0;bool hidden=false,fast=false,interactive=true,teleport=false,rewardTest=false,windowShot=false,layoutDump=false,bossEnter=false,invulnerable=false,continueRun=false,saveOnExit=false;const char* scriptText=0;const char* shotFile="build/windows/frame.bmp";const char* continueFile="build/windows/continue.dat";
     for(int i=1;i<argc;++i){if(!strcmp(argv[i],"--seed")&&i+1<argc)seed=(unsigned int)strtoul(argv[++i],0,10);
         else if(!strcmp(argv[i],"--frames")&&i+1<argc)frames=atoi(argv[++i]);else if(!strcmp(argv[i],"--hidden"))hidden=true;
         else if(!strcmp(argv[i],"--fast"))fast=true;else if(!strcmp(argv[i],"--script")&&i+1<argc){scriptText=argv[++i];interactive=false;}
         else if(!strcmp(argv[i],"--shot-frame")&&i+1<argc)shotFrame=atoi(argv[++i]);else if(!strcmp(argv[i],"--shot-file")&&i+1<argc)shotFile=argv[++i];
         else if(!strcmp(argv[i],"--teleport-pickups"))teleport=true;else if(!strcmp(argv[i],"--reward-test"))rewardTest=true;
         else if(!strcmp(argv[i],"--window-shot"))windowShot=true;else if(!strcmp(argv[i],"--layout"))layoutDump=true;else if(!strcmp(argv[i],"--boss"))bossEnter=true;
-        else if(!strcmp(argv[i],"--invulnerable"))invulnerable=true;else if(!strcmp(argv[i],"--descend")&&i+1<argc)descendTimes=atoi(argv[++i]);}
+        else if(!strcmp(argv[i],"--invulnerable"))invulnerable=true;else if(!strcmp(argv[i],"--continue"))continueRun=true;else if(!strcmp(argv[i],"--save"))saveOnExit=true;
+        else if(!strcmp(argv[i],"--continue-file")&&i+1<argc)continueFile=argv[++i];
+        else if(!strcmp(argv[i],"--descend")&&i+1<argc)descendTimes=atoi(argv[++i]);}
     CreateDirectoryA("build\\windows",0);CreateDirectoryA("build\\windows\\profile",0);gLog=fopen("build/windows/port.log","wt");
     std::vector<Segment> script;if(scriptText)ParseScript(scriptText,script);
     if(!CreateHiddenWindow(hidden)||!InitD3D())return 2;
@@ -398,5 +400,6 @@ int main(int argc,char** argv){
         ++frame;
         if(!fast)Sleep(33);else Sleep(0);
     }
+    if(saveOnExit&&runtime.phase==PNR_READY)Log("WIN save result=%d file=%s",session.SaveContinue(continueFile,runtime)?1:0,continueFile);
     Log("WIN done frames=%d phase=%d",frame,runtime.phase);if(gLog)fclose(gLog);return 0;
 }

@@ -1,6 +1,7 @@
 #include "game_session.h"
 #include "native_room_update.h"
 #include <string.h>
+#include <stdio.h>
 PortNormalRuntime::PortNormalRuntime():initialSaveFileWritten(false),phase(PNR_IDLE),missingNativePrerequisite(0),completePlayerInitializations(0),completePlayerTicks(0),completeWholeGameplayTicks(0),enemyKills(0),doorsOpened(0),roomTransitions(0),playerHits(0),playerDeathTicks(0),doorsUnlocked(0),gameOverCount(0),pickupsCollected(0),collectiblesCollected(0),playerInvulnerable(0),lastCollectible(0),playerDead(false),bossDefeated(false),descendRequested(false),startingItemsGranted(false),doorTransitionGrace(0),tickFrame(0),playerTailTrailSegments(0),playerTailRenderCallbacks(0),playerTailTicks(0),roomEntryPrefixPrepared(false) {
     memset(&run,0,sizeof(run));memset(&entryIssue,0,sizeof(entryIssue));
     gameRandom.Default();
@@ -271,4 +272,112 @@ NativePlayerVelocityResult PortGameSession::EvaluateNormalVelocity(const NormalR
         if(issue){issue->nextAddress=0;issue->missingEffect=-1;issue->sourceResult=NPI_BAD_REQUEST;}return NPV_BAD_REQUEST;
     }
     return NativePlayerVelocityCore(c,actions,effects,output,issue);
+}
+
+bool PortGameSession::SaveContinue(const char* path,PortNormalRuntime& runtime){
+    if(!path||runtime.phase!=PNR_READY||runtime.playerDead||!runtime.world.Current())return false;
+    FILE* f=fopen(path,"wb");
+    if(!f)return false;
+    fprintf(f,"BOI360_C1\n");
+    fprintf(f,"%u %d %d %d %d\n",runtime.run.seeds.start,runtime.run.context.stage,
+        frontend.characterPage,frontend.characterChoice,frontend.characterMode);
+    fprintf(f,"%d %d %d %d %d %d %d\n",runtime.playerState.redHearts,runtime.playerState.maxRedHearts,
+        runtime.playerState.soulHearts,runtime.playerState.blackHeartMask,runtime.playerState.keys,
+        runtime.playerState.bombs,runtime.playerState.coins);
+    fprintf(f,"%.3f %.3f\n",runtime.playerBody.position.x,runtime.playerBody.position.y);
+    const NativePlacedRoom* d=runtime.world.CurrentDescriptor();
+    fprintf(f,"%d %d %d\n",d?d->definition:-1,d?d->gridIndex:-1,d?d->dimension:-1);
+    unsigned int items=0;
+    for(unsigned int i=0;i<runtime.playerState.collectibleCounts.size();++i)
+        if(runtime.playerState.collectibleCounts[i])++items;
+    fprintf(f,"%u\n",items);
+    for(unsigned int i=0;i<runtime.playerState.collectibleCounts.size();++i)
+        if(runtime.playerState.collectibleCounts[i])fprintf(f,"%u %d\n",i,runtime.playerState.collectibleCounts[i]);
+    unsigned int trinkets=0;
+    for(unsigned int i=0;i<runtime.playerState.trinketCounts.size();++i)
+        if(runtime.playerState.trinketCounts[i])++trinkets;
+    fprintf(f,"%u\n",trinkets);
+    for(unsigned int i=0;i<runtime.playerState.trinketCounts.size();++i)
+        if(runtime.playerState.trinketCounts[i])fprintf(f,"%u %d\n",i,(int)runtime.playerState.trinketCounts[i]);
+    fprintf(f,"%d %d %d %d %d %d\n",runtime.playerState.activeItems[0],runtime.playerState.activeItems[1],
+        runtime.playerState.activeItems[2],runtime.playerState.activeItems[3],
+        runtime.playerState.heldCard,runtime.playerState.heldPill);
+    fclose(f);return true;
+}
+bool PortGameSession::ContinueSavedRun(const char* path,PortNormalRuntime& runtime,NativeSceneFiles& files,NativeActionSource* actions){
+    if(!path)return false;
+    FILE* f=fopen(path,"rb");
+    if(!f)return false;
+    char header[16]={0};
+    if(!fgets(header,sizeof(header),f)||strncmp(header,"BOI360_C1",9)){fclose(f);return false;}
+    unsigned int seed=0;int stage=1,page=0,choice=1,mode=0;
+    int hp=0,maxHp=0,soul=0,black=0,keys=0,bombs=0,coins=0;
+    float px=320.0f,py=380.0f;int definition=-1,grid=-1,dimension=-1;
+    if(fscanf(f,"%u %d %d %d %d",&seed,&stage,&page,&choice,&mode)!=5){fclose(f);return false;}
+    if(fscanf(f,"%d %d %d %d %d %d %d",&hp,&maxHp,&soul,&black,&keys,&bombs,&coins)!=7){fclose(f);return false;}
+    if(fscanf(f,"%f %f",&px,&py)!=2){fclose(f);return false;}
+    if(fscanf(f,"%d %d %d",&definition,&grid,&dimension)!=3){fclose(f);return false;}
+    unsigned int items=0;if(fscanf(f,"%u",&items)!=1){fclose(f);return false;}
+    std::vector<int> itemIds,itemCounts;
+    for(unsigned int i=0;i<items;++i){unsigned int id;int count=0;
+        if(fscanf(f,"%u %d",&id,&count)!=2){fclose(f);return false;}
+        itemIds.push_back((int)id);itemCounts.push_back(count);}
+    unsigned int trinkets=0;if(fscanf(f,"%u",&trinkets)!=1){fclose(f);return false;}
+    std::vector<int> trinketIds,trinketCounts;
+    for(unsigned int i=0;i<trinkets;++i){unsigned int id;int count=0;
+        if(fscanf(f,"%u %d",&id,&count)!=2){fclose(f);return false;}
+        trinketIds.push_back((int)id);trinketCounts.push_back(count);}
+    int active[4]={0,0,0,0},card=0,pill=-1;
+    if(fscanf(f,"%d %d %d %d %d %d",&active[0],&active[1],&active[2],&active[3],&card,&pill)!=6){fclose(f);return false;}
+    fclose(f);
+    files.backdrop=NativeStageBackdrop(1);
+    frontend.characterPage=page;frontend.characterChoice=choice;frontend.characterMode=mode;
+    PortSessionStart start=StartNormalCharacter(seed,runtime);
+    if(start.result!=NPS_WORLD_PENDING)return false;
+    for(int step=0;step<2000&&(runtime.phase==PNR_GENERATING||runtime.phase==PNR_ROOM_COMPONENTS);++step){
+        NativeActionFrame frame;frame.Clear(runtime.playerCreation.native153c,runtime.playerBody.entityToken,files.frame+step);
+        frame.SupplyConnection(true);frame.SupplyDrop(false);
+        for(int a=0;a<12;++a){frame.SupplyHeld(a,false);frame.SupplyPressed(a,false);if(a<8)frame.SupplyValue(a,0);}
+        NativeFrameActions generated(frame);
+        NormalRunResult r=AdvanceNormalSetup(runtime,files,actions?actions:&generated);
+        if(r==NFR_BAD_REQUEST)return false;
+    }
+    if(runtime.phase!=PNR_READY)return false;
+    while(runtime.run.context.stage<stage){
+        files.backdrop=NativeStageBackdrop(runtime.run.context.stage+1);
+        if(!DescendNormal(runtime,files,actions))return false;
+    }
+    runtime.playerState.collectibleCounts.assign(runtime.playerState.collectibleCounts.size()?runtime.playerState.collectibleCounts.size():733,0);
+    for(unsigned int i=0;i<itemIds.size();++i)
+        if(itemIds[i]>0&&(unsigned int)itemIds[i]<runtime.playerState.collectibleCounts.size())
+            runtime.playerState.collectibleCounts[itemIds[i]]=itemCounts[i];
+    runtime.playerState.trinketCounts.assign(runtime.playerState.trinketCounts.size()?runtime.playerState.trinketCounts.size():190,0);
+    for(unsigned int i=0;i<trinketIds.size();++i)
+        if(trinketIds[i]>=0&&(unsigned int)trinketIds[i]<runtime.playerState.trinketCounts.size())
+            runtime.playerState.trinketCounts[trinketIds[i]]=(unsigned char)trinketCounts[i];
+    for(int i=0;i<4;++i)runtime.playerState.activeItems[i]=active[i];
+    runtime.playerState.heldCard=card;runtime.playerState.heldPill=pill;
+    runtime.playerState.maxRedHearts=maxHp;runtime.playerState.redHearts=hp;
+    runtime.playerState.soulHearts=soul;runtime.playerState.blackHeartMask=black;
+    runtime.playerState.keys=keys;runtime.playerState.bombs=bombs;runtime.playerState.coins=coins;
+    runtime.startingItemsGranted=true;
+    if(definition>=0){
+        for(int i=0;i<runtime.world.layout.count;++i){
+            const NativePlacedRoom& p=runtime.world.layout.rooms[i];
+            if(p.definition==definition&&p.gridIndex>=0){
+                NativeWorldIssue issue;
+                if(runtime.world.Enter(p.gridIndex,p.dimension,files,&issue,0)==NWR_OK)break;
+            }
+        }
+    }
+    NativeRoomState* room=runtime.world.Current();
+    if(room){
+        NativePoint at={px,py},clamped;
+        if(room->space.Clamp(at,2,2,2,2,&clamped))at=clamped;
+        runtime.playerBody.position=at;runtime.playerBody.previousPosition=at;
+        runtime.playerBody.velocity.x=runtime.playerBody.velocity.y=0;
+    }
+    runtime.phase=PNR_READY;runtime.doorTransitionGrace=0;
+    runtime.projectiles.Reset();runtime.enemyShots.Clear();runtime.bombs.Clear();runtime.familiars.Clear();
+    return true;
 }

@@ -89,6 +89,11 @@ struct PortGameSession {
     //start its first room and place the surviving player. Player health,
     //resources and items persist; only floor-local transient state resets.
     bool DescendNormal(PortNormalRuntime&,NativeSceneFiles&,NativeActionSource* actions=0);
+    //Maintained continue checkpoint: run seed/stage/character plus player
+    //health, resources, inventory and current room. Native GSR0142 encoding
+    //remains the separate target save format.
+    bool SaveContinue(const char* path,PortNormalRuntime&);
+    bool ContinueSavedRun(const char* path,PortNormalRuntime&,NativeSceneFiles&,NativeActionSource* actions=0);
     NormalRunResult AdvanceNormalSetup(PortNormalRuntime&,const NativeSceneFiles&,NativeActionSource* actions=0);
     NormalRunResult TickNormal(PortNormalRuntime&,const NativeSceneFiles&,NativeActionSource* actions);
     NativeWorldResult PrepareNormalWorld(const NormalRunFlow&,NativeWorld&,const NativeSceneFiles&,NativeWorldIssue* issue=0);

@@ -561,6 +561,14 @@ VOID __cdecl main() {
             if(action==UI_SELECT_SLOT){gUi.profile=gProfiles[gUi.selectedSlot];gUi.SlotLoaded(true,false);}
             if(action==UI_DELETE_SLOT){ZeroMemory(&gProfiles[gUi.selectedSlot],sizeof(NativeProfile));gUi.SlotDeleted(true);}
             if(action==UI_START_CHARACTER){unsigned int runSeed=0;
+                NativeSceneFiles continueFiles={"game:\\game\\file_index.bin","game:\\game\\",1,gNormalRuntime.run.context.nativeMode,0};
+                FILE* continueFile=fopen("game:\\continue.dat","rb");
+                if(continueFile){fclose(continueFile);
+                    if(PortGameSession(gMenuRandom,gUi).ContinueSavedRun("game:\\continue.dat",gNormalRuntime,continueFiles,&frameActions))
+                        Log("PORT continue stage=%d room=%d",gNormalRuntime.run.context.stage,gNormalRuntime.world.currentList);
+                    else Log("PORT continue failed");
+                    continue;}
+                
                 //Optional local QA seed; absent in ordinary release layouts.
                 FILE* seedFile=fopen("game:\\port\\target_seed.txt","rb");
                 if(seedFile){if(fscanf(seedFile,"%u",&runSeed)!=1)runSeed=0;fclose(seedFile);}
@@ -573,6 +581,8 @@ VOID __cdecl main() {
                     if(gNormalRuntime.missingNativePrerequisite==0x6c8140&&gNormalRuntime.world.currentList>=0){NativeWorldResident& live=gNormalRuntime.world.resident[gNormalRuntime.world.currentList];
                         Log("PORT door visual stop slot=%d kind=%d variant=%d aux=%d backdrop=%d",live.doorFailureSlot,live.doorFailureKind,live.doorFailureVariant,live.doorFailureAux,live.backdrop);}}}
             if(gNormalRuntime.phase==PNR_READY){
+                static unsigned int lastContinueSave=0;
+                if(gNormalRuntime.tickFrame>lastContinueSave+300){lastContinueSave=gNormalRuntime.tickFrame;PortGameSession(gMenuRandom,gUi).SaveContinue("game:\\continue.dat",gNormalRuntime);}
                 static bool readyLogged=false;
                 if(!readyLogged){NativeWorldResident& first=gNormalRuntime.world.resident[gNormalRuntime.world.currentList];
                     Log("PORT normal ready ticks=0 playerToken=%08x doorVisualGaps=%d",gNormalRuntime.playerBody.entityToken,first.doorVisualGaps);
