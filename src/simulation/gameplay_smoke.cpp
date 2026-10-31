@@ -210,6 +210,18 @@ int RunDescendProbe(NativeMt& random,PortFrontend& ui){
     if(!session.DescendNormal(*runtime,files)){delete runtime;return 67;}
     if(runtime->run.context.stage!=2||!runtime->world.Current()||runtime->phase!=PNR_READY){delete runtime;return 68;}
     if(runtime->playerState.redHearts!=red||runtime->playerState.soulHearts!=soul){delete runtime;return 69;}
+    //Continue the maintained descend path through every prepared floor. This
+    //exercises Caves..Dark Room generation (including the terminal combined
+    //pool and single-boss path) without a rendering device.
+    while(runtime->run.context.stage<12){
+        files.backdrop=NativeStageBackdrop(runtime->run.context.stage+1);
+        if(!session.DescendNormal(*runtime,files)){
+            printf("DESCEND_STAGE_FAIL stage=%d prerequisite=%08x\n",runtime->run.context.stage,runtime->missingNativePrerequisite);
+            delete runtime;return 70;
+        }
+        if(!runtime->world.Current()||runtime->phase!=PNR_READY){delete runtime;return 71;}
+    }
+    if(runtime->run.context.stage!=12){delete runtime;return 72;}
     printf("DESCEND from=1 to=%d room=%d definition=%d hp=%d/%d soul=%d\n",runtime->run.context.stage,
         runtime->world.currentList,runtime->world.CurrentDescriptor()?runtime->world.CurrentDescriptor()->definition:-1,
         runtime->playerState.redHearts,runtime->playerState.maxRedHearts,runtime->playerState.soulHearts);

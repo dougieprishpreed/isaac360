@@ -62,7 +62,9 @@ NativeBossPlacementResult NativePlaceSelectedBoss(NativeTopology& graph,NativeRo
 }
 NativeBossSequenceResult NativeBossSequence::Begin(int nextStage,bool stage11Shortcut,const NativeBossRequest& c,const NativePlacementContext& pc) {
     if(nextStage<1 || nextStage>13 || c.nativeMode<0 || c.nativeMode>3 || pc.nativeMode!=c.nativeMode || pc.dimension<0 || pc.dimension>2) return NBS_BAD_REQUEST;
-    if(nextStage==12 || (nextStage==11 && stage11Shortcut) || c.nativeMode==2 || c.nativeMode==3 || (c.effectiveCurses&0x80)) return NBS_UNSUPPORTED_CONTEXT;
+    //The maintained terminal-floor path uses one boss identity for stage12;
+    //the original multi-boss sequence is not yet prepared.
+    if((nextStage==11 && stage11Shortcut) || c.nativeMode==2 || c.nativeMode==3 || (c.effectiveCurses&0x80)) return NBS_UNSUPPORTED_CONTEXT;
     context=c; placement=pc; stage=nextStage; phase=NBS_FIRST_IDENTITY;
     firstLayoutIndex=lastLayoutIndex=lastTopologyIndex=-1; restorationSeed=0; return NBS_OK;
 }

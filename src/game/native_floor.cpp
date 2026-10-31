@@ -21,7 +21,12 @@ NativeFloorResult CombinedHistogram(NativeFloorPlan& p,int low,int high) {
     // Native stage12 concatenates stage-owned pools1..17 except13, retaining
     // aliased source entries. A widening pass APPENDS, rather than replacing.
     for(int stage=1;stage<18;++stage) if(stage!=13) {
-        NativeFloorResult result=Histogram(p,stage,low,high,true); if(result!=NF_OK) return result;
+        NativeFloorResult result=Histogram(p,stage,low,high,true);
+        //The prepared catalogue may not bind every late stage source; an
+        //absent stage contributes no rooms instead of failing the combined
+        //Dark Room pool.
+        if(result==NF_MISSING_STAGE) continue;
+        if(result!=NF_OK) return result;
     }
     return NF_OK;
 }

@@ -27,6 +27,8 @@ IMAGES=[
     ('backdrop10','gfx/backdrop/07_The Womb.png'),
     ('backdrop11','gfx/backdrop/08_Utero.png'),
     ('backdrop14','gfx/backdrop/09_Sheol.png'),
+    ('backdrop16','gfx/backdrop/12_DarkRoom.png'),
+    ('backdrop17','gfx/backdrop/11_Chest.png'),
     ('backdrop15','gfx/backdrop/10_Cathedral.png'),
     ('player','gfx/characters/costumes/character_001_isaac.png'),
     ('hearts','gfx/ui/ui_hearts.png'),
@@ -276,6 +278,11 @@ ANIMATED=[
     ('mulliganwalk','gfx/016.000_Mulligan.anm2','',None,64),
     ('mulligoonwalk','gfx/016.001_Mulligoon.anm2','',None,64),
     ('mulliboomwalk','gfx/016.002_Mulliboom.anm2','',None,64),
+    ('lambwalk','gfx/273.000_TheLamb.anm2','',None,128),
+    ('deliriumwalk','gfx/412.000_Delirium.anm2','',None,256),
+    ('darkonewalk','gfx/267.000_Dark One.anm2','',None,128),
+    ('adversarywalk','gfx/268.000_Dark One 2.anm2','',None,128),
+    ('polycephaluswalk','gfx/269.000_Polycephalus.anm2','',None,128),
 ]
 ANIMATION_FRAME_LIMIT=8
 #Manifest strips that are enemy sprites, keyed by the native type/variant.
@@ -334,7 +341,7 @@ ENEMY_SPRITE_KEYS={
     'blackglobinheadwalk':(279,0),'candlerwalk':(833,0),'poltywalk':(816,0),'bishopwalk':(805,0),
     'psytumorwalk':(253,0),'holymulliganwalk':(22,2),'holyeyewalk':(60,2),'holybonywalk':(227,1),
     'lokiwalk':(69,0),'widowwalk':(100,0),'pitfallwalk':(291,0),'iblobwalk':(15,2),
-    'satanwalk':(84,0),'isaacwalk':(102,0),'mulliganwalk':(16,0),'mulligoonwalk':(16,1),'mulliboomwalk':(16,2),
+    'satanwalk':(84,0),'isaacwalk':(102,0),'mulliganwalk':(16,0),'mulligoonwalk':(16,1),'mulliboomwalk':(16,2),'lambwalk':(273,0),'deliriumwalk':(412,0),'darkonewalk':(267,0),'adversarywalk':(268,0),'polycephaluswalk':(269,0),
 }
 CORE4={'gaperwalk','flywalk','pooterwalk','fattywalk','skinnywalk','rottywalk','cyclopiawalk',
     'dinglewalk','danglewalk','dartflywalk','dipwalk','larrywalk','monstrowalk','dukewalk',

@@ -8,7 +8,9 @@ NativeOrdinaryResult NativePlaceOrdinary(const NativeTopology& graph,NativeRoomP
         layout.count<0 || layout.count>507 || graph.count<1 || graph.count>169) return NOP_BAD_REQUEST;
     // These native selector paths need distinct pools/branches, not an ordinary
     // substitute. No actor-support filtering or repicks are permitted here.
-    if(c.stage==12 || c.placement.nativeMode==2 || c.placement.nativeMode==3 || (c.effectiveCurses&0x80)) return NOP_UNSUPPORTED_CONTEXT;
+    //Stage12 (Dark Room) uses the combined stage-26 config pool through the
+    //same ordinary selector; its distinct native branch is not yet prepared.
+    if(c.placement.nativeMode==2 || c.placement.nativeMode==3 || (c.effectiveCurses&0x80)) return NOP_UNSUPPORTED_CONTEXT;
     if(NativeStageSource(c.configStage,pool.catalog)<0) return NOP_MISSING_STAGE;
     int order[kNativeTopologyCells]; int n=graph.PlacementOrder(order,kNativeTopologyCells);
     if(n<0) return NOP_BAD_REQUEST;

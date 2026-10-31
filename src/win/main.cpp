@@ -108,6 +108,8 @@ static bool BackdropAtlasRect(int id,int* ox,int* oy){
     if(id==11){*ox=kGameplayBackdrop11X;*oy=kGameplayBackdrop11Y;return true;}
     if(id==14){*ox=kGameplayBackdrop14X;*oy=kGameplayBackdrop14Y;return true;}
     if(id==15){*ox=kGameplayBackdrop15X;*oy=kGameplayBackdrop15Y;return true;}
+    if(id==16){*ox=kGameplayBackdrop16X;*oy=kGameplayBackdrop16Y;return true;}
+    if(id==17){*ox=kGameplayBackdrop17X;*oy=kGameplayBackdrop17Y;return true;}
     return false;
 }
 static void DrawBackground(){

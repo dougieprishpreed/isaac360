@@ -233,7 +233,12 @@ const NativeEntityBodyProperties kEnemyBodies[]={
     {102,0,0,12,0.33f,1.0f,20.0f,1.0f,1.0f,1.0f,50.0f,2000.0f,0.0f,"gfx/102.000_Isaac (final boss).anm2"},
     {16,0,0,12,0.13f,1.0f,13.0f,1.0f,1.0f,0.0f,6.0f,13.0f,0.0f,"gfx/016.000_Mulligan.anm2"},
     {16,1,0,12,0.13f,1.0f,13.0f,1.0f,1.0f,0.0f,6.0f,13.0f,0.0f,"gfx/016.001_Mulligoon.anm2"},
-    {16,2,0,12,0.13f,1.0f,13.0f,1.0f,1.0f,0.0f,6.0f,13.0f,0.0f,"gfx/016.002_Mulliboom.anm2"}
+    {16,2,0,12,0.13f,1.0f,13.0f,1.0f,1.0f,0.0f,6.0f,13.0f,0.0f,"gfx/016.002_Mulliboom.anm2"},
+    {273,0,0,12,0.22f,1.0f,13.0f,1.0f,1.0f,2.0f,45.0f,2000.0f,0.0f,"gfx/273.000_TheLamb.anm2"},
+    {412,0,0,40,0.0f,1.0f,40.0f,1.0f,1.0f,1.0f,100.0f,10000.0f,0.0f,"gfx/412.000_Delirium.anm2"},
+    {267,0,0,12,0.22f,1.0f,20.0f,1.0f,1.0f,1.0f,75.0f,400.0f,0.0f,"gfx/267.000_Dark One.anm2"},
+    {268,0,0,12,0.22f,1.0f,20.0f,1.0f,1.0f,1.0f,75.0f,520.0f,0.0f,"gfx/268.000_Dark One 2.anm2"},
+    {269,0,0,12,0.0f,1.0f,20.0f,1.0f,1.0f,1.0f,75.0f,200.0f,0.0f,"gfx/269.000_Polycephalus.anm2"}
 };
 }
 const NativeEntityBodyProperties* NativePreparedEnemyBody(int type,int variant){
@@ -281,6 +286,11 @@ bool NativeBossEntityType(int type,int variant){
     if(type==84)return variant==0;
     if(type==100)return variant==0;
     if(type==102)return variant==0;
+    if(type==273)return variant==0;
+    if(type==412)return variant==0;
+    if(type==267)return variant==0;
+    if(type==268)return variant==0;
+    if(type==269)return variant==0;
     return false;
 }
 const NativeEntityBodyProperties* NativePreparedPlayerBody(int variant){

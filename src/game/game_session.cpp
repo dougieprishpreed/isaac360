@@ -73,7 +73,7 @@ bool PortGameSession::DescendNormal(PortNormalRuntime& runtime,NativeSceneFiles&
     const int nextStage=(int)runtime.run.context.stage+1;
     //Basement and Cellar are the prepared graphics; later stages keep their
     //explicit unsupported-context boundary instead of substituting art.
-    if(nextStage<2||nextStage>10)return false;
+    if(nextStage<2||nextStage>12)return false;
     NativeFloorContext context=runtime.run.context;
     context.stage=nextStage;context.stageType=0;context.effectiveCurses=0;
     context.challenge=false;context.gameFlags=0;context.runCounter=0;
@@ -88,8 +88,8 @@ bool PortGameSession::DescendNormal(PortNormalRuntime& runtime,NativeSceneFiles&
     if(result!=NFR_OK){runtime.missingNativePrerequisite=0x6401U|((unsigned int)result<<8)|((unsigned int)next.lastCode<<16);return false;}
     int guard=0;
     while(next.phase!=NRF_NEED_ROOM_ENTRY&&guard++<100000){
-        result=next.Step();
-        if(next.phase==NRF_BLOCKED){runtime.missingNativePrerequisite=0x6402U|((unsigned int)next.lastCode<<16);return false;}
+        NormalRunPhase before=next.phase;result=next.Step();
+        if(next.phase==NRF_BLOCKED){runtime.missingNativePrerequisite=0x6402U|((unsigned int)next.lastCode<<16)|((unsigned int)before<<24);return false;}
     }
     if(next.phase!=NRF_NEED_ROOM_ENTRY){runtime.missingNativePrerequisite=0x6403;return false;}
     files.backdrop=NativeStageBackdrop(nextStage);
@@ -240,7 +240,7 @@ NativeWorldResult PortGameSession::PrepareNormalWorld(const NormalRunFlow& flow,
     //Backdrop6's option and alternate-stage flags require their actual inputs.
     //The first two standard floor graphics are prepared (basement, cellar).
     //Later stages retain their explicit unsupported-context boundary.
-    if(flow.context.stage<1||flow.context.stage>10||flow.context.stageType<0||flow.context.stageType>2||files.backdrop!=NativeStageBackdrop(flow.context.stage))return NWR_BAD_REQUEST;
+    if(flow.context.stage<1||flow.context.stage>12||flow.context.stageType<0||flow.context.stageType>2||files.backdrop!=NativeStageBackdrop(flow.context.stage))return NWR_BAD_REQUEST;
     NativeRoomSetupContext setup={files.backdrop,flow.floor.plan.configStage,false,0};
     return world.Start(flow.layout,flow.currentGrid,flow.placement.dimension,files,issue,&setup);
 }

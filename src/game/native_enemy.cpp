@@ -92,7 +92,7 @@ void NativeEnemy::Update(const NativeRoomState& room,const NativeEntityBody& pla
         else{vx=dx*0.25f;vy=dy*0.25f;}
         if(shots&&distance<520.0f&&cycle==62)
             shots->Fire(body.position,dx*3.2f,dy*3.2f,1.0f,8.0f,240,body.entityToken);
-    }else if(type==67||type==260||type==79||type==908||type==28||type==36||type==62||type==68||type==71||type==99||type==262||type==264||type==916||type==72||type==43||type==45||type==263||type==265||type==900||type==75||type==76||type==78||type==266||type==270||type==74||type==81||type==50||type==52||type==69||type==84||type==100||type==102){
+    }else if(type==67||type==260||type==79||type==908||type==28||type==36||type==62||type==68||type==71||type==99||type==262||type==264||type==916||type==72||type==43||type==45||type==263||type==265||type==900||type==75||type==76||type==78||type==266||type==270||type==74||type==81||type==50||type==52||type==69||type==84||type==100||type==102||type==273||type==412||type==267||type==268||type==269){
         //Duke/Haunt: floating boss with a periodic spread volley.
         const int cycle=phase%150;
         vx=dx*0.32f;vy=dy*0.32f;
