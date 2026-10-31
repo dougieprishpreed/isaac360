@@ -19,6 +19,11 @@ def main():
     transition=re.search(r'^TRANSITION seed=(\d+) from=(-?\d+) slot=(\d+) to=(-?\d+) definition=(-?\d+) room=(\d+) enemies=(\d+) transitions=(\d+)',log,re.M)
     death=re.search(r'^DEATH seed=(\d+) room=(\d+) hits=(\d+) hp=(-?\d+)/(-?\d+) soul=(-?\d+) dead=(\d+) ticks=(\d+) enemies=(\d+)',log,re.M)
     descend=re.search(r'^DESCEND from=(\d+) to=(\d+) room=(-?\d+) definition=(-?\d+) hp=(-?\d+)/(-?\d+) soul=(-?\d+)',log,re.M)
+    floorPath=re.search(r'^FLOOR_PATH seed=(\d+) rooms=(\d+) boss=(-?\d+) route=([0-9,]+)',log,re.M)
+    floorRooms=list(re.finditer(r'^FLOOR_ROOM step=(\d+) grid=(-?\d+) def=(-?\d+) type=(-?\d+) variant=(\d+) enemies=(\d+) kills=(\d+) remaining=(\d+) clear=(\d+) hp=(-?\d+)/(-?\d+) ticks=(\d+)',log,re.M))
+    floorBoss=re.search(r'^FLOOR_BOSS identity=(-?\d+) award=(-?\d+) room=(-?\d+) variant=(\d+) entryEnemies=(\d+) kills=(\d+)',log,re.M)
+    floorTrap=re.search(r'^FLOOR_TRAPDOOR state=(\d+) descend=(\d+) stage=(\d+) grid=(-?\d+) hp=(-?\d+)/(-?\d+) soul=(-?\d+) kills=(\d+)',log,re.M)
+    floorContinue=re.search(r'^FLOOR_CONTINUE stage=(\d+) grid=(-?\d+) hp=(-?\d+)/(-?\d+) soul=(-?\d+) bombs=(-?\d+) keys=(-?\d+) coins=(-?\d+)',log,re.M)
     item=re.search(r'^ITEM pool=(\d+) id=(\d+) collected=(\d+) owned=(\d+) poolCounter=(\d+)(?: effect_hp=(\d+)/(\d+) effect_keys=(\d+))?',log,re.M)
     bomb=re.search(r'^BOMB placed=(\d+) explosions=(\d+) enemyHits=(\d+) bombsLeft=(-?\d+) enemies=(\d+)',log,re.M)
     chars=re.search(r'^CHARACTERS ok=(\d+) fail=(\d+)',log,re.M)
@@ -33,6 +38,7 @@ def main():
     bossAttacks=re.search(r'^BOSS_ATTACKS (.+)$',log,re.M)
     bossFlags=bossAttacks.group(1) if bossAttacks else ''
     audio=re.search(r'^AUDIO device=(\d+) sfx=(\d+) loaded=(\d+) music=(\d+) music_frames=(\d+) sfx_frames=(\d+) rms=(-?[0-9.]+) gameplay_sfx=(\d+)',log,re.M)
+    musicSet=re.search(r'^MUSICSET intro=(\d+) layer=(\d+) layer_frames=(\d+)',log,re.M)
     blackheart=re.search(r'^BLACKHEART absorbed=(\d+) soul=(\d+) red=(\d+) mask=(\d+)',log,re.M)
     walkanim=re.search(r'^WALKANIM clip=([A-Za-z]+) frame=(-?[0-9.]+) stopped=(\d+)',log,re.M)
     doorvis=re.search(r'^DOORVIS opened=(\d+) locked=(\d+)',log,re.M)
@@ -96,6 +102,22 @@ def main():
             'descend_to':int(descend.group(2)) if descend else 0,
             'descend_room':int(descend.group(3)) if descend else -1,
             'descend_definition':int(descend.group(4)) if descend else -1,
+            'floor_rooms':int(floorPath.group(2)) if floorPath else 0,
+            'floor_boss_list':int(floorPath.group(3)) if floorPath else -1,
+            'floor_route':[int(v) for v in floorPath.group(4).split(',')] if floorPath and floorPath.group(4) else [],
+            'floor_room_grids':[int(r.group(2)) for r in floorRooms],
+            'floor_room_enemies':[int(r.group(6)) for r in floorRooms],
+            'floor_room_kills':[int(r.group(7)) for r in floorRooms],
+            'floor_rooms_cleared':sum(1 for r in floorRooms if int(r.group(9)) and int(r.group(8))==0),
+            'floor_boss_identity':int(floorBoss.group(1)) if floorBoss else -1,
+            'floor_boss_kills':int(floorBoss.group(6)) if floorBoss else 0,
+            'floor_trapdoor_state':int(floorTrap.group(1)) if floorTrap else 0,
+            'floor_descend_stage':int(floorTrap.group(3)) if floorTrap else 0,
+            'floor_descend_grid':int(floorTrap.group(4)) if floorTrap else -1,
+            'floor_descend_kills':int(floorTrap.group(8)) if floorTrap else 0,
+            'floor_continue_stage':int(floorContinue.group(1)) if floorContinue else 0,
+            'floor_continue_grid':int(floorContinue.group(2)) if floorContinue else -1,
+            'floor_continue_hp':int(floorContinue.group(3)) if floorContinue else -1,
             'item_pool':int(item.group(1)) if item else -1,
             'item_id':int(item.group(2)) if item else 0,
             'item_collected':int(item.group(3)) if item else 0,
@@ -172,6 +194,9 @@ def main():
             'audio_sfx_frames':int(audio.group(6)) if audio else 0,
             'audio_rms':float(audio.group(7)) if audio else 0.0,
             'audio_gameplay_sfx':int(audio.group(8)) if audio else 0,
+            'music_set_intro':int(musicSet.group(1)) if musicSet else 0,
+            'music_set_layer':int(musicSet.group(2)) if musicSet else 0,
+            'music_set_layer_frames':int(musicSet.group(3)) if musicSet else 0,
             'blackheart_absorbed':int(blackheart.group(1)) if blackheart else 0,
             'blackheart_soul':int(blackheart.group(2)) if blackheart else -1,
             'blackheart_red':int(blackheart.group(3)) if blackheart else -1,
@@ -228,7 +253,7 @@ def main():
             'tail_trail_segments':int(tail.group(2)) if tail else 0,
             'tail_render_callbacks':int(tail.group(3)) if tail else 0,
             'tail_reached_fields_present':[bool(int(tail.group(i))) for i in (4,5,6,7)] if tail else []},
-        'scope':'Focused owned session execution: normal New Run reaches an initialized player and repeated whole simulation ticks in its generated starting room. Each tick completes 414dc0 actor/player update, 6712a0 collision, the disabled 8d8470 particle gate, the 8798f0 room-effect cache Update and the primary projectile lifecycle using the evaluated shot vector and fireDelay/shotSpeed/damage/range stats; host evidence observes spawn, wall collision and range expiry. A stage-owned generated Gaper room constructs its actual spawn plan, advances the enemy, kills it with projectiles, sets room clear and opens a normal door. A cleared normal door accepts the player, constructs the exact linked resident (rocks and enemies), places the player at the reciprocal door and continues whole ticks. A generated Gaper encounter damages and kills the player through six contact hits; player HP reaches zero, a 60-tick dying state reaches game over, and restart rebuilds a ready player at full health. Treasure doors stay closed without a key, consume one key on contact, and boss doors open only after the boss-defeated flag. Native 72c430 executes the reached no-item timer/counter/direction state; 736d70 executes a bounded post-755870 tail through the 73891f state checks, effect-cache update, reached 747490/74ffa0 clean owner checks, no-item sprite anchors, first 7697a0 trail block and 7f0e50 no-callback return. Deferred presentation/room visuals: 747490/74ffa0 item/effect branches, full 739451/73d612 consumers, remaining 7ae620 visual services, GPU rendering/audio. Deferred gameplay: remaining enemy variants/AI/death FX, transitions, 72c430 item/controlled branches, 713120 D6 grant, profile content stops, native file save/Continue, target execution.',
+        'scope':'Focused owned session execution: normal New Run reaches an initialized player and repeated whole simulation ticks in its generated starting room. Each tick completes 414dc0 actor/player update, 6712a0 collision, the disabled 8d8470 particle gate, the 8798f0 room-effect cache Update and the primary projectile lifecycle using the evaluated shot vector and fireDelay/shotSpeed/damage/range stats; host evidence observes spawn, wall collision and range expiry. A stage-owned generated Gaper room constructs its actual spawn plan, advances the enemy, kills it with projectiles, sets room clear and opens a normal door. A cleared normal door accepts the player, constructs the exact linked resident (rocks and enemies), places the player at the reciprocal door and continues whole ticks. A BFS over the generated layout door graph then clears three ordinary rooms with tears, enters each linked resident through its native door actor, kills the selected boss (identity from the generated room subtype), verifies the boss death opens the trapdoor, descends through trapdoor contact to stage2 with resources preserved, and continues the descended save at the same floor/grid/resources. A generated Gaper encounter damages and kills the player through six contact hits; player HP reaches zero, a 60-tick dying state reaches game over, and restart rebuilds a ready player at full health. Treasure doors stay closed without a key, consume one key on contact, and boss doors open only after the boss-defeated flag. Native 72c430 executes the reached no-item timer/counter/direction state; 736d70 executes a bounded post-755870 tail through the 73891f state checks, effect-cache update, reached 747490/74ffa0 clean owner checks, no-item sprite anchors, first 7697a0 trail block and 7f0e50 no-callback return. Deferred presentation/room visuals: 747490/74ffa0 item/effect branches, full 739451/73d612 consumers, remaining 7ae620 visual services, GPU rendering/audio. Deferred gameplay: remaining enemy variants/AI/death FX, 72c430 item/controlled branches, 713120 D6 grant, profile content stops, target execution.',
         'sha256':{f.relative_to(ROOT).as_posix():hashlib.sha256(f.read_bytes()).hexdigest() for f in sorted(paths)}}
     (ROOT/'build/gameplay/result.json').write_text(json.dumps(packet,indent=2)+'\n')
 if __name__=='__main__':main()

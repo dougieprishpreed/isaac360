@@ -301,6 +301,11 @@ bool NativeRoomUpdate::TickSimulationTail(PortNormalRuntime& runtime,NativeActio
             NativeWorldResident& entered=runtime.world.resident[runtime.world.currentList];
             if(!entered.doors&&runtime.world.PrepareDoorActors(*global,files->frame)!=NDR_OK){*next=0x6c8140;return false;}
             if(runtime.world.PreparePerimeter(*global,files->frame)!=NWR_OK){*next=0x7c8a90;return false;}
+            //Door target kinds/variants are gameplay state. Bind them at room
+            //entry instead of waiting for the renderer's lazy DoorVisuals call,
+            //so clear-state opening and passage work in headless/native ticks.
+            runtime.world.PrepareDoorVisuals(runtime.run.context.stage,runtime.run.context.stageType,
+                runtime.run.context.nativeMode,runtime.run.context.challenge,runtime.playerState);
             if(entered.doors&&reverse>=0&&reverse<8){
                 NativeDoorActor& back=entered.doors->actors[reverse];
                 if(back.grid>=0){float bx,by;NativeRoomState* enteredRoom=runtime.world.Current();if(enteredRoom&&enteredRoom->geometry.Position(back.grid,&bx,&by)){

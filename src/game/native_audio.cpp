@@ -168,6 +168,11 @@ struct WavStream {
         return produced;
     }
 };
+bool OpenMusicPath(const std::string& root,const char* virtualPath,WavStream& stream){
+    if(!virtualPath||!*virtualPath)return true;
+    std::string path;JoinAssetPath(path,root,std::string(virtualPath)+".wav");
+    return stream.Open(path,kEngineRate);
+}
 }
 
 struct NativeAudio::Impl {
@@ -180,20 +185,21 @@ struct NativeAudio::Impl {
         float volume;
     };
     std::vector<Voice> voices;
-    WavStream music;
+    WavStream musicIntro,musicLoopStream,layerIntro,layerLoopStream;
     std::string musicKey;
-    bool musicActive,musicLoop;
-    float musicGain,musicTarget;
+    bool musicActive,musicLoop,musicIntroActive,musicLoopActive,layerIntroActive,layerLoopActive;
+    float musicGain,musicTarget,layerGain,layerTarget,layerScale;
     float lastRms;
     std::vector<int> accum;
     std::vector<short> musicBuffer;
-    Impl():backendUser(0),musicActive(false),musicLoop(false),musicGain(0),musicTarget(0),lastRms(0){
+    std::vector<short> layerBuffer;
+    Impl():backendUser(0),musicActive(false),musicLoop(false),musicIntroActive(false),musicLoopActive(false),layerIntroActive(false),layerLoopActive(false),musicGain(0),musicTarget(0),layerGain(0),layerTarget(0),layerScale(0.55f),lastRms(0){
         memset(&backend,0,sizeof(backend));
     }
 };
 
 NativeAudio::NativeAudio():initialized(false),deviceReady(false),sfxLoaded(0),sfxLoadFailures(0),sfxStarted(0),sfxFinished(0),
-    musicStarted(0),musicLoops(0),musicFrames(0),sfxFrames(0),framesMixed(0),deviceSubmits(0),impl(new Impl){}
+    musicStarted(0),musicLoops(0),musicFrames(0),musicLayerFrames(0),musicIntros(0),musicLayers(0),sfxFrames(0),framesMixed(0),deviceSubmits(0),impl(new Impl){}
 NativeAudio::~NativeAudio(){Shutdown();delete impl;impl=0;}
 
 bool NativeAudio::Initialize(const char* assetRoot){
@@ -243,23 +249,47 @@ bool NativeAudio::PlaySfx(const char* virtualPath,float volume,float pitch){
     impl->voices.push_back(voice);++sfxStarted;return true;
 }
 bool NativeAudio::PlayMusic(const char* virtualPath,bool loop,float volume){
-    if(!initialized||!impl||!virtualPath||!*virtualPath)return false;
-    if(impl->musicActive&&impl->musicKey==virtualPath){
-        impl->musicLoop=loop;impl->musicTarget=volume;return true;
+    return PlayMusicSet("",virtualPath,"","",loop,volume,0.0f);
+}
+bool NativeAudio::PlayMusicSet(const char* introPath,const char* loopPath,const char* layerIntroPath,
+    const char* layerPath,bool loop,float volume,float layerVolume){
+    if(!initialized||!impl||((!loopPath||!*loopPath)&&(!introPath||!*introPath)))return false;
+    if(impl->musicActive&&loopPath&&*loopPath&&impl->musicKey==loopPath){
+        impl->musicLoop=loop;
+        if(volume<0.0f)volume=0.0f;if(volume>1.0f)volume=1.0f;
+        if(layerVolume<0.0f)layerVolume=0.0f;if(layerVolume>1.0f)layerVolume=1.0f;
+        impl->musicTarget=volume;impl->layerScale=layerVolume;impl->layerTarget=volume*layerVolume;
+        return true;
     }
-    std::string path;JoinAssetPath(path,root,std::string(virtualPath)+".wav");
-    if(!impl->music.Open(path,kEngineRate))return false;
-    impl->musicKey=virtualPath;impl->musicActive=true;impl->musicLoop=loop;
-    impl->musicGain=0;impl->musicTarget=volume;
+    StopMusic();
+    if(!OpenMusicPath(root,introPath,impl->musicIntro)||
+       !OpenMusicPath(root,loopPath,impl->musicLoopStream)||
+       !OpenMusicPath(root,layerIntroPath,impl->layerIntro)||
+       !OpenMusicPath(root,layerPath,impl->layerLoopStream)){StopMusic();return false;}
+    impl->musicIntroActive=introPath&&*introPath;
+    impl->musicLoopActive=loopPath&&*loopPath;
+    impl->layerIntroActive=layerIntroPath&&*layerIntroPath;
+    impl->layerLoopActive=layerPath&&*layerPath;
+    impl->musicLoopStream.loop=loop;impl->layerLoopStream.loop=loop;
+    impl->musicActive=impl->musicIntroActive||impl->musicLoopActive;
+    impl->musicLoop=loop;
+    impl->musicKey=loopPath&&*loopPath?loopPath:(introPath?introPath:"");
+    if(volume<0.0f)volume=0.0f;if(volume>1.0f)volume=1.0f;
+    if(layerVolume<0.0f)layerVolume=0.0f;if(layerVolume>1.0f)layerVolume=1.0f;
+    impl->musicGain=impl->layerGain=0;impl->musicTarget=volume;impl->layerScale=layerVolume;impl->layerTarget=volume*layerVolume;
+    if(impl->musicIntroActive)++musicIntros;
+    if(impl->layerIntroActive||impl->layerLoopActive)++musicLayers;
     ++musicStarted;return true;
 }
 void NativeAudio::StopMusic(){
     if(!impl)return;
-    impl->music.Close();impl->musicActive=false;impl->musicKey.clear();
+    impl->musicIntro.Close();impl->musicLoopStream.Close();impl->layerIntro.Close();impl->layerLoopStream.Close();
+    impl->musicActive=impl->musicIntroActive=impl->musicLoopActive=impl->layerIntroActive=impl->layerLoopActive=false;
+    impl->musicKey.clear();impl->musicGain=impl->layerGain=0;
 }
 void NativeAudio::SetMusicVolume(float volume){
     if(!impl)return;if(volume<0.0f)volume=0.0f;if(volume>1.0f)volume=1.0f;
-    impl->musicTarget=volume;
+    impl->musicTarget=volume;impl->layerTarget=volume*impl->layerScale;
 }
 void NativeAudio::Mix(short* output,int frames){
     if(!impl||!output||frames<=0)return;
@@ -289,15 +319,51 @@ void NativeAudio::Mix(short* output,int frames){
             impl->voices.erase(impl->voices.begin()+v);++sfxFinished;
         }else ++v;
     }
+    std::vector<short>& layer=impl->layerBuffer;
+    if(layer.size()<(size_t)frames*kEngineChannels)layer.resize((size_t)frames*kEngineChannels);
+    for(int i=0;i<frames*kEngineChannels;++i)layer[i]=0;
     if(impl->musicActive){
-        const int got=impl->music.Read(&music[0],frames);
-        musicFrames+=(unsigned int)got;musicLoops=impl->music.loops;
+        int got=0;
+        if(impl->musicIntroActive){
+            got=impl->musicIntro.Read(&music[0],frames);
+            if(got<frames){
+                impl->musicIntro.Close();impl->musicIntroActive=false;
+                if(impl->musicLoopActive)got+=impl->musicLoopStream.Read(&music[(size_t)got*kEngineChannels],frames-got);
+            }
+        }else if(impl->musicLoopActive){
+            got=impl->musicLoopStream.Read(&music[0],frames);
+        }
+        musicFrames+=(unsigned int)got;
+        if(impl->musicLoopActive)musicLoops=impl->musicLoopStream.loops;
         impl->musicGain+=(impl->musicTarget-impl->musicGain)*0.12f;
         if(impl->musicGain<0.0f)impl->musicGain=0.0f;if(impl->musicGain>1.0f)impl->musicGain=1.0f;
         for(int i=0;i<got*kEngineChannels;++i)
             accum[(size_t)i]+=(int)((float)music[(size_t)i]*impl->musicGain);
-        if(got<frames&&!impl->musicLoop){
-            impl->music.Close();impl->musicActive=false;impl->musicKey.clear();
+        const bool ended=got<frames;
+        if(ended&&!impl->musicIntroActive&&(!impl->musicLoopActive||!impl->musicLoop)){
+            impl->musicIntro.Close();impl->musicLoopStream.Close();
+            impl->musicActive=false;impl->musicLoopActive=false;impl->musicKey.clear();
+        }
+    }
+    if(impl->layerIntroActive||impl->layerLoopActive){
+        int got=0;
+        if(impl->layerIntroActive){
+            got=impl->layerIntro.Read(&layer[0],frames);
+            if(got<frames){
+                impl->layerIntro.Close();impl->layerIntroActive=false;
+                if(impl->layerLoopActive)got+=impl->layerLoopStream.Read(&layer[(size_t)got*kEngineChannels],frames-got);
+            }
+        }else if(impl->layerLoopActive){
+            got=impl->layerLoopStream.Read(&layer[0],frames);
+        }
+        musicLayerFrames+=(unsigned int)got;
+        impl->layerGain+=(impl->layerTarget-impl->layerGain)*0.12f;
+        if(impl->layerGain<0.0f)impl->layerGain=0.0f;if(impl->layerGain>1.0f)impl->layerGain=1.0f;
+        for(int i=0;i<got*kEngineChannels;++i)
+            accum[(size_t)i]+=(int)((float)layer[(size_t)i]*impl->layerGain);
+        if(got<frames&&!impl->layerIntroActive&&(!impl->layerLoopActive||!impl->musicLoop)){
+            impl->layerIntro.Close();impl->layerLoopStream.Close();
+            impl->layerIntroActive=impl->layerLoopActive=false;
         }
     }
     double squares=0;

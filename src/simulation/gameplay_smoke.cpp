@@ -8,6 +8,7 @@
 #include <string.h>
 #include <math.h>
 #include <algorithm>
+#include <vector>
 namespace {
 unsigned int RunMovementTicks(PortGameSession& session,PortNormalRuntime& runtime,float x,float y,unsigned int count){
     unsigned int done=0;
@@ -459,6 +460,14 @@ int RunBombProbe(NativeMt& random,PortFrontend& ui){
     if(!audio.PlayMusic("resources/music/diptera sonata(basement).ogg",true,0.7f))return 206;
     audio.Mix(pcm,4096);
     if(audio.musicStarted!=1||audio.musicFrames==0)return 207;
+    audio.StopMusic();
+    if(!audio.PlayMusicSet("resources/music/diptera sonata intro.ogg",
+        "resources/music/diptera sonata(basement).ogg",
+        "resources/music/diptera layer intro.ogg",
+        "resources/music/diptera layer.ogg",true,0.7f,0.5f))return 226;
+    audio.Mix(pcm,4096);
+    if(audio.musicIntros==0||audio.musicLayers==0||audio.musicLayerFrames==0)return 227;
+    printf("MUSICSET intro=%u layer=%u layer_frames=%u\n",audio.musicIntros,audio.musicLayers,audio.musicLayerFrames);
     PortNormalRuntime* runtime=new PortNormalRuntime;PortGameSession session(random,ui);
     PortSessionStart start=session.StartNormalCharacter(1,*runtime);
     if(start.result!=NPS_WORLD_PENDING||!AdvanceToBoundary(session,*runtime)||runtime->phase!=PNR_READY){delete runtime;return 208;}
@@ -687,7 +696,118 @@ int RunBombProbe(NativeMt& random,PortFrontend& ui){
     if(!session.AdvanceGreedWave(*runtime,files)||!runtime->greedComplete){delete runtime;return 182;}
     printf("GREED complete waves=%d next=%d room=%d\n",runtime->greedWaveCount,runtime->greedWave+1,runtime->world.currentGrid);
     ui.characterMode=0;delete runtime;return 0;
-}int RunStatProbe(NativeMt& random,PortFrontend& ui){
+}//Authentic generated-floor traversal: BFS over the selected layout's actual
+//door graph, clear each room with tears, enter every next room through its
+//native door actor, kill the selected boss, use the resulting trapdoor, and
+//persist the descended run. Invulnerability only keeps this host probe from
+//randomizing the route on contact damage; it does not author rooms, enemies,
+//items or door state.
+int RunFloorProbe(NativeMt& random,PortFrontend& ui){
+    PortNormalRuntime* runtime=new PortNormalRuntime;PortGameSession session(random,ui);
+    PortSessionStart start=session.StartNormalCharacter(1,*runtime);
+    if(start.result!=NPS_WORLD_PENDING){printf("FLOOR_START fail=%d\n",start.result);delete runtime;return 240;}
+    if(!AdvanceToBoundary(session,*runtime)||runtime->phase!=PNR_READY){delete runtime;return 241;}
+    NativeLevelLayout& layout=runtime->world.layout;
+    const int count=layout.count,startList=runtime->world.currentList;
+    std::vector<int> prev(count,-1),viaSlot(count,-1),queue;
+    prev[startList]=startList;queue.push_back(startList);
+    int bossList=-1;
+    for(unsigned int q=0;q<queue.size()&&bossList<0;++q){
+        const int at=queue[q];const NativePlacedRoom* p=layout.ByList(at);
+        if(!p){delete runtime;return 242;}
+        const NativeRoomDef* d=NativeRoom(p->definition);
+        if(d&&d->type==5){bossList=at;break;}
+        for(int slot=0;slot<8;++slot){if(!(p->doors&(1U<<slot)))continue;
+            const NativePlacedRoom* target=layout.DoorTarget(at,slot);if(!target)continue;
+            const int next=target->listIndex;if(next<0||next>=count||prev[next]>=0)continue;
+            prev[next]=at;viaSlot[next]=slot;queue.push_back(next);}
+    }
+    if(bossList<0){printf("FLOOR_NO_BOSS count=%d\n",count);delete runtime;return 243;}
+    std::vector<int> path;bool pathOk=true;
+    for(int at=bossList;;at=prev[at]){path.push_back(at);if(at==startList)break;if(at<0||prev[at]<0){pathOk=false;break;}}
+    if(!pathOk){delete runtime;return 244;}std::reverse(path.begin(),path.end());
+    printf("FLOOR_PATH seed=1 rooms=%d boss=%d route=",(int)path.size(),bossList);
+    for(unsigned int i=0;i<path.size();++i)printf("%s%d",i?",":"",layout.rooms[path[i]].gridIndex);printf("\n");
+    for(unsigned int i=0;i<path.size();++i){
+        const int expected=path[i];
+        if(runtime->world.currentList!=expected){printf("FLOOR_ORDER expected=%d actual=%d step=%u\n",expected,runtime->world.currentList,i);delete runtime;return 245;}
+        NativeWorldResident& live=runtime->world.resident[runtime->world.currentList];
+        NativeRoomState* room=runtime->world.Current();const NativePlacedRoom* descriptor=runtime->world.CurrentDescriptor();
+        if(!room||!descriptor||!live.doors){printf("FLOOR_ROOM_MISSING step=%u room=%d doors=%d\n",i,room?1:0,live.doors?1:0);delete runtime;return 246;}
+        const NativeRoomDef* definition=NativeRoom(descriptor->definition);
+        const int entryEnemies=live.enemies.count;const unsigned int kills0=runtime->enemyKills;
+        runtime->playerInvulnerable=0x7fffffff;unsigned int combatTicks=0;
+        while(live.enemies.count>0&&combatTicks<30000){
+            NativeEnemy* enemy=0;for(int e=0;e<live.enemies.count;++e)if(live.enemies.entries[e]&&!live.enemies.entries[e]->dead){enemy=live.enemies.entries[e];break;}
+            if(!enemy)break;
+            float x=enemy->body.position.x-64.0f,y=enemy->body.position.y;
+            NativePoint wanted={x,y},clamped;
+            if(room->space.Clamp(wanted,0,0,0,0,&clamped)){x=clamped.x;y=clamped.y;}
+            runtime->playerBody.position.x=x;runtime->playerBody.position.y=y;
+            runtime->playerBody.previousPosition=runtime->playerBody.position;runtime->playerBody.velocity.x=runtime->playerBody.velocity.y=0;
+            const int action=enemy->body.position.x>=x?5:4;
+            if(!RunProjectileTicks(session,*runtime,action,-1,8)){printf("FLOOR_COMBAT_STOP step=%u issue=%08x\n",i,runtime->missingNativePrerequisite);delete runtime;return 247;}
+            combatTicks+=8;
+        }
+        if(!RunProjectileTicks(session,*runtime,-1,-1,2)){delete runtime;return 248;}
+        const int remaining=live.enemies.count;const unsigned int roomKills=runtime->enemyKills-kills0;
+        printf("FLOOR_ROOM step=%u grid=%d def=%d type=%d variant=%u enemies=%d kills=%u remaining=%d clear=%d hp=%d/%d ticks=%u\n",
+            i,descriptor->gridIndex,descriptor->definition,definition?definition->type:-1,definition?definition->variant:0,
+            entryEnemies,roomKills,remaining,room->clear?1:0,runtime->playerState.redHearts,runtime->playerState.maxRedHearts,combatTicks);
+        if(remaining||!room->clear||(entryEnemies&&roomKills==0)){printf("FLOOR_ROOM_FAIL step=%u\n",i);delete runtime;return 249;}
+        if(i+1==path.size()){
+            printf("FLOOR_BOSS identity=%d award=%d room=%d variant=%u entryEnemies=%d kills=%u\n",
+                definition?definition->subtype:-1,runtime->bossAwardIdentity,
+                descriptor->definition,definition?definition->variant:0,entryEnemies,roomKills);
+            if(!runtime->bossDefeated||!definition||definition->subtype<0){printf("FLOOR_BOSS_FAIL defeated=%d subtype=%d\n",runtime->bossDefeated?1:0,definition?definition->subtype:-1);delete runtime;return 266;}
+            if(room->trapdoorState==0){printf("FLOOR_TRAPDOOR missing\n");delete runtime;return 250;}
+            for(int t=0;t<40&&room->trapdoorState<2;++t)if(!RunProjectileTicks(session,*runtime,-1,-1,1)){delete runtime;return 251;}
+            if(room->trapdoorState!=2){printf("FLOOR_TRAPDOOR state=%d\n",room->trapdoorState);delete runtime;return 252;}
+            runtime->playerBody.position.x=room->trapdoorX;runtime->playerBody.position.y=room->trapdoorY;
+            runtime->playerBody.previousPosition=runtime->playerBody.position;
+            if(!RunProjectileTicks(session,*runtime,-1,-1,1)||!runtime->descendRequested){printf("FLOOR_DESCEND no-contact\n");delete runtime;return 253;}
+            const int red=runtime->playerState.redHearts,soul=runtime->playerState.soulHearts;
+            const int bombs=runtime->playerState.bombs,keys=runtime->playerState.keys,coins=runtime->playerState.coins;
+            const unsigned int kills=runtime->enemyKills;
+            NativeSceneFiles files={"runtime/game/file_index.bin","runtime/game/",NativeStageBackdrop(runtime->run.context.stage),runtime->run.context.nativeMode,0};
+            if(!session.DescendNormal(*runtime,files)){printf("FLOOR_DESCEND fail=%08x\n",runtime->missingNativePrerequisite);delete runtime;return 254;}
+            if(runtime->run.context.stage!=2||!runtime->world.Current()||runtime->phase!=PNR_READY){delete runtime;return 255;}
+            if(runtime->playerState.redHearts!=red||runtime->playerState.soulHearts!=soul||
+               runtime->playerState.bombs!=bombs||runtime->playerState.keys!=keys||runtime->playerState.coins!=coins){delete runtime;return 256;}
+            const NativePlacedRoom* nextFloor=runtime->world.CurrentDescriptor();
+            printf("FLOOR_TRAPDOOR state=2 descend=1 stage=%d grid=%d hp=%d/%d soul=%d kills=%u\n",
+                runtime->run.context.stage,nextFloor?nextFloor->gridIndex:-1,runtime->playerState.redHearts,
+                runtime->playerState.maxRedHearts,runtime->playerState.soulHearts,kills);
+            //Persistence across the floor boundary carries floor, grid, resources
+            //and owned inventory (the continue probe owns the item matrix).
+            if(!session.SaveContinue("build/gameplay/floor_continue.dat",*runtime)){delete runtime;return 257;}
+            PortNormalRuntime* resumed=new PortNormalRuntime;NativeMt resumedRandom;resumedRandom.Seed(444);
+            PortGameSession resumedSession(resumedRandom,ui);NativeSceneFiles resumedFiles={"runtime/game/file_index.bin","runtime/game/",NativeStageBackdrop(2),runtime->run.context.nativeMode,0};
+            if(!resumedSession.ContinueSavedRun("build/gameplay/floor_continue.dat",*resumed,resumedFiles)){delete resumed;delete runtime;return 258;}
+            if(resumed->run.context.stage!=2||resumed->world.currentGrid!=runtime->world.currentGrid||
+               resumed->playerState.redHearts!=red||resumed->playerState.soulHearts!=soul||
+               resumed->playerState.bombs!=bombs||resumed->playerState.keys!=keys||resumed->playerState.coins!=coins){delete resumed;delete runtime;return 259;}
+            printf("FLOOR_CONTINUE stage=%d grid=%d hp=%d/%d soul=%d bombs=%d keys=%d coins=%d\n",
+                resumed->run.context.stage,resumed->world.currentGrid,resumed->playerState.redHearts,resumed->playerState.maxRedHearts,
+                resumed->playerState.soulHearts,resumed->playerState.bombs,resumed->playerState.keys,resumed->playerState.coins);
+            delete resumed;delete runtime;return 0;
+        }
+        const int next=path[i+1],slot=viaSlot[next];
+        if(slot<0||!(live.doors->attached&(1U<<slot))){printf("FLOOR_DOOR missing step=%u slot=%d\n",i,slot);delete runtime;return 260;}
+        NativeDoorActor& door=live.doors->actors[slot];
+        if(door.state!=2){printf("FLOOR_DOOR closed step=%u slot=%d state=%d targetType=%d\n",i,slot,door.state,door.targetType);delete runtime;return 261;}
+        float px,py;if(!room->geometry.Position(door.grid,&px,&py)){delete runtime;return 262;}
+        runtime->playerBody.position.x=px+20.0f;runtime->playerBody.position.y=py+20.0f;
+        runtime->playerBody.previousPosition=runtime->playerBody.position;runtime->playerBody.velocity.x=runtime->playerBody.velocity.y=0;
+        const unsigned int transitions=runtime->roomTransitions;
+        for(int t=0;t<12&&runtime->roomTransitions==transitions;++t)if(!RunProjectileTicks(session,*runtime,-1,-1,1)){delete runtime;return 263;}
+        if(runtime->roomTransitions==transitions||runtime->world.currentList!=next){
+            printf("FLOOR_TRANSITION fail step=%u slot=%d transitions=%u want=%d got=%d\n",i,slot,runtime->roomTransitions,next,runtime->world.currentList);
+            delete runtime;return 264;}
+    }
+    delete runtime;return 265;
+}
+int RunStatProbe(NativeMt& random,PortFrontend& ui){
     PortNormalRuntime* runtime=new PortNormalRuntime;PortGameSession session(random,ui);
     PortSessionStart start=session.StartNormalCharacter(1,*runtime);
     if(start.result!=NPS_WORLD_PENDING){delete runtime;return 103;}
@@ -973,6 +1093,7 @@ int main(int argc,char** argv){
     if(!failed){int transition=RunTransitionProbe(random,ui);if(transition){printf("TRANSITION_RESULT failed=%d\n",transition);failed=true;}}
     if(!failed){int locks=RunLockProbe(random,ui);if(locks){printf("LOCK_RESULT failed=%d\n",locks);failed=true;}}
     if(!failed){int descend=RunDescendProbe(random,ui);if(descend){printf("DESCEND_RESULT failed=%d\n",descend);failed=true;}}
+    if(!failed){int floor=RunFloorProbe(random,ui);if(floor){printf("FLOOR_RESULT failed=%d\n",floor);failed=true;}}
     if(!failed){int item=RunItemProbe(random,ui);if(item){printf("ITEM_RESULT failed=%d\n",item);failed=true;}}
     if(!failed){int bomb=RunBombProbe(random,ui);if(bomb){printf("BOMB_RESULT failed=%d\n",bomb);failed=true;}}
     if(!failed){int hard=RunHardModeProbe(random,ui);if(hard){printf("HARD_RESULT failed=%d\n",hard);failed=true;}}

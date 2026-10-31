@@ -23,6 +23,7 @@ static NativeMt gRandom;
 static PortNormalRuntime* gRuntime=0;
 static NativeAudio gAudio;
 static int gLastMusicTrack=-1;
+static float gRoomCameraX=0;
 static FILE* gLog=0;
 static IDirect3D9* gD3D=0;
 static IDirect3DDevice9* gDevice=0;
@@ -47,7 +48,7 @@ static void SyncMusic(){
         gLastMusicTrack=track;
         const NativeMusicDef* definition=NativeMusicDefinition(track);
         if(definition&&definition->path&&*definition->path){
-            if(gAudio.PlayMusic(definition->path,definition->loop,gUi.music.volume*1.6f))
+            if(gAudio.PlayMusicSet(definition->intro,definition->path,definition->layerIntro,definition->layer,definition->loop,gUi.music.volume*1.6f,0.55f))
                 Log("WIN music track=%d path=%s",track,definition->path);
             else Log("WIN music failed track=%d path=%s",track,definition->path);
         }else gAudio.StopMusic();
@@ -131,6 +132,17 @@ static void TexRectRotated(float cx,float cy,float x,float y,float w,float h,flo
     const float uv[8]={sx,sy,sx+sw,sy,sx,sy+sh,sx+sw,sy+sh};
     TexQuad(xy,uv,(float)kGameplayAtlasWidth,(float)kGameplayAtlasHeight,color);
 }
+static void TexRectFlip(float x,float y,float w,float h,float sx,float sy,float sw,float sh,
+    bool flipX,bool flipY,DWORD color=0xffffffff){
+    const float xy[8]={x,y,x+w,y,x,y+h,x+w,y+h};
+    float uv[8]={sx,sy,sx+sw,sy,sx,sy+sh,sx+sw,sy+sh};
+    if(flipX){float t=uv[0];uv[0]=uv[2];uv[2]=t;t=uv[4];uv[4]=uv[6];uv[6]=t;}
+    if(flipY){float t=uv[1];uv[1]=uv[5];uv[5]=t;t=uv[3];uv[3]=uv[7];uv[7]=t;}
+    TexQuad(xy,uv,(float)kGameplayAtlasWidth,(float)kGameplayAtlasHeight,color);
+}
+static float RoomCameraX(const NativeRoomBackground& bg){
+    return (480.0f-(bg.right+bg.left))*0.5f;
+}
 static bool DoorAtlasRect(const std::string& path,int* ox,int* oy){
     const char* p=path.c_str();
     if(strstr(p,"door_12_cellardoor")){*ox=kGameplayDoorcellarX;*oy=kGameplayDoorcellarY;return true;}
@@ -183,9 +195,10 @@ static void DrawBackground(){
     if(!live.view->background.ready||!live.view->background.definition){static bool nl=false;if(!nl){nl=true;const NativePlacedRoom* d=gRuntime->world.CurrentDescriptor();
         Log("WIN bg not ready=%d def=%d definition=%d type=%d",live.view->background.ready?1:0,live.view->background.definition?1:0,d?d->definition:-1,live.room?live.room->type:-1);}return;}
     const NativeRoomBackground& bg=live.view->background;int ox,oy;if(!BackdropAtlasRect(bg.definition->id,&ox,&oy)){static bool bl=false;if(!bl){bl=true;Log("WIN bg unsupported id=%d",bg.definition->id);}return;}
+    const float cameraX=RoomCameraX(bg);gRoomCameraX=cameraX;
     for(unsigned int pass=0;pass<2;++pass){const std::vector<NativeBackgroundQuad>& list=pass?bg.wall:bg.floor;
         for(unsigned int i=0;i<list.size();++i){const NativeBackgroundQuad& q=list[i];float xy[8],uv[8];
-            for(int k=0;k<4;++k){xy[k*2]=q.destination[k].x;xy[k*2+1]=q.destination[k].y;uv[k*2]=q.source[k].x+ox;uv[k*2+1]=q.source[k].y+oy;}
+            for(int k=0;k<4;++k){xy[k*2]=q.destination[k].x+cameraX;xy[k*2+1]=q.destination[k].y;uv[k*2]=q.source[k].x+ox;uv[k*2+1]=q.source[k].y+oy;}
             TexQuad(xy,uv,(float)kGameplayAtlasWidth,(float)kGameplayAtlasHeight,0xffffffff);}}
 }
 static void DrawDoors(){
@@ -200,7 +213,7 @@ static void DrawDoors(){
         if(!v.ready||!v.main.asset||v.main.layerSheets.empty())continue;
         int ax=0,ay=0;if(!DoorAtlasRect(v.main.layerSheets[0].path,&ax,&ay))continue;
         float wx,wy;if(!live.room->geometry.Position(live.doors->actors[slot].grid,&wx,&wy))continue;
-        float px=bg.left+(wx+20-space.left)*rw/ww+v.main.offset.x;
+        float px=bg.left+(wx+20-space.left)*rw/ww+v.main.offset.x+gRoomCameraX;
         float py=bg.top+(wy+20-space.top)*rh/wh+v.main.offset.y;
         for(unsigned int i=0;i<v.main.asset->layerCount;++i){const NativeSpriteFrame* f=v.main.LayerFrame(v.main.asset->layers[i].id);
             if(!f||!f->visible)continue;float cx=Bits(f->geometry[0]),cy=Bits(f->geometry[1]),w=Bits(f->geometry[2]),h=Bits(f->geometry[3]);
@@ -218,7 +231,7 @@ static void DrawRocks(){
     float cw=40*rw/ww,ch=40*rh/wh;
     for(int i=0;i<live.room->staticGridCount;++i){const NativeStaticGrid& g=live.room->staticGrids[i];
         if(g.type!=1000&&g.type!=1001&&g.type!=1002&&g.type!=1008&&g.type!=1010&&g.type!=1400&&g.type!=1500)continue;float wx,wy;
-        if(!live.room->geometry.Position(g.grid,&wx,&wy))continue;float px=bg.left+(wx-space.left)*rw/ww,py=bg.top+(wy-space.top)*rh/wh;
+        if(!live.room->geometry.Position(g.grid,&wx,&wy))continue;float px=bg.left+(wx-space.left)*rw/ww+gRoomCameraX,py=bg.top+(wy-space.top)*rh/wh;
         int sx=kGameplayRocksbasementX,sy=kGameplayRocksbasementY,cx=0,cy=0;
         if(g.type==1002)cy=32;else if(g.type==1400){sx=kGameplayFireplacesheetX;sy=kGameplayFireplacesheetY;}
         else if(g.type==1500){sx=kGameplayPoopsheetX;sy=kGameplayPoopsheetY;}else cx=(g.variant&3)*32;
@@ -234,7 +247,7 @@ static void DrawPickups(){
         else if(p->variant==20){sx=kGameplayPickupcoinX;sy=kGameplayPickupcoinY;}
         else if(p->variant==30){sx=kGameplayPickupkeyX;sy=kGameplayPickupkeyY;}
         else if(p->variant==40){sx=kGameplayPickupbombX;sy=kGameplayPickupbombY;}else continue;
-        float px=bg.left+(p->position.x-space.left)*rw/ww,py=bg.top+(p->position.y-space.top)*rh/wh;
+        float px=bg.left+(p->position.x-space.left)*rw/ww+gRoomCameraX,py=bg.top+(p->position.y-space.top)*rh/wh;
         TexRect(px-8,py-8,16,16,(float)sx,(float)sy,32,32);}
 }
 static bool EnemyWalkRect(int type,int variant,int* sx,int* sy,int* frames,int* fw,int* fh){
@@ -252,7 +265,7 @@ static void DrawTrapdoor(){
     const NativeRoomBackground& bg=live.view->background;const NativeRoomSpace& space=room->space;
     float rw=bg.right-bg.left,rh=bg.bottom-bg.top,ww=space.right-space.left,wh=space.bottom-space.top;if(ww<=0||wh<=0)return;
     int frame=room->trapdoorState==1?room->trapdoorTimer/5:5;if(frame<0)frame=0;if(frame>5)frame=5;
-    float px=bg.left+(room->trapdoorX-space.left)*rw/ww,py=bg.top+(room->trapdoorY-space.top)*rh/wh;
+    float px=bg.left+(room->trapdoorX-space.left)*rw/ww+gRoomCameraX,py=bg.top+(room->trapdoorY-space.top)*rh/wh;
     TexRect(px-32,py-32,64,64,(float)(kGameplayTrapdooropenX+frame*64),(float)kGameplayTrapdooropenY,64,64);
 }
 static void DrawFamiliars(){
@@ -269,7 +282,7 @@ static void DrawFamiliars(){
         else continue;
         if(frames<=0)continue;
         int frame=((int)(f.time/6))%frames;
-        float px=bg.left+(f.position.x-space.left)*rw/ww,py=bg.top+(f.position.y-space.top)*rh/wh;
+        float px=bg.left+(f.position.x-space.left)*rw/ww+gRoomCameraX,py=bg.top+(f.position.y-space.top)*rh/wh;
         TexRect(px-32,py-48,64,64,(float)(sx+frame*64),(float)sy,64,64);
     }
 }static void DrawEnemies(){
@@ -280,7 +293,7 @@ static void DrawFamiliars(){
     for(int i=0;i<live.enemies.count;++i){NativeEnemy* e=live.enemies.entries[i];if(!e||!e->ready||e->dead)continue;
         int sx=0,sy=0,frames=0,fw=64,fh=64;if(!EnemyWalkRect(e->type,e->body.variant,&sx,&sy,&frames,&fw,&fh)||frames<=0)continue;
         int frame=((int)(e->body.time/6))%frames;
-        float px=bg.left+(e->body.position.x-space.left)*rw/ww,py=bg.top+(e->body.position.y-space.top)*rh/wh;
+        float px=bg.left+(e->body.position.x-space.left)*rw/ww+gRoomCameraX,py=bg.top+(e->body.position.y-space.top)*rh/wh;
         TexRect(px-fw*0.5f,py-fh*0.75f,(float)fw,(float)fh,(float)(sx+frame*fw),(float)sy,(float)fw,(float)fh);}
 }
 static void DrawDeathFx(){
@@ -293,7 +306,7 @@ static void DrawDeathFx(){
         int sx=0,sy=0,frames=0,fw=64,fh=64;if(!EnemyWalkRect(fx.type,fx.variant,&sx,&sy,&frames,&fw,&fh)||frames<=0)continue;
         float scale=1.0f-fx.time/30.0f;if(scale<0.15f)scale=0.15f;
         const int frame=((int)(fx.time/3))%frames;
-        const float px=bg.left+(fx.position.x-space.left)*rw/ww;
+        const float px=bg.left+(fx.position.x-space.left)*rw/ww+gRoomCameraX;
         const float py=bg.top+(fx.position.y-space.top)*rh/wh;
         const unsigned int alpha=(unsigned int)(255.0f*scale)&255U;
         TexRect(px-fw*scale*0.5f,py-fh*scale*0.75f,fw*scale,fh*scale,
@@ -307,24 +320,24 @@ static void DrawPlayer(){
     if(strstr(sprite.layerSheets[1].path.c_str(),"character_001_isaac")==0)return;
     const NativeRoomBackground& bg=live.view->background;const NativeRoomSpace& space=live.room->space;
     float rw=bg.right-bg.left,rh=bg.bottom-bg.top,ww=space.right-space.left,wh=space.bottom-space.top;if(ww<=0||wh<=0)return;
-    float px=bg.left+(gRuntime->playerBody.position.x-space.left)*rw/ww,py=bg.top+(gRuntime->playerBody.position.y-space.top)*rh/wh;
+    float px=bg.left+(gRuntime->playerBody.position.x-space.left)*rw/ww+gRoomCameraX,py=bg.top+(gRuntime->playerBody.position.y-space.top)*rh/wh;
     const NativeSpriteFrame* frames[2]={sprite.LayerFrame(1),sprite.LayerFrame(4,true)};
     for(int i=0;i<2;++i){const NativeSpriteFrame* f=frames[i];if(!f||!f->visible)continue;
         float cx=Bits(f->geometry[0]),cy=Bits(f->geometry[1]),w=Bits(f->geometry[2]),h=Bits(f->geometry[3]);
         float ox=Bits(f->geometry[4]),oy=Bits(f->geometry[5]),sx=Bits(f->geometry[6]),sy=Bits(f->geometry[7]);
         float pvx=Bits(f->geometry[8]),pvy=Bits(f->geometry[9]);if(w<=0||h<=0)continue;if(sx==0||sy==0)sx=sy=1;
         float x=px+(ox-pvx)*fabsf(sx),y=py+(oy-pvy)*fabsf(sy);
-        TexRect(x,y,w*fabsf(sx),h*fabsf(sy),cx+kGameplayPlayerX,cy+kGameplayPlayerY,w,h);}
+        TexRectFlip(x,y,w*fabsf(sx),h*fabsf(sy),cx+kGameplayPlayerX,cy+kGameplayPlayerY,w,h,sx<0,sy<0);}
 }
 static void DrawProjectiles(){
     NativeWorldResident& live=gRuntime->world.resident[gRuntime->world.currentList];if(!live.room||!live.view||!live.view->background.ready)return;
     const NativeRoomBackground& bg=live.view->background;const NativeRoomSpace& space=live.room->space;
     float rw=bg.right-bg.left,rh=bg.bottom-bg.top,ww=space.right-space.left,wh=space.bottom-space.top;if(ww<=0||wh<=0)return;
     for(unsigned int i=0;i<gRuntime->projectiles.active.size();++i){const NativeProjectile& p=gRuntime->projectiles.active[i];
-        float px=bg.left+(p.position.x-space.left)*rw/ww,py=bg.top+(p.position.y-space.top)*rh/wh;
-        TexRect(px-16,py-16,32,32,(float)kGameplayTearsX,(float)kGameplayTearsY,32,32);}
+        float px=bg.left+(p.position.x-space.left)*rw/ww+gRoomCameraX,py=bg.top+(p.position.y-space.top)*rh/wh;
+        TexRect(px-18,py-18,36,36,(float)(kGameplayTearsX+32),(float)(kGameplayTearsY+32),32,32);}
     for(unsigned int i=0;i<gRuntime->enemyShots.active.size();++i){const NativeEnemyShot& p=gRuntime->enemyShots.active[i];
-        float px=bg.left+(p.position.x-space.left)*rw/ww,py=bg.top+(p.position.y-space.top)*rh/wh;
+        float px=bg.left+(p.position.x-space.left)*rw/ww+gRoomCameraX,py=bg.top+(p.position.y-space.top)*rh/wh;
         TexRect(px-14,py-14,28,28,(float)(kGameplayTearsX+128),(float)(kGameplayTearsY+64),32,32);}
 }
 static void DrawHud(){
@@ -361,8 +374,12 @@ static void DrawMinimap(){
         float sx=Bits(f->geometry[6]),sy=Bits(f->geometry[7]);
         const float pivotX=Bits(f->geometry[8]),pivotY=Bits(f->geometry[9]);
         if(w<=0||h<=0)continue;if(sx==0||sy==0)sx=sy=1;
-        const float x=baseX+(draw.position.x+(offX-pivotX)*fabsf(sx))*scale;
-        const float y=baseY+(draw.position.y+(offY-pivotY)*fabsf(sy))*scale;
+        const bool isIcon=(draw.asset==gRuntime->minimaps.icons.asset);
+        //Icon sheet cells are16x16 with their7x7 glyph inset at(3,2); the
+        //native draw places the cell at room center-2. Shift the cell so the
+        //glyph centers on the room cell, matching the original minimap.
+        const float x=isIcon?baseX+(draw.position.x-4.0f)*scale:baseX+(draw.position.x+(offX-pivotX)*fabsf(sx))*scale;
+        const float y=isIcon?baseY+(draw.position.y-3.0f)*scale:baseY+(draw.position.y+(offY-pivotY)*fabsf(sy))*scale;
         TexRect(x,y,w*fabsf(sx)*scale,h*fabsf(sy)*scale,cropX+ax,cropY+ay,w,h);
     }
 }
@@ -509,7 +526,6 @@ int main(int argc,char** argv){
                 Log("WIN descend stage=%d room=%d def=%d",runtime.run.context.stage,runtime.world.currentList,runtime.world.CurrentDescriptor()?runtime.world.CurrentDescriptor()->definition:-1);
             else{runtime.descendRequested=false;Log("WIN descend failed stage=%d prerequisite=%08x",runtime.run.context.stage,runtime.missingNativePrerequisite);}
         }
-        if(frame<3)Log("WIN input frame=%d W=%d S=%d A=%d D=%d vel=(%.2f,%.2f) tick=%d flags=%08x",frame,held[2]?1:0,held[3]?1:0,held[0]?1:0,held[1]?1:0,runtime.playerBody.velocity.x,runtime.playerBody.velocity.y,(int)tickResult,runtime.playerBody.flagsLow);
         if(frame%30==0){NativeWorldResident& live=runtime.world.resident[runtime.world.currentList];const NativePlacedRoom* d=runtime.world.CurrentDescriptor();
             static int loggedDoorList=-1;
             if(loggedDoorList!=runtime.world.currentList&&live.doors){loggedDoorList=runtime.world.currentList;

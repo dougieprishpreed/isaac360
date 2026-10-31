@@ -23,6 +23,10 @@ public:
     void Shutdown();
     bool PlaySfx(const char* virtualPath,float volume=0.8f,float pitch=1.0f);
     bool PlayMusic(const char* virtualPath,bool loop,float volume=0.7f);
+    //Original music records can carry one-shot intro/layer-intro streams and a
+    //looping main/layer pair. Empty paths are skipped; loopPath is the key.
+    bool PlayMusicSet(const char* introPath,const char* loopPath,const char* layerIntroPath,
+        const char* layerPath,bool loop,float volume,float layerVolume=0.55f);
     void StopMusic();
     void SetMusicVolume(float volume);
     void Update();
@@ -30,7 +34,7 @@ public:
     float LastRms() const;
     bool initialized,deviceReady;
     unsigned int sfxLoaded,sfxLoadFailures,sfxStarted,sfxFinished;
-    unsigned int musicStarted,musicLoops,musicFrames,sfxFrames,framesMixed,deviceSubmits;
+    unsigned int musicStarted,musicLoops,musicFrames,musicLayerFrames,musicIntros,musicLayers,sfxFrames,framesMixed,deviceSubmits;
     std::string root;
 private:
     struct Impl;
