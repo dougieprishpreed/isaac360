@@ -500,7 +500,25 @@ int RunBombProbe(NativeMt& random,PortFrontend& ui){
        !(runtime->playerState.stats.moveSpeed>spd0)||runtime->playerState.stats.luck<1.0f){delete runtime;return 106;}
     printf("STAT fd=%.3f damage=%.3f speed=%.3f luck=%.1f\n",runtime->playerState.stats.fireDelay,
         runtime->playerState.stats.damage,runtime->playerState.stats.moveSpeed,runtime->playerState.stats.luck);
-    delete runtime;return 0;
+    const float fd1=runtime->playerState.stats.fireDelay,dmg1=runtime->playerState.stats.damage;
+    const float spd1=runtime->playerState.stats.moveSpeed,luck1=runtime->playerState.stats.luck;
+    delete runtime;
+    //The cache operator must be order-independent: the same inventory granted
+    //in reverse order owns identical evaluated stats.
+    PortNormalRuntime* reverse=new PortNormalRuntime;PortGameSession reverseSession(random,ui);
+    PortSessionStart reverseStart=reverseSession.StartNormalCharacter(1,*reverse);
+    if(reverseStart.result!=NPS_WORLD_PENDING||!AdvanceToBoundary(reverseSession,*reverse)||reverse->phase!=PNR_READY){delete reverse;return 107;}
+    if(!reverse->playerState.GrantCollectible(46)||!reverse->playerState.GrantCollectible(27)||
+       !reverse->playerState.GrantCollectible(4)||!reverse->playerState.GrantCollectible(1)){delete reverse;return 108;}
+    if(fabs(reverse->playerState.stats.fireDelay-fd1)>0.0001f||fabs(reverse->playerState.stats.damage-dmg1)>0.0001f||
+       fabs(reverse->playerState.stats.moveSpeed-spd1)>0.0001f||fabs(reverse->playerState.stats.luck-luck1)>0.0001f){delete reverse;return 109;}
+    const int maxBefore=reverse->playerState.maxRedHearts;
+    if(!reverse->playerState.GrantCollectible(12)){delete reverse;return 110;}
+    if(reverse->playerState.maxRedHearts!=maxBefore+2||reverse->playerState.redHearts!=reverse->playerState.maxRedHearts){delete reverse;return 111;}
+    if(fabs(reverse->playerState.stats.damage-6.45f)>0.0001f||fabs(reverse->playerState.stats.moveSpeed-1.6f)>0.0001f){delete reverse;return 112;}
+    printf("STAT order=1 resource_hp=%d/%d cache_damage=%.3f cache_speed=%.3f\n",reverse->playerState.redHearts,reverse->playerState.maxRedHearts,
+        reverse->playerState.stats.damage,reverse->playerState.stats.moveSpeed);
+    delete reverse;return 0;
 }int RunHardModeProbe(NativeMt& random,PortFrontend& ui){
     (void)random;(void)ui;
     PortFrontend local;local.Init(false);

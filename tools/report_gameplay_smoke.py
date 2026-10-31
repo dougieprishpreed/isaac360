@@ -24,6 +24,7 @@ def main():
     chars=re.search(r'^CHARACTERS ok=(\d+) fail=(\d+)',log,re.M)
     hard=re.search(r'^HARD mode=(\d+) phase=(\d+) player=(\d+) hp=(-?\d+)/(-?\d+)',log,re.M)
     stat=re.search(r'^STAT fd=(-?[0-9.]+) damage=(-?[0-9.]+) speed=(-?[0-9.]+) luck=(-?[0-9.]+)',log,re.M)
+    statOrder=re.search(r'^STAT order=(\d+) resource_hp=(-?\d+)/(-?\d+) cache_damage=(-?[0-9.]+) cache_speed=(-?[0-9.]+)',log,re.M)
     pocket=re.search(r'^POCKET hp=(-?\d+)/(-?\d+) bombs=(-?\d+) keys=(-?\d+) coins=(-?\d+)',log,re.M)
     active=re.search(r'^ACTIVE id=(\d+) hp=(-?\d+)/(-?\d+)',log,re.M)
     familiar=re.search(r'^FAMILIAR spawned=(\d+) shots=(\d+) hits=(\d+) enemies=(\d+)',log,re.M)
@@ -104,6 +105,10 @@ def main():
             'stat_damage':float(stat.group(2)) if stat else 0.0,
             'stat_speed':float(stat.group(3)) if stat else 0.0,
             'stat_luck':float(stat.group(4)) if stat else 0.0,
+            'stat_order_independent':int(statOrder.group(1)) if statOrder else 0,
+            'stat_resource_hp':int(statOrder.group(2)) if statOrder else -1,
+            'stat_cache_damage':float(statOrder.group(4)) if statOrder else 0.0,
+            'stat_cache_speed':float(statOrder.group(5)) if statOrder else 0.0,
             'pocket_hp':int(pocket.group(1)) if pocket else -1,
             'pocket_max_hp':int(pocket.group(2)) if pocket else -1,
             'pocket_bombs':int(pocket.group(3)) if pocket else -1,

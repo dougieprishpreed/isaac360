@@ -41,6 +41,20 @@ def prepare():
         (json.dumps(texture_binding['virtual_path']),width,height)]
     path=ROOT/'build/generated/native_player_resource_data.h';path.parent.mkdir(parents=True,exist_ok=True)
     path.write_text('\n'.join(lines)+'\n',encoding='ascii')
+    #Pickup-owned resource fields from the prepared complete-edition items.xml.
+    #Only numeric fields are emitted; trigger/scripted effects remain code.
+    item_raw,item_binding=r.read('items.xml');item_root=ET.fromstring(item_raw)
+    resource_lines=['//Original items.xml numeric pickup fields (half-heart units).',
+        'struct NativeItemResourceEffect {int id,hearts,maxhearts,soulhearts,blackhearts,keys,bombs,coins;};',
+        'static const NativeItemResourceEffect kNativeItemResources[]={']
+    for e in item_root:
+        if e.tag not in ('passive','active'):continue
+        ident=int(e.get('id','0'))
+        values=[int(e.get(k,'0') or 0) for k in ('hearts','maxhearts','soulhearts','blackhearts','keys','bombs','coins')]
+        if ident>0 and any(values):
+            resource_lines.append('{%d,%s},'%(ident,','.join(map(str,values))))
+    resource_lines+=['};']
+    (ROOT/'build/generated/native_item_resource_data.h').write_text('\n'.join(resource_lines)+'\n',encoding='ascii')
     constants={'TearsCoefficient':0xb49828,'TearsBase':0xb49b4c,'TearsScale':0xb49ab0,
         'Thirty':0xb49ba8,'DamageCoefficient':0xb49808,'DamageBase':0xb49a38,
         'IsaacDamageOffset':0xb2cc78,'IsaacSpeedOffset':0xbc5610,

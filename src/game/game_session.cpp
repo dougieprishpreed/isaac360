@@ -645,7 +645,7 @@ bool PortGameSession::ContinueNativeSave(const char* path,PortNormalRuntime& run
         runtime.playerBody.previousPosition=runtime.playerBody.position;
         runtime.playerBody.velocity.x=runtime.playerBody.velocity.y=0;runtime.playerBody.removed=false;
         runtime.playerState.stats.fireDelay=summary.fireDelay;
-        runtime.playerState.stats.damage=summary.damage;runtime.playerState.stats.baseDamage=summary.damage;
+        runtime.playerState.stats.damage=summary.damage;
         runtime.playerState.stats.moveSpeed=summary.moveSpeed;runtime.playerState.stats.luck=summary.luck;
         runtime.playerState.stats.dirty=0xffffU;
     }else if(room){

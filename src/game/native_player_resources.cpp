@@ -1,6 +1,7 @@
 #include "native_player_state.h"
 #include "native_sprite.h"
 #include "native_player_resource_data.h"
+#include "native_item_resource_data.h"
 #include "native_item_pool_data.h"
 #include <algorithm>
 
@@ -44,65 +45,27 @@ bool NativePlayerState::GrantCollectible(int id){
     if(!ready||id<=0||(unsigned int)id>=collectibleCounts.size())return false;
     ++collectibleCounts[id];
     if(NativePoolIsActive(id)){for(int i=0;i<4;++i)if(!activeItems[i]){activeItems[i]=id;break;}}
-    //Prepared non-stat item effects with exact resource/heart semantics. Stat-
-    //cache items remain owned but their native cache arithmetic is separate.
-    switch(id){
-    case 15: //<3
-    case 22: //Lunch
-    case 23: //Dinner
-    case 24: //Dessert
-    case 25: //Breakfast
-    case 26: //Rotten Meat
-        if(AddMaxHearts(2)){redHearts=std::min(maxRedHearts,redHearts+2);}
-        break;
-    case 16: //Raw Liver
-        if(AddMaxHearts(4)){redHearts=std::min(maxRedHearts,redHearts+4);}
-        break;
-    case 17: keys=std::min(99,keys+99);break; //Skeleton Key
-    case 18: coins=std::min(99,coins+99);break; //A Dollar
-    case 19: bombs=std::min(99,bombs+10);break; //Boom!
-    default:break;
-    }
-    //Prepared stat-cache deltas for the common original items. These adjust the
-    //live evaluated stats after grant; the full native cache operator remains
-    //a separate port item.
-    if(stats.ready){
-        switch(id){
-        case 1:{ //The Sad Onion: +0.7 tears.
-            float tears=30.0f/(stats.fireDelay+1.0f)-1.0f;
-            tears+=0.7f;stats.fireDelay=30.0f/(tears+1.0f)-1.0f;break;}
-        case 5: //My Reflection: +1.5 range.
-            stats.range+=1.5f;break;
-        case 7: //Blood of the Martyr: +1 damage.
-            stats.damage+=1.0f;stats.baseDamage+=1.0f;break;
-        case 4: //Cricket's Head: damage x1.5.
-            stats.damage*=1.5f;stats.baseDamage*=1.5f;break;
-        case 6:{ //Number One: +1.5 tears, -1.5 range.
-            float tears=30.0f/(stats.fireDelay+1.0f)-1.0f;
-            tears+=1.5f;stats.fireDelay=std::max(5.0f,30.0f/(tears+1.0f)-1.0f);}
-            stats.range=std::max(6.5f,stats.range-1.5f);break;
-        case 12: //Magic Mushroom: damage x1.5 and +0.3 speed.
-            stats.damage*=1.5f;stats.baseDamage*=1.5f;
-            stats.moveSpeed=std::min(2.0f,stats.moveSpeed+0.3f);break;
-        case 13: //The Virus: +0.3 speed.
-            stats.moveSpeed=std::min(2.0f,stats.moveSpeed+0.3f);break;
-        case 14: //Roid Rage: +0.6 speed, +1.5 range.
-            stats.moveSpeed=std::min(2.0f,stats.moveSpeed+0.6f);stats.range+=1.5f;break;
-        case 27: //Wooden Spoon: +0.3 speed.
-        case 28: //The Belt: +0.3 speed.
-            stats.moveSpeed=std::min(2.0f,stats.moveSpeed+0.3f);break;
-        case 29: //Mom's Underwear.
-        case 30: //Mom's Heels.
-        case 31: //Mom's Lipstick.
-            stats.range+=1.5f;break;
-        case 32:{ //Wire Coat Hanger: +0.7 tears.
-            float tears=30.0f/(stats.fireDelay+1.0f)-1.0f;
-            tears+=0.7f;stats.fireDelay=std::max(5.0f,30.0f/(tears+1.0f)-1.0f);break;}
-        case 46: stats.luck+=1.0f;break; //Lucky Foot
-        default:break;
+    //Original items.xml numeric pickup fields. hearts99/100 are the prepared
+    //full-heal sentinels; maxhearts/soulhearts/blackhearts are half-heart units.
+    const NativeItemResourceEffect* resource=0;
+    for(unsigned int i=0;i<sizeof(kNativeItemResources)/sizeof(kNativeItemResources[0]);++i)
+        if(kNativeItemResources[i].id==id){resource=&kNativeItemResources[i];break;}
+    if(resource){
+        if(resource->maxhearts)AddMaxHearts(resource->maxhearts);
+        if(resource->hearts){
+            if(resource->hearts>=99)redHearts=maxRedHearts;
+            else redHearts=std::min(maxRedHearts,redHearts+resource->hearts);
         }
-        stats.dirty=0xffffU;
+        if(resource->soulhearts)AddSoulHearts(resource->soulhearts);
+        if(resource->blackhearts)AddBlackHearts(resource->blackhearts);
+        if(resource->keys)keys=Clamp(keys+resource->keys,0,99);
+        if(resource->bombs)bombs=Clamp(bombs+resource->bombs,0,99);
+        if(resource->coins)coins=Clamp(coins+resource->coins,0,99);
     }
+    //00716840's numeric cache operator: recompute from the character baseline
+    //and the complete owned inventory instead of accumulating order-dependent
+    //mutations. Conditional/triggered items stay outside the numeric table.
+    if(stats.ready)stats.RecomputeCache(*this);
     return true;
 }
 bool NativePlayerState::HeartLimit(bool ignoreBroken,int* result) const{

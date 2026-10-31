@@ -350,6 +350,7 @@ bool RunReachedPlayerTail(NativePlayerUpdate& call,PortNormalRuntime& runtime,Li
 }
 
 void AdjustTears(NativePlayerState& state,float delta){
+    if(state.stats.cacheBaseReady){state.stats.bonusTears+=delta;state.stats.RecomputeCache(state);return;}
     float tears=30.0f/(state.stats.fireDelay+1.0f)-1.0f;
     tears+=delta;if(tears<-0.9f)tears=-0.9f;
     float delay=30.0f/(tears+1.0f)-1.0f;
@@ -382,16 +383,17 @@ void UsePill(PortNormalRuntime& runtime,int effect){
     case 5:state.redHearts=state.maxRedHearts;break; //Full Health
     case 6:state.maxRedHearts=std::max(2,state.maxRedHearts-2);state.redHearts=std::min(state.redHearts,state.maxRedHearts);break;
     case 7:state.AddHeartContainers(2);break; //Health Up
-    case 11:state.stats.range=std::max(6.5f,state.stats.range-1.5f);break;
-    case 12:state.stats.range+=1.5f;break;
-    case 13:state.stats.moveSpeed=std::max(1.0f,state.stats.moveSpeed-0.15f);break;
-    case 14:state.stats.moveSpeed=std::min(2.0f,state.stats.moveSpeed+0.15f);break;
-    case 15:AdjustTears(state,-0.35f);break;
-    case 16:AdjustTears(state,0.35f);break;
-    case 17:state.stats.luck-=1.0f;break;
-    case 18:state.stats.luck+=1.0f;break;
+    case 11:state.stats.bonusRange-=1.5f;break; //Range Down
+    case 12:state.stats.bonusRange+=1.5f;break; //Range Up
+    case 13:state.stats.bonusMoveSpeed-=0.15f;break; //Speed Down
+    case 14:state.stats.bonusMoveSpeed+=0.15f;break; //Speed Up
+    case 15:AdjustTears(state,-0.35f);break; //Tears Down
+    case 16:AdjustTears(state,0.35f);break; //Tears Up
+    case 17:state.stats.bonusLuck-=1.0f;break; //Luck Down
+    case 18:state.stats.bonusLuck+=1.0f;break; //Luck Up
     default:break;
     }
+    if(state.stats.ready)state.stats.RecomputeCache(state);
     state.stats.dirty=0xffffU;
 }
 void UseCard(PortNormalRuntime& runtime,int id){
@@ -402,7 +404,7 @@ void UseCard(PortNormalRuntime& runtime,int id){
     case 9: //Justice
         if(!state.AddHeartContainers(2))state.redHearts=std::min(state.maxRedHearts,state.redHearts+2);
         state.bombs=std::min(99,state.bombs+1);state.keys=std::min(99,state.keys+1);state.coins=std::min(99,state.coins+1);break;
-    case 12:state.stats.damage+=1.0f;state.stats.baseDamage+=1.0f;state.stats.dirty=0xffffU;break; //Strength
+    case 12:state.stats.bonusDamage+=1.0f;state.stats.RecomputeCache(state);state.stats.dirty=0xffffU;break; //Strength
     case 14:DamageAllEnemies(runtime,40.0f);break; //Death
     case 20:state.redHearts=state.maxRedHearts;DamageAllEnemies(runtime,100.0f);break; //The Sun
     case 23:state.bombs=std::min(99,state.bombs*2);break;

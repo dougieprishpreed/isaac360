@@ -3,6 +3,7 @@
 #include "native_player_creation.h"
 #include "native_player_manager.h"
 #include "native_player_stat_constants.h"
+#include "native_item_cache.h"
 #include <algorithm>
 #include <math.h>
 #include <string.h>
@@ -13,6 +14,7 @@ float Sub(float a,float b){volatile float f=a-b;return f;}
 float Mul(float a,float b){volatile float f=a*b;return f;}
 float Div(float a,float b){volatile float f=a/b;return f;}
 float Root(float a){volatile float f=(float)sqrt((double)a);return f;}
+float Pow(float a,int n){volatile float f=(float)pow((double)a,(double)n);return f;}
 enum FreshQueryKind {FQ_HAS_ITEM,FQ_ITEM_COUNT,FQ_HAS_TRINKET,FQ_TRINKET_COUNT,FQ_WEAPON,FQ_FORM,
  FQ_CARD_EFFECT,FQ_ITEM_EFFECT,FQ_NULL_EFFECT,FQ_TRINKET_EFFECT,FQ_ITEM_EFFECT_COUNT,FQ_NULL_EFFECT_COUNT,
  FQ_FAMILIAR,FQ_CALLBACK,FQ_PILL_COUNT,FQ_SEED_EFFECT};
@@ -31,6 +33,9 @@ void Scalar(unsigned int& h,float n){unsigned int v;memcpy(&v,&n,4);Fold(h,v);}
 }
 NativePlayerStats::NativePlayerStats():ready(false),flying(false),dirty(0),fireDelay(0),shotSpeed(0),damage(0),baseDamage(0),tearHeight(0),fallingSpeed(0),fallingAcceleration(0),range(0),moveSpeed(0),luck(0),native17c0(0),native17c4(0){
  memset(weapons,0,sizeof(weapons));memset(tearFlags,0,sizeof(tearFlags));memset(colors,0,sizeof(colors));memset(size,0,sizeof(size));
+ cacheBaseReady=false;cacheBaseFireDelay=cacheBaseShotSpeed=cacheBaseRange=cacheBaseMoveSpeed=cacheBaseLuck=0;
+ cacheBaseTearHeight=cacheBaseFallingAcceleration=0;
+ bonusTears=bonusFireRate=bonusDamage=bonusRange=bonusMoveSpeed=bonusShotSpeed=bonusLuck=0;
 }
 bool NativePlayerStats::EvaluateFresh(NativePlayerState& state,const NativePlayerCreation& creation,NativePlayerManager& manager,const NativePlayerStartup& startup,NativeEntityBody& body,NativePlayerSprites& sprites,unsigned int* next){
  if(next)*next=0x716840;
@@ -101,18 +106,72 @@ bool NativePlayerStats::EvaluateFresh(NativePlayerState& state,const NativePlaye
  //722080 virtual70b4f0 copies the complete body color to the body Sprite.
  for(int i=0;i<11;++i)sprites.sprites[0].color[i]=n.colors[2][i];
  manager.roomCacheDirty=true; //722460 ->67c7c0, room+7778, even before entry.
- n.moveSpeed=std::max(F(kStatMinSpeed),std::min(F(kStatMaxSpeed),n.moveSpeed));
- n.shotSpeed=std::max(n.shotSpeed,F(kStatMinShotSpeed));
- n.tearHeight=std::min(n.tearHeight,-5.0f);n.range=std::max(n.range,F(kStatMinRange));
- n.damage=std::max(n.damage,F(kStatMinDamage));n.fireDelay=std::max(n.fireDelay,F(kStatMinFireDelay));
+ n.cacheBaseFireDelay=n.fireDelay;n.cacheBaseShotSpeed=n.shotSpeed;n.cacheBaseRange=n.range;
+ n.cacheBaseMoveSpeed=n.moveSpeed;n.cacheBaseLuck=n.luck;n.cacheBaseTearHeight=n.tearHeight;
+ n.cacheBaseFallingAcceleration=n.fallingAcceleration;n.cacheBaseReady=true;
+ n.FinalizeDerived();
+ n.dirty=0;n.ready=true;Swap(n);if(next)*next=0;return true;
+}
+void NativePlayerStats::FinalizeDerived(){
+ //The final clamp/derive block of00716840, shared by the fresh evaluation
+ //and every cache recompute.
+ moveSpeed=std::max(F(kStatMinSpeed),std::min(F(kStatMaxSpeed),moveSpeed));
+ shotSpeed=std::max(shotSpeed,F(kStatMinShotSpeed));
+ tearHeight=std::min(tearHeight,-5.0f);range=std::max(range,F(kStatMinRange));
+ damage=std::max(damage,F(kStatMinDamage));fireDelay=std::max(fireDelay,F(kStatMinFireDelay));
  //646730: original pow(double,double)->float boundary and scalar operation
  //order. Falling speed is derived from evaluated range/shot speed/height.
- float time=Div(n.range,Mul(n.shotSpeed,10));
+ float time=Div(range,Mul(shotSpeed,10));
  volatile float power=(float)pow((double)F(kStatRangeDecay),(double)time);
  float d=std::max(Mul(Sub(power,1),F(kStatRangeDecayScale)),F(kStatRangeDecayMinimum));
- float speed=Add(Mul(n.fallingAcceleration,10),1);
- n.fallingSpeed=-Div(Sub(Sub(-5,n.tearHeight),Mul(speed,Sub(time,d))),d);
- n.dirty=0;n.ready=true;Swap(n);if(next)*next=0;return true;
+ float speed=Add(Mul(fallingAcceleration,10),1);
+ fallingSpeed=-Div(Sub(Sub(-5,tearHeight),Mul(speed,Sub(time,d))),d);
+}
+bool NativePlayerStats::RecomputeCache(const NativePlayerState& state){
+ if(!ready||!cacheBaseReady)return false;
+ float tears=Div(F(kStatThirty),Add(cacheBaseFireDelay,1));
+ tears=Sub(tears,1);
+ float fireAdd=bonusFireRate,fireMul=1;
+ float damageAdd=0,damageMul=1,sharedDamage15=false;
+ float rangeAdd=0,rangeMul=1,speedAdd=0,speedMul=1,shotAdd=0,shotMul=1,luckAdd=0;
+ int flight=flying?1:0;
+ for(unsigned int id=0;id<state.collectibleCounts.size();++id){
+  const int count=state.collectibleCounts[id];if(count<=0)continue;
+  const NativeItemCacheEffect e=NativeItemCacheEffectFor((int)id);
+  const float n=(float)count;
+  tears=Mul(Add(tears,Mul(e.tearsAdd,n)),Pow(e.tearsMul,count));
+  fireAdd=Add(fireAdd,Mul(e.fireRateAdd,n));
+  fireMul=Mul(fireMul,Pow(e.fireRateMul,count));
+  damageAdd=Add(damageAdd,Mul(e.damageAdd,n));
+  if(e.damageMul==1.5f)sharedDamage15=true;
+  else damageMul=Mul(damageMul,Pow(e.damageMul,count));
+  rangeAdd=Add(rangeAdd,Mul(e.rangeAdd,n));
+  rangeMul=Mul(rangeMul,Pow(e.rangeMul,count));
+  speedAdd=Add(speedAdd,Mul(e.speedAdd,n));
+  speedMul=Mul(speedMul,Pow(e.speedMul,count));
+  shotAdd=Add(shotAdd,Mul(e.shotSpeedAdd,n));
+  shotMul=Mul(shotMul,Pow(e.shotSpeedMul,count));
+  luckAdd=Add(luckAdd,Mul(e.luckAdd,n));
+  if(e.flying>=0)flight=e.flying?1:0;
+ }
+ //Cricket's Head, Magic Mushroom and the Blood of the Martyr/Book of Belial
+ //pair share one1.5x damage multiplier instead of stacking.
+ if(sharedDamage15)damageMul=Mul(damageMul,1.5f);
+ //Temporary pill/card/active layer is added after the collectible cache.
+ tears=Add(tears,bonusTears);fireAdd=Add(fireAdd,bonusFireRate);
+ damage=Mul(Add(Add(baseDamage,damageAdd),bonusDamage),damageMul);
+ range=Mul(Add(Add(cacheBaseRange,rangeAdd),bonusRange),rangeMul);
+ moveSpeed=Mul(Add(Add(cacheBaseMoveSpeed,speedAdd),bonusMoveSpeed),speedMul);
+ shotSpeed=Mul(Add(Add(cacheBaseShotSpeed,shotAdd),bonusShotSpeed),shotMul);
+ luck=Add(Add(cacheBaseLuck,luckAdd),bonusLuck);
+ //Tears -> delay, then direct fire-rate additions/multipliers.
+ if(tears<-0.9f)tears=-0.9f;
+ float delay=Sub(Div(F(kStatThirty),Add(tears,1)),1);
+ float rate=Add(Div(F(kStatThirty),Add(delay,1)),fireAdd);
+ rate=Mul(rate,fireMul);
+ fireDelay=Sub(Div(F(kStatThirty),rate),1);
+ flying=flight==1;
+ FinalizeDerived();dirty=0xffffU;return true;
 }
 void NativePlayerStats::Swap(NativePlayerStats& b){
  std::swap(ready,b.ready);std::swap(flying,b.flying);std::swap(dirty,b.dirty);
@@ -120,6 +179,13 @@ void NativePlayerStats::Swap(NativePlayerStats& b){
  std::swap(fireDelay,b.fireDelay);std::swap(shotSpeed,b.shotSpeed);std::swap(damage,b.damage);std::swap(baseDamage,b.baseDamage);
  std::swap(tearHeight,b.tearHeight);std::swap(fallingSpeed,b.fallingSpeed);std::swap(fallingAcceleration,b.fallingAcceleration);
  std::swap(range,b.range);std::swap(moveSpeed,b.moveSpeed);std::swap(luck,b.luck);std::swap(native17c0,b.native17c0);std::swap(native17c4,b.native17c4);
+ std::swap(cacheBaseReady,b.cacheBaseReady);std::swap(cacheBaseFireDelay,b.cacheBaseFireDelay);
+ std::swap(cacheBaseShotSpeed,b.cacheBaseShotSpeed);std::swap(cacheBaseRange,b.cacheBaseRange);
+ std::swap(cacheBaseMoveSpeed,b.cacheBaseMoveSpeed);std::swap(cacheBaseLuck,b.cacheBaseLuck);
+ std::swap(cacheBaseTearHeight,b.cacheBaseTearHeight);std::swap(cacheBaseFallingAcceleration,b.cacheBaseFallingAcceleration);
+ std::swap(bonusTears,b.bonusTears);std::swap(bonusFireRate,b.bonusFireRate);std::swap(bonusDamage,b.bonusDamage);
+ std::swap(bonusRange,b.bonusRange);std::swap(bonusMoveSpeed,b.bonusMoveSpeed);std::swap(bonusShotSpeed,b.bonusShotSpeed);
+ std::swap(bonusLuck,b.bonusLuck);
  for(int i=0;i<3;++i){std::swap(size[i],b.size[i]);for(int j=0;j<11;++j)std::swap(colors[i][j],b.colors[i][j]);}
 }
 unsigned int NativePlayerStats::StateHash() const{
@@ -127,5 +193,9 @@ unsigned int NativePlayerStats::StateHash() const{
  for(int i=0;i<16;++i)Fold(h,weapons[i]);for(int i=0;i<4;++i)Fold(h,tearFlags[i]);
  Scalar(h,fireDelay);Scalar(h,shotSpeed);Scalar(h,damage);Scalar(h,baseDamage);Scalar(h,tearHeight);Scalar(h,fallingSpeed);
  Scalar(h,fallingAcceleration);Scalar(h,range);Scalar(h,moveSpeed);Scalar(h,luck);Fold(h,native17c0);Fold(h,native17c4);
+ Fold(h,cacheBaseReady);Scalar(h,cacheBaseFireDelay);Scalar(h,cacheBaseShotSpeed);Scalar(h,cacheBaseRange);
+ Scalar(h,cacheBaseMoveSpeed);Scalar(h,cacheBaseLuck);Scalar(h,cacheBaseTearHeight);Scalar(h,cacheBaseFallingAcceleration);
+ Scalar(h,bonusTears);Scalar(h,bonusFireRate);Scalar(h,bonusDamage);Scalar(h,bonusRange);
+ Scalar(h,bonusMoveSpeed);Scalar(h,bonusShotSpeed);Scalar(h,bonusLuck);
  for(int i=0;i<3;++i){Scalar(h,size[i].x);Scalar(h,size[i].y);for(int j=0;j<11;++j)Scalar(h,colors[i][j]);}return h;
 }
