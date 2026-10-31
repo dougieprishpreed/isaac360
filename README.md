@@ -16,7 +16,7 @@ The shared sources compile into an Xbox 360 XEX with the installed XDK. Earlier 
 
 ## Current verification
 
-The required serial 128-seed host packet passes with `5,907,327` checks and `0` failures at `logs/normal_flow_20261031T034944893221Z/results.json`; `tools/audit_port.py` verifies the packet against the current tree. Focused host evidence records `CHARACTERS ok=36 fail=0`, `DESCEND from=1 to=12`, `ITEM pool=0 id=55 owned=1`, `BOMB explosions=1`, `POCKET hp=10/10`, `ACTIVE id=45 hp=6/6`, `STAT damage=5.25` and `HARD mode=1 phase=5`. The focused result is `build/gameplay/result.json`. The Windows target compiles at SHA256 `704E7DCC43B64F120FB0BC29CD9E341359A23664FFAE3BB18A5690F3998C0F4C`; the current XEX is `runtime/default.xex` at SHA256 `7B30B37CE2520E4A85B2EDC981F08C5300515982CA7C80C43F04F8DF4B060C41` (compiled, not re-run on target).
+The required serial 128-seed host packet passes with `5,907,327` checks and `0` failures at `logs/normal_flow_20261031T040449293211Z/results.json`; `tools/audit_port.py` verifies the packet against the current tree. Focused host evidence records `CHARACTERS ok=36 fail=0`, `DESCEND from=1 to=12`, `ITEM pool=0 id=55 owned=1`, `BOMB explosions=1`, `POCKET hp=10/10`, `ACTIVE id=45 hp=6/6`, `FAMILIAR spawned=2 shots=2 hits=1`, `STAT damage=5.25` and `HARD mode=1 phase=5`. The focused result is `build/gameplay/result.json`. The Windows target compiles at SHA256 `E5579AE4F89D342A05D70ABBF2F614E925FF5CF5B5F94D2A5177B03F1B5BF1D7`; the current XEX is `runtime/default.xex` at SHA256 `F780AFACCE8BD57DCC42D525FFFC720FE4C255724F1066F23545BB6D8E94EE04` (compiled, not re-run on target).
 
 ## Development requirements
 
