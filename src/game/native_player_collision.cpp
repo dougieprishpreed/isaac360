@@ -58,7 +58,17 @@ bool NativePlayerGridCollision(PortNormalRuntime& runtime,bool positionOnly,unsi
             //including empty cells; preserve its position in the loop.
             bool effect=player.effects.Has(1,625);
             if(effect&&room->collision.occupied[cell]){*next=0x67166b;return false;}
-            if(collision==2||collision==3){*next=0x671869;return false;} //7734f0/grid destruction, not a wall response.
+            //7734f0 is the grid-destruction transaction. Only a crush effect
+            //(Leo302, Thunder Thighs314, Mega Mush625) may reach it; an
+            //ordinary ground or flying player treats an intact class2/3 grid
+            //as solid. Leaving the crush call explicit keeps every no-crush
+            //run deterministic and auditable.
+            if(collision==2||collision==3){
+                const bool crush=effect||player.effects.Has(1,302)||player.effects.Has(1,314);
+                if(crush){*next=0x671869;return false;}
+                normal.x=Add(normal.x,offset.x);normal.y=Add(normal.y,offset.y);
+                continue;
+            }
             if(collision==4&&room->collision.occupied[cell]&&room->collision.types[cell]==16){
                 unsigned int use;if(!runtime.playerCreation.constructorFields.Scalar(0x1524,&use))return false;
                 if(use==147){*next=0x6718e6;return false;}

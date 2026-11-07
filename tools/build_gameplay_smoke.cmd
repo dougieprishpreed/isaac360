@@ -1,5 +1,7 @@
 @echo off
-call "%VS100COMNTOOLS%..\..\VC\vcvarsall.bat" x86 >nul
+rem MSVC 2022 x86 (SSE2 floats, as IEEE as the console's GCC); BOI360_HOST_VC=2010 builds with the retired
+rem VS2010 toolchain for an A/B of the simulation results.
+if "%BOI360_HOST_VC%"=="2010" (call "%VS100COMNTOOLS%..\..\VC\vcvarsall.bat" x86 >nul) else (call "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvarsall.bat" x86 >nul 2>nul)
 if errorlevel 1 exit /b 1
 set CL=
 set _CL_=

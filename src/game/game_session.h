@@ -37,6 +37,9 @@ struct PortNormalRuntime {
     NativeGamePersistent initialSave;
     NativeSaveWriter initialSaveFile;
     bool initialSaveFileWritten;
+    //Set only by the native-Continue bootstrap. The fresh New Run caller is
+    //the sole owner of8a163d's initial-file publication.
+    bool suppressInitialNewRunPublish;
     NativeWorld world;
     NativePlayerStartup playerStartup;
     NativeEntityBody playerBody;
@@ -53,6 +56,11 @@ struct PortNormalRuntime {
     NativeRoomFx roomFx;
     NativeMinimaps minimaps;
     NativePauseUi pauseUi;
+    //A native Continue installs current-floor room records before the first
+    //resident is constructed, so saved grids enter the normal factory pass
+    //rather than replacing freshly generated rocks afterward.
+    std::vector<NativeSaveSummary::SavedRoom> pendingSavedRooms;
+    int pendingRestoreStage,pendingRestoreGrid,pendingRestoreDimension;
     PortNormalPhase phase;
     NativeWorldIssue entryIssue;
     unsigned int missingNativePrerequisite;
@@ -101,23 +109,29 @@ struct PortGameSession {
     //start its first room and place the surviving player. Player health,
     //resources and items persist; only floor-local transient state resets.
     bool DescendNormal(PortNormalRuntime&,NativeSceneFiles&,NativeActionSource* actions=0);
-    //Maintained continue checkpoint: run seed/stage/character plus player
-    //health, resources, inventory and current room. Native GSR0142 encoding
-    //remains the separate target save format.
+    //Legacy diagnostic checkpoint retained for simulator regressions. Platform
+    //adapters do not load or write this BOI360_C1 format; production New Run
+    //and Continue ownership is the native selected-slot path below.
     bool SaveContinue(const char* path,PortNormalRuntime&);
     bool ContinueSavedRun(const char* path,PortNormalRuntime&,NativeSceneFiles&,NativeActionSource* actions=0);
     //Read the native GSR0142 initial-run save, validate its checksum and
     //restore the run seed/initial New Run state.
     bool ContinueNativeSave(const char* path,PortNormalRuntime&,NativeSceneFiles&,NativeActionSource* actions=0);
+    //Adapter-neutral selected-slot owner for UI_CONTINUE_RUN and target/host
+    //Continue. The frontend's LocalRunFilenames resolves the same native path
+    //used by the first-run writer.
+    bool ContinueSelectedNativeRun(PortNormalRuntime&,NativeSceneFiles&,NativeActionSource* actions=0);
     //Write a current-state native GSR0142 snapshot (same layout/checksum) from
     //the live run, player and item pools.
     bool SaveNativeContinue(const char* path,PortNormalRuntime&);
+    bool SaveSelectedNativeContinue(PortNormalRuntime&);
     NormalRunResult AdvanceNormalSetup(PortNormalRuntime&,const NativeSceneFiles&,NativeActionSource* actions=0);
     NormalRunResult TickNormal(PortNormalRuntime&,const NativeSceneFiles&,NativeActionSource* actions);
     //Boss-defeat progression: resolve the selected boss identity from the
     //current boss room, grant its profile award and persist the profile.
     void AwardBossProgress(PortNormalRuntime&);
-    NativeWorldResult PrepareNormalWorld(const NormalRunFlow&,NativeWorld&,const NativeSceneFiles&,NativeWorldIssue* issue=0);
+    NativeWorldResult PrepareNormalWorld(const NormalRunFlow&,NativeWorld&,const NativeSceneFiles&,NativeWorldIssue* issue=0,
+        const std::vector<NativeSaveSummary::SavedRoom>* restored=0);
     //Component boundary only: real evaluated entity/action inputs are required.
     //Does not initialize a player, advance simulation or enable normal Play.
     NativePlayerInputResult EvaluateNormalInput(const NormalRunFlow&,const NativeWorld&,const NativePlayerInputContext&,NativeActionSource&,bool shooting,NativePoint*);

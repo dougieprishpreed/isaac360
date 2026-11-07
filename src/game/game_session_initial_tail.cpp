@@ -51,24 +51,30 @@ NativeWorldResult PortGameSession::ContinueInitialGeneration(PortNormalRuntime& 
         address=0x8a163d; //No Steam storage interface in either offline adapter.
     }
     if(address==0x8a163d){
-        std::string primary,rerun;
-        if(!frontend.LocalRunFilenames(&primary,&rerun)){next=0x8a163d;return NWR_CONSTRUCTION_GAP;}
-        //Preflight the complete native byte codec before publishing anything.
-        //Unsupported capture cannot truncate the previously valid local save.
-        NativeSaveWriter writer;
-        if(!writer.InitialGame(runtime.initialSave)){
-            runtime.initialSaveFile=writer;next=writer.nextAddress;return NWR_CONSTRUCTION_GAP;
+        //8a163d/8a1745 are New Run publication services. A native Continue
+        //loads through the bootstrap but must not replace the selected file or
+        //rewrite its slot metadata with the stage1 scaffold.
+        if(runtime.suppressInitialNewRunPublish)address=0x906310;
+        else {
+            std::string primary,rerun;
+            if(!frontend.LocalRunFilenames(&primary,&rerun)){next=0x8a163d;return NWR_CONSTRUCTION_GAP;}
+            //Preflight the complete native byte codec before publishing anything.
+            //Unsupported capture cannot truncate the previously valid local save.
+            NativeSaveWriter writer;
+            if(!writer.InitialGame(runtime.initialSave)){
+                runtime.initialSaveFile=writer;next=writer.nextAddress;return NWR_CONSTRUCTION_GAP;
+            }
+            runtime.initialSaveFile=writer;
+            remove(rerun.c_str()); //90bc00's actual local rerun deletion.
+            FILE* file=fopen(primary.c_str(),"wb");
+            if(file){const unsigned int count=(unsigned int)writer.data.size();
+                const bool wrote=fwrite(&writer.data[0],1,count,file)==count;
+                const bool closed=fclose(file)==0;runtime.initialSaveFileWritten=wrote&&closed;
+            }
+            //8a1745: the native wrapper next marks PersistentGameData dirty and
+            //updates its file-slot metadata. That owner must precede906310.
+            address=0x8a1745;
         }
-        runtime.initialSaveFile=writer;
-        remove(rerun.c_str()); //90bc00's actual local rerun deletion.
-        FILE* file=fopen(primary.c_str(),"wb");
-        if(file){const unsigned int count=(unsigned int)writer.data.size();
-            const bool wrote=fwrite(&writer.data[0],1,count,file)==count;
-            const bool closed=fclose(file)==0;runtime.initialSaveFileWritten=wrote&&closed;
-        }
-        //8a1745: the native wrapper next marks PersistentGameData dirty and
-        //updates its file-slot metadata. That owner must precede906310.
-        address=0x8a1745;
     }
     if(address==0x8a1745){
         unsigned int checksum;

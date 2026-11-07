@@ -14,6 +14,8 @@ struct NativePlacedRoom {
     unsigned int doors,flags,placementSeed,nativeB4;
     unsigned int displayFlags; //Descriptor+3c, distinct from unresolved+B4.
     unsigned int visitedCount; //Descriptor+40. Increment is later in Room::Init.
+    unsigned int native48; //Descriptor+48, serialized two-byte word.
+    unsigned int clearEventCount; //Descriptor+4a, incremented by007b1dde.
     NativeRoomSeeds seeds;
     int doorTargets[8],doorTargetSlots[8]; //006f3530 potential grid cells / reverse slots.
     bool linksPrepared; //The negative-grid early return leaves94..ab native storage unwritten.
@@ -31,6 +33,7 @@ struct NativeLevelLayout {
         const NativePlacementContext& context,int* index=0);
     const NativePlacedRoom* ByCell(int gridIndex,int dimension=-1) const;
     const NativePlacedRoom* ByList(int index) const;
+    NativePlacedRoom* ByList(int index);
     NativePlacedRoom* Special(int gridIndex);
     //006f3ad0: all grid descriptors, then18 fixed negative slots. Does not
     //draw RNG. Potential cells and enabled reciprocal doors remain distinct.

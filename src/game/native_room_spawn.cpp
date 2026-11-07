@@ -36,15 +36,19 @@ NativeRoomSpawnResult NativePlanRoomSpawns(const RoomRecord& room,const NativeRo
     }
     plan.finalState=rng.state;*output=plan;return NRS_OK;
 }
-bool NativeBasementDecoration(unsigned int spawnSeed,int grid,unsigned int* seed,int* animation) {
-    NativeRoomGrid geometry;geometry.Init(1,13,7);
-    return NativeBasementDecoration(spawnSeed,geometry,grid,seed,animation);
+int NativeDecorationAnimationCount(int backdrop) {
+    if(backdrop<0) return 0;
+    for(unsigned int i=0;i<sizeof(kNativeDecorationSets)/sizeof(kNativeDecorationSets[0]);++i)
+        if((int)kNativeDecorationSets[i].backdrop==backdrop) return (int)kNativeDecorationSets[i].animations;
+    return 0;
 }
-bool NativeBasementDecoration(unsigned int spawnSeed,const NativeRoomGrid& geometry,int grid,unsigned int* seed,int* animation) {
-    int x,y;
-    if(!seed || !animation || !geometry.Tile(grid,&x,&y) || x<0 || x>=geometry.width || y<0 || y>=geometry.height) return false;
+bool NativeRoomDecoration(unsigned int spawnSeed,const NativeRoomGrid& geometry,int grid,
+                         int backdrop,unsigned int* seed,int* animation) {
+    int x,y,count=NativeDecorationAnimationCount(backdrop);
+    if(!count || !seed || !animation || !geometry.Tile(grid,&x,&y) ||
+       x<0 || x>=geometry.width || y<0 || y>=geometry.height) return false;
     unsigned int local=spawnSeed+(unsigned int)grid;
     if(!spawnSeed || !local) return false;
     local=NativeShift(local,5,9,7);
-    *seed=local;*animation=local%kNativeDecorationCount;return true;
+    *seed=local;*animation=local%(unsigned int)count;return true;
 }

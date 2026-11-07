@@ -2,6 +2,7 @@
 #include "game_session.h"
 #include "native_player_input.h"
 #include "native_audio.h"
+#include "native_pickup.h"
 #include <math.h>
 #include <string.h>
 namespace {
@@ -41,7 +42,7 @@ bool NativeProjectileSystem::Step(PortNormalRuntime& runtime,NativeActionSource*
         p.travelled+=Length(p.velocity);
         bool hitEnemy=false;
         for(int e=0;e<live.enemies.count;++e){NativeEnemy* enemy=live.enemies.entries[e];
-            if(!enemy||!enemy->ready||enemy->dead)continue;
+            if(!enemy||!enemy->participates||!enemy->ready||enemy->dead)continue;
             float dx=p.position.x-enemy->body.position.x,dy=p.position.y-enemy->body.position.y;
             float radius=enemy->body.collision.radius+4.0f;
             if(dx*dx+dy*dy<=radius*radius){
@@ -49,12 +50,9 @@ bool NativeProjectileSystem::Step(PortNormalRuntime& runtime,NativeActionSource*
                 if(runtime.audio)runtime.audio->PlaySfx("resources/sfx/v2/meat impact.wav",0.45f);
                 if(enemy->dead){++enemyKills;++runtime.enemyKills;
                     if(runtime.audio)runtime.audio->PlaySfx("resources/sfx/death burst small.wav",0.55f);
-                    if(NativeBossEntityType(enemy->type,enemy->body.variant)){
+                    if(NativeBossEntityType(enemy->type,enemy->body.variant))
                         runtime.bossDefeated=true;
-                        if(runtime.audio)runtime.audio->PlaySfx("resources/sfx/death_burst_large_0.wav",0.7f);
-                        if(room->trapdoorState==0){room->trapdoorState=1;room->trapdoorTimer=0;
-                            room->trapdoorX=enemy->body.position.x;room->trapdoorY=enemy->body.position.y;}
-                    }}
+                }
                 break;
             }
         }
@@ -65,13 +63,6 @@ bool NativeProjectileSystem::Step(PortNormalRuntime& runtime,NativeActionSource*
         if(p.travelled>=p.range){++expired;active.erase(active.begin()+i);continue;}
         ++i;
     }
-    //Remove dead actors from the resident list, then expose the clear owner.
-    for(int e=0;e<live.enemies.count;){
-        NativeEnemy* enemy=live.enemies.entries[e];
-        if(enemy&&enemy->dead){runtime.deathFx.Spawn(*enemy);delete enemy;for(int j=e+1;j<live.enemies.count;++j)live.enemies.entries[j-1]=live.enemies.entries[j];--live.enemies.count;live.enemies.entries[live.enemies.count]=0;continue;}
-        ++e;
-    }
-    if(live.enemies.count==0)room->clear=true;
     if(fire&&cooldown<=0.0f){
         float length=Length(shot);if(length<=0.0f)return false;
         NativeProjectile p;p.position=body.position;
@@ -144,33 +135,73 @@ bool NativeBombSystem::Step(PortNormalRuntime& runtime){
             NativeEnemy* enemy=live.enemies.entries[e];if(!enemy||!enemy->ready||enemy->dead)continue;
             float dx=enemy->body.position.x-bomb.position.x,dy=enemy->body.position.y-bomb.position.y;
             if(dx*dx+dy*dy>radius*radius)continue;
-            const float px=enemy->body.position.x,py=enemy->body.position.y;
             enemy->Damage(100.0f);++enemyHits;
             if(enemy->dead){
                 ++runtime.enemyKills;
-                if(NativeBossEntityType(enemy->type,enemy->body.variant)){
+                if(NativeBossEntityType(enemy->type,enemy->body.variant))
                     runtime.bossDefeated=true;
-                    if(room->trapdoorState==0){room->trapdoorState=1;room->trapdoorTimer=0;room->trapdoorX=px;room->trapdoorY=py;}
-                }
             }
         }
         for(int g=0;g<room->staticGridCount;){
-            const NativeStaticGrid& grid=room->staticGrids[g];
-            const bool destructible=grid.type==1000||grid.type==1001||grid.type==1002||grid.type==1500||grid.type==1400;
-            bool destroyed=false;
+            NativeStaticGrid& grid=room->staticGrids[g];
+            const bool poop=grid.type==1490||grid.type==1494||grid.type==1495||
+                grid.type==1496||grid.type==1497||grid.type==1500;
+            const bool destructible=grid.type==1000||grid.type==1001||grid.type==1002||
+                poop||grid.type==1400;
+            bool handled=false;bool kept=false;
             if(destructible){
                 float gx=0,gy=0;
                 if(room->geometry.Position(grid.grid,&gx,&gy)){
                     float dx=gx+20.0f-bomb.position.x,dy=gy+20.0f-bomb.position.y;
                     if(dx*dx+dy*dy<=radius*radius){
-                        const int cell=room->geometry.PositionIndex(gx+20.0f,gy+20.0f);
-                        if(cell>=0){room->collision.occupied[cell]=0;room->collision.types[cell]=0;}
-                        room->staticGrids[g]=room->staticGrids[--room->staticGridCount];
-                        ++rockHits;destroyed=true;
+                        //The static-grid owner already carries the native cell
+                        //that constructed the collision. Round-tripping its
+                        //world center through PositionIndex at a cell boundary
+                        //can clear a different cell.
+                        const int cell=grid.grid;
+                        if(poop){
+                            //Retail GRIDDUMP: destruction sets state1000 and
+                            //collision class0; the room path-cost update then
+                            //decays the stored 1500 to0. The grid record stays
+                            //for the destruction animation/save state.
+                            if(grid.state!=1000){
+                                grid.state=1000;grid.collisionClass=0;
+                                room->collision.classes[cell]=0;
+                                //Retail GRIDDUMP golden poop (variant3) dropped
+                                //six coin pickups at its cell. Rainbow poop
+                                //(variant4) dropped no pickup; the decoded heal
+                                //owner restores the red-heart container.
+                                if(grid.variant==3&&live.pickups.count<=58){
+                                    float px,py;NativePoint at;
+                                    if(room->geometry.Position(grid.grid,&px,&py)){
+                                        at.x=px+20.0f;at.y=py+20.0f;
+                                        unsigned int local=grid.seed?grid.seed:0x16a9de81U;
+                                        for(int coin=0;coin<6;++coin){
+                                            local=NativeShift(local,5,9,7);
+                                            NativePickup* pickup=new NativePickup;
+                                            if(!pickup->Begin(5,20,0,grid.grid,local?local:1U,runtime.tickFrame,at)){
+                                                delete pickup;break;
+                                            }
+                                            live.pickups.entries[live.pickups.count++]=pickup;
+                                        }
+                                    }
+                                }else if(grid.variant==4){
+                                    runtime.playerState.redHearts=runtime.playerState.maxRedHearts;
+                                }
+                                ++rockHits;
+                            }
+                            kept=true;
+                        }else{
+                            room->collision.occupied[cell]=0;room->collision.classes[cell]=0;
+                            room->collision.types[cell]=0;room->collision.native76c[cell]=0;
+                            room->staticGrids[g]=room->staticGrids[--room->staticGridCount];
+                            ++rockHits;
+                        }
+                        handled=true;
                     }
                 }
             }
-            if(!destroyed)++g;
+            if(!handled||kept)++g;
         }
         if(!runtime.playerDead&&runtime.playerInvulnerable<=0){
             float dx=runtime.playerBody.position.x-bomb.position.x,dy=runtime.playerBody.position.y-bomb.position.y;
@@ -181,16 +212,6 @@ bool NativeBombSystem::Step(PortNormalRuntime& runtime){
                 ++runtime.playerHits;runtime.playerInvulnerable=30;
             }
         }
-        for(int e=0;e<live.enemies.count;){
-            NativeEnemy* enemy=live.enemies.entries[e];
-            if(enemy&&enemy->dead){
-                runtime.deathFx.Spawn(*enemy);delete enemy;
-                for(int j=e+1;j<live.enemies.count;++j)live.enemies.entries[j-1]=live.enemies.entries[j];
-                --live.enemies.count;live.enemies.entries[live.enemies.count]=0;continue;
-            }
-            ++e;
-        }
-        if(live.enemies.count==0)room->clear=true;
         ++explosions;
         if(runtime.audio)runtime.audio->PlaySfx("resources/sfx/explosion_strong1.wav",0.65f);
         active.erase(active.begin()+i);
@@ -231,7 +252,7 @@ bool NativeFamiliarSystem::Step(PortNormalRuntime& runtime){
         NativeFamiliar& f=active[i];f.time+=1.0f;
         NativeEnemy* nearest=0;float best=1.0e9f;
         for(int e=0;e<live.enemies.count;++e){NativeEnemy* enemy=live.enemies.entries[e];
-            if(!enemy||!enemy->ready||enemy->dead)continue;
+            if(!enemy||!enemy->participates||!enemy->ready||enemy->dead)continue;
             float dx=enemy->body.position.x-f.position.x,dy=enemy->body.position.y-f.position.y;
             float d=dx*dx+dy*dy;if(d<best){best=d;nearest=enemy;}}
         if(f.item==8){
@@ -261,8 +282,9 @@ bool NativeFamiliarSystem::Step(PortNormalRuntime& runtime){
                 if(dx*dx+dy*dy<22.0f*22.0f){
                     nearest->Damage(5.0f);++hits;f.contactCooldown=30;
                     if(nearest->dead){++runtime.enemyKills;
-                        if(NativeBossEntityType(nearest->type,nearest->body.variant)){runtime.bossDefeated=true;
-                            if(room->trapdoorState==0){room->trapdoorState=1;room->trapdoorTimer=0;room->trapdoorX=nearest->body.position.x;room->trapdoorY=nearest->body.position.y;}}}
+                        if(NativeBossEntityType(nearest->type,nearest->body.variant))
+                            runtime.bossDefeated=true;
+                    }
                 }
             }
         }else if(f.item==117){
@@ -275,11 +297,8 @@ bool NativeFamiliarSystem::Step(PortNormalRuntime& runtime){
                     nearest->Damage(5.0f);++hits;f.contactCooldown=30;
                     if(nearest->dead){
                         ++runtime.enemyKills;
-                        if(NativeBossEntityType(nearest->type,nearest->body.variant)){
+                        if(NativeBossEntityType(nearest->type,nearest->body.variant))
                             runtime.bossDefeated=true;
-                            if(room->trapdoorState==0){room->trapdoorState=1;room->trapdoorTimer=0;
-                                room->trapdoorX=nearest->body.position.x;room->trapdoorY=nearest->body.position.y;}
-                        }
                     }
                 }
             }else{
@@ -290,10 +309,6 @@ bool NativeFamiliarSystem::Step(PortNormalRuntime& runtime){
         }
         NativePoint clamped;if(room->space.Clamp(f.position,4,4,4,4,&clamped))f.position=clamped;
     }
-    for(int e=0;e<live.enemies.count;){NativeEnemy* enemy=live.enemies.entries[e];
-        if(enemy&&enemy->dead){runtime.deathFx.Spawn(*enemy);delete enemy;for(int j=e+1;j<live.enemies.count;++j)live.enemies.entries[j-1]=live.enemies.entries[j];--live.enemies.count;live.enemies.entries[live.enemies.count]=0;continue;}
-        ++e;}
-    if(live.enemies.count==0)room->clear=true;
     return true;
 }
 void NativeFamiliarSystem::Swap(NativeFamiliarSystem& b){

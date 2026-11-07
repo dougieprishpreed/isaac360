@@ -1,8 +1,11 @@
 #include "../game/game_session.h"
 #include "../game/native_room_effects.h"
 #include "../game/native_room_view.h"
+#include "../game/native_rooms.h"
+#include "../game/native_static_grid.h"
 #include "../game/native_audio.h"
 #include "../game/native_door_resources.h"
+#include "../game/native_save_reader.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -56,6 +59,350 @@ unsigned int AdvanceToBoundary(PortGameSession& session,PortNormalRuntime& runti
         if(steps==1000000)return 0;
     }
     return steps;
+}
+unsigned int DiscoveredRoomCount(const NativeLevelLayout& layout){
+    unsigned int count=0;
+    for(int i=0;i<layout.count;++i)if(layout.rooms[i].displayFlags)++count;
+    for(int i=0;i<18;++i)if(layout.offGrid[i].definition>=0&&layout.offGrid[i].displayFlags)++count;
+    return count;
+}
+unsigned int ClearedVisitedRoomCount(const NativeLevelLayout& layout){
+    unsigned int count=0;
+    for(int i=0;i<layout.count;++i)if(layout.rooms[i].visitedCount&&(layout.rooms[i].flags&1U))++count;
+    for(int i=0;i<18;++i)if(layout.offGrid[i].definition>=0&&layout.offGrid[i].visitedCount&&(layout.offGrid[i].flags&1U))++count;
+    return count;
+}
+#include "generated_pickup_probe.inc"
+
+static bool ReadProbeFile(const char* path,std::vector<unsigned char>& data){
+    FILE* file=fopen(path,"rb");if(!file)return false;
+    if(fseek(file,0,SEEK_END)!=0){fclose(file);return false;}long size=ftell(file);
+    if(size<64||fseek(file,0,SEEK_SET)!=0){fclose(file);return false;}
+    data.resize((size_t)size);size_t got=fread(&data[0],1,data.size(),file);fclose(file);
+    return got==data.size();
+}
+static bool WriteProbeFile(const char* path,const std::vector<unsigned char>& data){
+    if(data.empty())return false;FILE* file=fopen(path,"wb");if(!file)return false;
+    size_t wrote=fwrite(&data[0],1,data.size(),file);bool closed=fclose(file)==0;
+    return wrote==data.size()&&closed;
+}
+static unsigned int ProbeU32(const std::vector<unsigned char>& data,size_t at){
+    return (unsigned int)data[at]|((unsigned int)data[at+1]<<8)|
+        ((unsigned int)data[at+2]<<16)|((unsigned int)data[at+3]<<24);
+}
+static void ProbePutU32(std::vector<unsigned char>& data,size_t at,unsigned int value){
+    for(unsigned int i=0;i<4;++i)data[at+i]=(unsigned char)(value>>(8*i));
+}
+static float ProbeFloat(unsigned int bits){float value;memcpy(&value,&bits,4);return value;}
+static unsigned int ProbeArithmeticRight(unsigned int n){return (n>>1)|(n&0x80000000U);}
+static unsigned int ProbeCrcEntry(unsigned int n){
+    n=(n>>1)^((n&1)?0xedb88320U:0);
+    for(int i=1;i<8;++i)n=ProbeArithmeticRight(n)^((n&1)?0xedb88320U:0);
+    return n;
+}
+static bool RewriteProbeSaveChecksum(std::vector<unsigned char>& data){
+    if(data.size()<64)return false;unsigned int checksum=0xfedcba76U;
+    for(size_t i=16;i<data.size()-4;++i){
+        unsigned int n=~checksum;n=(n>>8)^ProbeCrcEntry((n&255)^data[i]);checksum=~n;
+    }
+    ProbePutU32(data,data.size()-4,checksum^0x96696996U);
+    return true;
+}
+static bool FindProbePickupRecord(const std::vector<unsigned char>& data,int variant,int grid,size_t* output){
+    if(!output||data.size()<82)return false;int found=0;
+    for(size_t at=16;at+82<=data.size()-4;++at){
+        if(ProbeU32(data,at)!=5||ProbeU32(data,at+4)!=(unsigned int)variant||
+           ProbeU32(data,at+8)!=0||ProbeU32(data,at+12)!=(unsigned int)grid||
+           data[at+24]!=1||data[at+29]!=0xff||data[at+30]!=0xff||
+           data[at+31]!=0xff||data[at+32]!=0xff)continue;
+        *output=at;++found;
+    }
+    return found==1;
+}
+static bool RejectNativeContinueWithoutMutation(const char* path,NativeMt& random,PortFrontend& ui){
+    PortNormalRuntime runtime;PortGameSession session(random,ui);
+    const int page=session.frontend.characterPage,choice=session.frontend.characterChoice,mode=session.frontend.characterMode;
+    const NativeMusicState music=session.frontend.music;
+    NativeSceneFiles files={"runtime/game/file_index.bin","runtime/game/",777,777,777};
+    if(session.ContinueNativeSave(path,runtime,files,0))return false;
+    return runtime.phase==PNR_IDLE&&runtime.world.residentCount==0&&runtime.completePlayerTicks==0&&
+        !runtime.suppressInitialNewRunPublish&&
+        session.frontend.characterPage==page&&session.frontend.characterChoice==choice&&session.frontend.characterMode==mode&&
+        !memcmp(&session.frontend.music,&music,sizeof(music))&&
+        files.backdrop==777&&files.nativeMode==777&&files.frame==777;
+}
+class ProbeCountingActions:public NativeActionSource{
+    NativeFrameActions delegate;
+public:
+    unsigned int calls,valueCalls,pressedCalls,dropCalls,heldCalls,connectedCalls;
+    explicit ProbeCountingActions(const NativeActionFrame& frame):delegate(frame),calls(0),valueCalls(0),
+        pressedCalls(0),dropCalls(0),heldCalls(0),connectedCalls(0){}
+    NativePlayerInputResult Value(int action,int controller,unsigned int owner,float* output){
+        ++calls;++valueCalls;return delegate.Value(action,controller,owner,output);}
+    NativePlayerInputResult Pressed(int action,int controller,unsigned int owner,bool* output){
+        ++calls;++pressedCalls;if(action==11)++dropCalls;return delegate.Pressed(action,controller,owner,output);}
+    NativePlayerInputResult Held(int action,int controller,unsigned int owner,bool* output){
+        ++calls;++heldCalls;return delegate.Held(action,controller,owner,output);}
+    NativePlayerInputResult Connected(int controller,bool* output){
+        ++calls;++connectedCalls;return delegate.Connected(controller,output);}
+};
+static int RunSelectedRunIntentProbe(){
+    std::vector<unsigned char> source;
+    std::vector<unsigned char> consumedSource;
+    if(!ReadProbeFile("build/gameplay/profile/current_gamestate1.dat",source)||
+       !ReadProbeFile("build/gameplay/generated_pickup_native.dat",consumedSource))return 336;
+    const char* freshPath="build/gameplay/gamestate1.dat";
+    const char* validPath="build/gameplay/gamestate2.dat";
+    const char* slotThreePath="build/gameplay/gamestate3.dat";
+    if(!WriteProbeFile(freshPath,source)||!WriteProbeFile(validPath,source))return 337;
+    std::vector<unsigned char> invalid=source;invalid[invalid.size()-1]^=1U;
+    if(!WriteProbeFile(slotThreePath,invalid))return 338;
+
+    PortFrontend freshUi;freshUi.Init(false);
+    if(!freshUi.BindSaveDirectory("build/gameplay/"))return 339;
+    freshUi.selectedSlot=0;
+    std::string primary,rerun;
+    if(!freshUi.LocalRunFilenames(&primary,&rerun)||primary.size()<14||
+       primary.substr(primary.size()-14)!="gamestate1.dat")return 340;
+    freshUi.hasContinue=true;freshUi.OpenCharacters();freshUi.characterChoice=1;freshUi.characterMode=0;
+    PortMenuInput accept={0};accept.accept=true;
+    const PortAction freshAction=freshUi.Step(accept);
+    const NativeCharacterDef* freshCharacter=NativeCharacter(freshUi.characterPage,freshUi.characterChoice);
+    NativeMt freshRandom;freshRandom.Seed(9300);PortNormalRuntime freshRuntime;PortGameSession freshSession(freshRandom,freshUi);
+    const unsigned int freshSeed=424242U;
+    const PortSessionStart freshStart=freshSession.StartNormalCharacter(freshSeed,freshRuntime);
+    if(freshAction!=UI_START_CHARACTER||!freshCharacter||freshStart.result!=NPS_WORLD_PENDING||
+       freshRuntime.run.seeds.start!=freshSeed||freshRuntime.run.player.player!=freshCharacter->player||
+       freshUi.music.currentTrack!=95||freshUi.music.slot!=1)return 341;
+    const NativeMusicVoice freshVoice=freshUi.music.voices[freshUi.music.slot];
+    if(freshVoice.current!=0||freshVoice.target!=freshUi.music.volume||
+       freshVoice.rate!=ProbeFloat(0x3da3d70aU))return 341;
+    if(!AdvanceToBoundary(freshSession,freshRuntime)||freshRuntime.phase!=PNR_READY||
+       freshUi.music.queuedTrack==0||freshUi.music.native348!=0||freshUi.music.native364!=0)return 341;
+
+    PortFrontend continueUi;continueUi.Init(false);
+    if(!continueUi.BindSaveDirectory("build/gameplay/"))return 342;
+    if(continueUi.music.currentTrack!=0)return 342;
+    continueUi.selectedSlot=1;continueUi.hasContinue=true;continueUi.OpenMain();continueUi.selection=MAIN_CONTINUE;
+    if(continueUi.Step(accept)!=UI_CONTINUE_RUN)return 343;
+    NativeMt continueRandom;continueRandom.Seed(9301);PortNormalRuntime continued;PortGameSession continueSession(continueRandom,continueUi);
+    NativeSceneFiles continueFiles={"runtime/game/file_index.bin","runtime/game/",1,2,0};
+    NativeActionFrame staleFrame;staleFrame.Clear(0,0,0);staleFrame.SupplyConnection(true);staleFrame.SupplyDrop(false);
+    for(int a=0;a<12;++a){staleFrame.SupplyHeld(a,false);staleFrame.SupplyPressed(a,false);if(a<8)staleFrame.SupplyValue(a,0);}
+    ProbeCountingActions staleActions(staleFrame);
+    const bool selectedContinue=continueSession.ContinueSelectedNativeRun(continued,continueFiles,&staleActions);
+    std::vector<unsigned char> afterFirst;const bool retainedFirst=ReadProbeFile(validPath,afterFirst)&&afterFirst==source;
+    NativeSaveSummary decodedCurrent;
+    const bool decodedCurrentOk=NativeReadSaveSummary(validPath,decodedCurrent);
+    if(!selectedContinue||continued.phase!=PNR_READY||
+       continued.run.seeds.start!=1U||continued.run.context.stage!=3||continued.run.player.player!=0||
+       continued.run.context.nativeMode!=0||continueFiles.nativeMode!=0||
+       staleFrame.controller!=continued.playerCreation.native153c||
+       staleFrame.playerToken!=continued.playerBody.entityToken||staleActions.calls!=0||
+       staleActions.valueCalls!=0||staleActions.pressedCalls!=0||staleActions.dropCalls!=0||
+       staleActions.heldCalls!=0||staleActions.connectedCalls!=0||
+       staleFrame.controller||staleFrame.playerToken||continueUi.music.slot!=1||
+       continueUi.music.currentTrack==0||continueUi.music.currentTrack==64||continueUi.music.currentTrack==95||
+       continueUi.music.native348!=0||continueUi.music.native364!=-100||!retainedFirst||
+       !decodedCurrentOk||decodedCurrent.nativeMode!=0){
+        printf("SELECTED_RUN_CONTINUE_DIAG accepted=%d phase=%d next=%08x seed=%u stage=%d player=%d mode=%d filesMode=%d calls=%u/%u/%u/%u/%u/%u owner=%u/%u/%u/%u slot=%u track=%d n348=%d n364=%d retained=%d decodedMode=%d\n",
+            selectedContinue?1:0,continued.phase,continued.missingNativePrerequisite,continued.run.seeds.start,
+            continued.run.context.stage,continued.run.player.player,continued.run.context.nativeMode,continueFiles.nativeMode,
+            staleActions.calls,staleActions.valueCalls,staleActions.pressedCalls,staleActions.dropCalls,
+            staleActions.heldCalls,staleActions.connectedCalls,staleFrame.controller,staleFrame.playerToken,
+            continued.playerCreation.native153c,continued.playerBody.entityToken,continueUi.music.slot,
+            continueUi.music.currentTrack,continueUi.music.native348,continueUi.music.native364,
+            retainedFirst?1:0,decodedCurrent.nativeMode);
+        return 344;}
+    const NativeMusicVoice coldVoice=continueUi.music.voices[continueUi.music.slot];
+    if(coldVoice.current!=0||coldVoice.target!=continueUi.music.volume||
+       coldVoice.rate!=ProbeFloat(0x3da3d70aU))return 344;
+
+    PortFrontend secondUi;secondUi.Init(false);
+    if(!secondUi.BindSaveDirectory("build/gameplay/"))return 348;
+    if(secondUi.music.currentTrack!=0)return 348;
+    secondUi.selectedSlot=1;secondUi.hasContinue=true;secondUi.OpenMain();secondUi.selection=MAIN_CONTINUE;
+    if(secondUi.Step(accept)!=UI_CONTINUE_RUN)return 348;
+    NativeMt secondRandom;secondRandom.Seed(9303);PortNormalRuntime secondContinued;PortGameSession secondSession(secondRandom,secondUi);
+    NativeSceneFiles secondFiles={"runtime/game/file_index.bin","runtime/game/",1,2,0};
+    std::vector<unsigned char> beforeSecond;if(!ReadProbeFile(validPath,beforeSecond))return 348;
+    if(!secondSession.ContinueSelectedNativeRun(secondContinued,secondFiles,0)||secondContinued.phase!=PNR_READY||
+       secondContinued.run.seeds.start!=continued.run.seeds.start||secondContinued.run.context.stage!=3||
+       secondContinued.run.context.nativeMode!=0||secondFiles.nativeMode!=0||
+       secondContinued.playerState.keys!=continued.playerState.keys||
+       secondContinued.playerState.bombs!=continued.playerState.bombs||
+       secondContinued.playerState.coins!=continued.playerState.coins||secondUi.music.slot!=1||
+       secondUi.music.currentTrack==0||secondUi.music.currentTrack==64||secondUi.music.currentTrack==95||
+       secondUi.music.native364!=-100)return 348;
+    std::vector<unsigned char> afterSecond;if(!ReadProbeFile(validPath,afterSecond)||afterSecond!=beforeSecond)return 348;
+
+    PortFrontend invalidUi;invalidUi.Init(false);
+    if(!invalidUi.BindSaveDirectory("build/gameplay/"))return 345;
+    invalidUi.selectedSlot=2;invalidUi.hasContinue=true;invalidUi.OpenMain();invalidUi.selection=MAIN_CONTINUE;
+    if(invalidUi.Step(accept)!=UI_CONTINUE_RUN)return 346;
+    NativeMt invalidRandom;invalidRandom.Seed(9302);PortNormalRuntime invalidRuntime;
+    NativeSceneFiles invalidFiles={"runtime/game/file_index.bin","runtime/game/",777,777,777};
+    const bool invalidAccepted=PortGameSession(invalidRandom,invalidUi).ContinueSelectedNativeRun(invalidRuntime,invalidFiles,0);
+    const bool invalidRejected=!invalidAccepted&&invalidRuntime.phase==PNR_IDLE&&invalidRuntime.world.residentCount==0&&
+        invalidRuntime.completePlayerTicks==0&&invalidUi.scene==UI_MAIN&&invalidUi.hasContinue&&
+        invalidUi.music.currentTrack==0&&invalidFiles.backdrop==777&&invalidFiles.nativeMode==777&&invalidFiles.frame==777;
+    if(!invalidRejected)return 347;
+
+    if(!WriteProbeFile(slotThreePath,consumedSource))return 349;
+    int consumedFirstPickups=-1,consumedSecondPickups=-1;
+    for(int pass=0;pass<2;++pass){
+        PortFrontend consumedUi;consumedUi.Init(false);
+        if(!consumedUi.BindSaveDirectory("build/gameplay/"))return 350;
+        consumedUi.selectedSlot=2;consumedUi.hasContinue=true;consumedUi.OpenMain();consumedUi.selection=MAIN_CONTINUE;
+        if(consumedUi.Step(accept)!=UI_CONTINUE_RUN)return 350;
+        std::vector<unsigned char> before,after;
+        if(!ReadProbeFile(slotThreePath,before))return 350;
+        NativeMt consumedRandom;consumedRandom.Seed(9310U+(unsigned int)pass);PortNormalRuntime consumedRuntime;
+        PortGameSession consumedSession(consumedRandom,consumedUi);NativeSceneFiles consumedFiles={"runtime/game/file_index.bin","runtime/game/",1,2,0};
+        if(!consumedSession.ContinueSelectedNativeRun(consumedRuntime,consumedFiles,0)||consumedRuntime.phase!=PNR_READY||
+           consumedRuntime.run.seeds.start!=12352U||consumedRuntime.run.context.nativeMode!=0||
+           consumedRuntime.playerState.keys!=1||consumedRuntime.playerState.bombs!=0||
+           !consumedRuntime.world.Current()||consumedRuntime.world.resident[consumedRuntime.world.currentList].pickups.count!=0||
+           !ReadProbeFile(slotThreePath,after)||after!=before)return 351;
+        if(pass==0)consumedFirstPickups=consumedRuntime.world.resident[consumedRuntime.world.currentList].pickups.count;
+        else consumedSecondPickups=consumedRuntime.world.resident[consumedRuntime.world.currentList].pickups.count;
+    }
+    remove(freshPath);remove(validPath);remove(slotThreePath);
+    printf("SELECTED_RUN_INTENT newWithSave=1 seed=%u player=%d continueSlot=%d mode=0 seed=%u stage=%d staleActions=%u preloadValue=%u preloadPressed=%u preloadDrop=%u preloadHeld=%u preloadConnected=%u preloadOwner=%u/%u restoredOwner=%u/%u coldTrack=%d native364=%d stingerQueued=%d stinger364=%d coldSlot=%u savedMode=%d retained=1 second=1 invalidNoFallback=1 consumedTwice=%d/%d\n",
+        freshSeed,freshCharacter->player,continueUi.selectedSlot,continued.run.seeds.start,continued.run.context.stage,
+        staleActions.calls,staleActions.valueCalls,staleActions.pressedCalls,staleActions.dropCalls,
+        staleActions.heldCalls,staleActions.connectedCalls,staleFrame.controller,staleFrame.playerToken,
+        continued.playerCreation.native153c,continued.playerBody.entityToken,continueUi.music.currentTrack,
+        continueUi.music.native364,freshUi.music.queuedTrack,freshUi.music.native364,
+        (unsigned int)continueUi.music.slot,decodedCurrent.nativeMode,consumedFirstPickups,consumedSecondPickups);
+    return 0;
+}
+static int RunNativePickupCodecProbe(NativeMt& random,PortFrontend& ui){
+    std::vector<unsigned char> source;
+    if(!ReadProbeFile("build/gameplay/generated_pickup_native_control.dat",source))return 320;
+    size_t key=(size_t)-1;
+    if(!FindProbePickupRecord(source,30,42,&key))return 321;
+    std::vector<unsigned char> codec=source;
+    ProbePutU32(codec,key+46,0x12345678U);
+    ProbePutU32(codec,key+71,0x40000000U);
+    ProbePutU32(codec,key+77,0x89abcdefU);
+    if(!RewriteProbeSaveChecksum(codec)||!WriteProbeFile("build/gameplay/generated_pickup_codec_fixture.dat",codec))return 322;
+    NativeSaveSummary summary;
+    if(!NativeReadSaveSummary("build/gameplay/generated_pickup_codec_fixture.dat",summary)||!summary.valid)return 323;
+    bool found=false;
+    for(unsigned int i=0;i<summary.currentRoomPickups.size();++i){
+        const NativeSaveSummary::Pickup& p=summary.currentRoomPickups[i];
+        if(p.variant!=30||p.grid!=42)continue;
+        unsigned int d8=0;memcpy(&d8,&p.nativeD8,4);
+        if(p.native470!=0x12345678U||p.native4e0!=0x89abcdefU||d8!=0x40000000U)return 324;
+        found=true;break;
+    }
+    if(!found)return 325;
+
+    std::vector<unsigned char> badCrc=source;badCrc[badCrc.size()-1]^=1U;
+    if(!WriteProbeFile("build/gameplay/generated_pickup_invalid_crc.dat",badCrc)||
+       !RejectNativeContinueWithoutMutation("build/gameplay/generated_pickup_invalid_crc.dat",random,ui))return 326;
+
+    std::vector<unsigned char> unsupported=source;unsupported[key+81]=1U;
+    if(!RewriteProbeSaveChecksum(unsupported)||
+       !WriteProbeFile("build/gameplay/generated_pickup_unsupported_extra.dat",unsupported))return 327;
+    NativeSaveSummary rejected;
+    if(NativeReadSaveSummary("build/gameplay/generated_pickup_unsupported_extra.dat",rejected)||
+       !RejectNativeContinueWithoutMutation("build/gameplay/generated_pickup_unsupported_extra.dat",random,ui))return 328;
+
+    NativeStaticGrid type4,type6,type15,type5,type26,type25,type14,type21,type24,type13,unsupportedGrid;
+    const bool grid4=NativeRestoreSerializedGrid(7,4,2,0,5,0x11223344U,0x16a9de81U,0x55667788U,17,&type4)&&
+        type4.type==1000&&type4.nativeType==4&&type4.collisionClass==4&&type4.initializations==6&&
+        type4.initializedFrame==17&&type4.native18==0x55667788U&&type4.native20==0x16a9de81U;
+    const bool grid6=NativeRestoreSerializedGrid(8,6,0,0,2,0x22334455U,0x7a11ee00U,0,18,&type6)&&
+        type6.type==1002&&type6.nativeType==6&&type6.collisionClass==3&&type6.initializations==3&&
+        type6.initializedFrame==18&&type6.native20==0x7a11ee00U;
+    const bool grid15=NativeRestoreSerializedGrid(9,15,0,0,1,0x33445566U,0x16a9de81U,0,19,&type15)&&
+        type15.type==1999&&type15.nativeType==15&&type15.collisionClass==4&&type15.initializations==2&&
+        type15.initializedFrame==19&&type15.native20==0x16a9de81U;
+    const bool grid5=NativeRestoreSerializedGrid(10,5,0,0,0,0x44556677U,0,0,20,&type5)&&
+        type5.type==1001&&type5.nativeType==5&&type5.collisionClass==4&&type5.initializations==1;
+    const bool grid26=NativeRestoreSerializedGrid(11,26,0,0,0,0x55667788U,0,0,21,&type26)&&
+        type26.type==1008&&type26.nativeType==26&&type26.collisionClass==4&&type26.initializations==1;
+    const bool grid25=NativeRestoreSerializedGrid(12,25,0,0,0,0x66778899U,0,0,22,&type25)&&
+        type25.type==1010&&type25.nativeType==25&&type25.collisionClass==4&&type25.initializations==1;
+    const bool grid14=NativeRestoreSerializedGrid(13,14,4,0,0,0x778899aaU,0,0,23,&type14)&&
+        type14.type==1494&&type14.nativeType==14&&type14.variant==4&&type14.collisionClass==3&&type14.initializations==1;
+    const bool grid21=NativeRestoreSerializedGrid(14,21,1,0,0,0x8899aabbU,0,0,24,&type21)&&
+        type21.type==5001&&type21.nativeType==21&&type21.variant==1&&type21.collisionClass==0&&type21.initializations==1;
+    const bool grid24=NativeRestoreSerializedGrid(15,24,0,0,0,0x99aabbccU,0,0,25,&type24)&&
+        type24.type==1901&&type24.nativeType==24&&type24.variant==0&&type24.collisionClass==4&&type24.initializations==1;
+    const bool grid13=NativeRestoreSerializedGrid(16,13,0,0,0,0x8899aabbU,0,0,26,&type13)&&
+        type13.type==1400&&type13.nativeType==13&&type13.collisionClass==4&&type13.initializations==1;
+    const bool unsupportedGrids=!NativeRestoreSerializedGrid(17,7,0,0,0,1,1,0,0,&unsupportedGrid)&&
+        !NativeRestoreSerializedGrid(17,18,0,0,0,1,1,0,0,&unsupportedGrid);
+    if(!grid4||!grid6||!grid15||!grid5||!grid26||!grid25||!grid14||!grid21||!grid24||!grid13||!unsupportedGrids)return 329;
+
+    printf("CODEC_FIXTURE pickup470=%08x pickup4e0=%08x d8=%08x fullword=1 invalidCrcRejected=1 unsupportedExtraRejected=1\n",
+        0x12345678U,0x89abcdefU,0x40000000U);
+    printf("GRID_CODEC_FIXTURE type4=1 type6=1 type15=1 type5=1 type26=1 type25=1 type14=1 type21=1 type24=1 type13=1 unsupported=1 postInitCounts=6/3/2/1/1/1/1/1/1/1 frame=17/18/19/20/21/22/23/24/25/26 tails=%08x/%08x/%08x\n",
+        0x16a9de81U,0x7a11ee00U,0x16a9de81U);
+    return 0;
+}
+static bool VerifyRestartedVirginPickupRoom(PortGameSession& session,PortNormalRuntime& runtime){
+    if(runtime.phase!=PNR_READY||runtime.world.currentGrid!=84||runtime.pendingRestoreStage!=0||
+       !runtime.pendingSavedRooms.empty()||!runtime.world.restoredRooms.empty())return false;
+    const int start=runtime.world.currentList;int target=-1,slot=-1;
+    for(int i=0;i<runtime.world.layout.count;++i)if(runtime.world.layout.rooms[i].definition==268501785){
+        target=i;break;}
+    for(int i=0;i<8;++i){const NativePlacedRoom* linked=runtime.world.layout.DoorTarget(start,i);
+        if(linked&&linked->listIndex==target){slot=i;break;}}
+    if(target<0||slot<0)return false;
+    unsigned int ticks=0;
+    if(!GeneratedPickupMoveToDoor(session,runtime,slot,&ticks)||runtime.world.currentList!=target)return false;
+    if(!GeneratedPickupEnterRoom(session,runtime,&ticks))return false;
+    const NativeWorldResident& live=runtime.world.resident[target];
+    NativeRoomState* room=runtime.world.Current();
+    if(!room||live.pickups.count!=2||live.room!=room)return false;
+    int key=0,bomb=0;
+    for(int i=0;i<live.pickups.count;++i)if(live.pickups.entries[i]){
+        if(live.pickups.entries[i]->variant==30&&!live.pickups.entries[i]->collected)++key;
+        if(live.pickups.entries[i]->variant==40&&!live.pickups.entries[i]->collected)++bomb;}
+    return key==1&&bomb==1&&GeneratedPickupGridPresent(*room,77)&&room->collision.occupied[77];
+}
+static int RunPendingRestartProbe(NativeMt& random,PortFrontend& ui){
+    std::vector<unsigned char> source;size_t key=(size_t)-1;
+    if(!ReadProbeFile("build/gameplay/generated_pickup_native_control.dat",source)||
+       !FindProbePickupRecord(source,30,42,&key))return 330;
+    ProbePutU32(source,key,6); //Valid common entity encoding, unsupported reached owner.
+    if(!RewriteProbeSaveChecksum(source)||
+       !WriteProbeFile("build/gameplay/generated_pickup_unsupported_actor.dat",source))return 331;
+    NativeSaveSummary decoded;
+    if(!NativeReadSaveSummary("build/gameplay/generated_pickup_unsupported_actor.dat",decoded)||!decoded.valid||
+       decoded.currentGrid!=71||decoded.currentSavedRoomIndex<0)return 332;
+    NativeSceneFiles files={"runtime/game/file_index.bin","runtime/game/",1,0,0};
+
+    PortNormalRuntime failed;PortGameSession failedSession(random,ui);
+    if(failedSession.ContinueNativeSave("build/gameplay/generated_pickup_unsupported_actor.dat",failed,files))return 333;
+    const unsigned int failedStop=failed.missingNativePrerequisite;
+    const bool failedCleared=failed.pendingRestoreStage==0&&failed.pendingSavedRooms.empty()&&
+        failed.pendingRestoreGrid<0&&failed.pendingRestoreDimension<0;
+    NativeActionFrame failedFrame;failedFrame.Clear(failed.playerCreation.native153c,failed.playerBody.entityToken,files.frame);
+    failedFrame.SupplyConnection(true);failedFrame.SupplyDrop(false);
+    for(int a=0;a<12;++a){failedFrame.SupplyHeld(a,false);failedFrame.SupplyPressed(a,false);if(a<8)failedFrame.SupplyValue(a,0);}
+    NativeFrameActions failedActions(failedFrame);
+    PortSessionStart failedRestart=failedSession.RestartNormal(12352,failed,files,&failedActions);
+    const bool failedFresh=failedRestart.result==NPS_WORLD_PENDING&&
+        VerifyRestartedVirginPickupRoom(failedSession,failed);
+
+    PortNormalRuntime successful;PortGameSession successfulSession(random,ui);
+    if(!successfulSession.ContinueNativeSave("build/gameplay/generated_pickup_native_control.dat",successful,files)||
+       successful.phase!=PNR_READY)return 334;
+    NativeActionFrame successFrame;successFrame.Clear(successful.playerCreation.native153c,successful.playerBody.entityToken,files.frame);
+    successFrame.SupplyConnection(true);successFrame.SupplyDrop(false);
+    for(int a=0;a<12;++a){successFrame.SupplyHeld(a,false);successFrame.SupplyPressed(a,false);if(a<8)successFrame.SupplyValue(a,0);}
+    NativeFrameActions successActions(successFrame);
+    PortSessionStart successRestart=successfulSession.RestartNormal(12352,successful,files,&successActions);
+    const bool successFresh=successRestart.result==NPS_WORLD_PENDING&&
+        VerifyRestartedVirginPickupRoom(successfulSession,successful);
+    printf("PENDING_RESTART failedStop=%08x failedCleared=%d failedVirgin=%d successVirgin=%d\n",
+        failedStop,failedCleared?1:0,failedFresh?1:0,successFresh?1:0);
+    return failedStop==0x79daf0&&failedCleared&&failedFresh&&successFresh?0:335;
 }
 }
 int RunLockProbe(NativeMt& random,PortFrontend& ui){
@@ -238,15 +585,26 @@ int RunItemProbe(NativeMt& random,PortFrontend& ui){
     if(!AdvanceToBoundary(session,*runtime)||runtime->phase!=PNR_READY){delete runtime;return 81;}
     NativeWorldResident& live=runtime->world.resident[runtime->world.currentList];
     if(!live.room||live.pickups.count>=64){delete runtime;return 82;}
-    NativePickup* pickup=new NativePickup;
-    if(!pickup->Begin(5,100,0,0,12345,0,runtime->playerBody.position)){delete pickup;delete runtime;return 83;}
-    live.pickups.entries[live.pickups.count++]=pickup;
+    //006e92d0's room-type table: type2=shop pool1, type24=planetarium pool26.
+    const unsigned int shopBefore=runtime->itemPools.pools[1].counter;
+    const unsigned int planetBefore=runtime->itemPools.pools[26].counter;
+    if(runtime->itemPools.SelectCollectibleForRoom(2,12345)<=0||
+       runtime->itemPools.pools[1].counter!=shopBefore+1||
+       runtime->itemPools.SelectCollectibleForRoom(24,12345)<=0||
+       runtime->itemPools.pools[26].counter!=planetBefore+1){delete runtime;return 91;}
+    //Creation owns the contextual identity; contact consumes it without a repick.
     const unsigned int before=runtime->itemPools.pools[0].counter;
+    const int itemSubtype=runtime->itemPools.PrepareRewardSubtype(100);
+    if(itemSubtype<=0||runtime->itemPools.pools[0].counter!=before+1){delete runtime;return 83;}
+    NativePickup* pickup=new NativePickup;
+    if(!pickup->Begin(5,100,itemSubtype,0,12345,0,runtime->playerBody.position)){delete pickup;delete runtime;return 83;}
+    live.pickups.entries[live.pickups.count++]=pickup;
     const unsigned int collectedBefore=runtime->collectiblesCollected;
     if(!RunProjectileTicks(session,*runtime,-1,-1,2)){delete runtime;return 84;}
     bool owned=false;
     if(runtime->lastCollectible<=0||!runtime->playerState.HasCollectible(runtime->lastCollectible,&owned)||!owned){delete runtime;return 85;}
-    if(!pickup->collected||runtime->collectiblesCollected!=collectedBefore+1||runtime->itemPools.pools[0].counter!=before+1){delete runtime;return 86;}
+    if(!pickup->collected||pickup->subtype!=itemSubtype||runtime->collectiblesCollected!=collectedBefore+1||
+       runtime->itemPools.pools[0].counter!=before+1){delete runtime;return 86;}
     const int hpBefore=runtime->playerState.maxRedHearts,keysBefore=runtime->playerState.keys;
     if(!runtime->playerState.GrantCollectible(25)){delete runtime;return 87;} //Breakfast
     if(runtime->playerState.maxRedHearts!=std::min(14,hpBefore+2)){delete runtime;return 88;}
@@ -266,7 +624,7 @@ int RunBombProbe(NativeMt& random,PortFrontend& ui){
     if(!live.room||live.enemies.count>=64){delete runtime;return 93;}
     const NativePoint at=runtime->playerBody.position;
     NativeEnemy* enemy=new NativeEnemy;
-    if(!enemy->Begin(10,0,54321,at,0,1)){delete enemy;delete runtime;return 94;}
+    if(!enemy->Begin(10,0,0,54321,at,0,1)){delete enemy;delete runtime;return 94;}
     live.enemies.entries[live.enemies.count++]=enemy;
     const int bombsBefore=runtime->playerState.bombs;
     if(!runtime->bombs.Place(*runtime)||runtime->playerState.bombs!=bombsBefore-1){delete runtime;return 95;}
@@ -300,14 +658,14 @@ int RunBombProbe(NativeMt& random,PortFrontend& ui){
     if(!live.room||live.pickups.count+2>=64){delete runtime;return 109;}
     //Pill pickup and use.
     NativePickup* pill=new NativePickup;
-    if(!pill->Begin(5,380,0,0,555,0,runtime->playerBody.position)){delete pill;delete runtime;return 110;}
+    if(!pill->Begin(5,70,4,0,555,0,runtime->playerBody.position)){delete pill;delete runtime;return 110;}
     live.pickups.entries[live.pickups.count++]=pill;
     if(!RunProjectileTicks(session,*runtime,-1,-1,1)){delete runtime;return 111;}
     if(!pill->collected||runtime->playerState.heldPill<0){delete runtime;return 112;}
     if(!RunActionPress(session,*runtime,10,1)||runtime->playerState.heldPill!=-1){delete runtime;return 113;}
     //Card pickup and use.
     NativePickup* card=new NativePickup;
-    if(!card->Begin(5,350,9,0,556,0,runtime->playerBody.position)){delete card;delete runtime;return 114;}
+    if(!card->Begin(5,300,9,0,556,0,runtime->playerBody.position)){delete card;delete runtime;return 114;}
     live.pickups.entries[live.pickups.count++]=card;
     if(!RunProjectileTicks(session,*runtime,-1,-1,1)){delete runtime;return 115;}
     if(!card->collected||runtime->playerState.heldCard!=9){delete runtime;return 116;}
@@ -430,7 +788,7 @@ int RunBombProbe(NativeMt& random,PortFrontend& ui){
         runtime->enemyShots.Clear();runtime->playerInvulnerable=1000;
         NativePoint at=runtime->playerBody.position;at.x+=140.0f;at.y+=40.0f;
         NativeEnemy* enemy=new NativeEnemy;
-        if(!enemy->Begin(types[t],0,700U+(unsigned int)t*37U,at,0,1)){delete enemy;delete runtime;return 195;}
+        if(!enemy->Begin(types[t],0,0,700U+(unsigned int)t*37U,at,0,1)){delete enemy;delete runtime;return 195;}
         live.enemies.entries[live.enemies.count++]=enemy;
         if(!RunProjectileTicks(session,*runtime,-1,-1,260)){delete runtime;return 196;}
         if(runtime->enemyShots.spawned==0){delete runtime;return 197;}
@@ -439,7 +797,7 @@ int RunBombProbe(NativeMt& random,PortFrontend& ui){
     live.enemies.count=0;if(live.room)live.room->clear=false;
     NativePoint at=runtime->playerBody.position;at.x+=60.0f;
     NativeEnemy* victim=new NativeEnemy;
-    if(!victim->Begin(10,0,999U,at,0,1)){delete victim;delete runtime;return 198;}
+    if(!victim->Begin(10,0,0,999U,at,0,1)){delete victim;delete runtime;return 198;}
     live.enemies.entries[live.enemies.count++]=victim;
     const unsigned int fx0=runtime->deathFx.spawned;
     victim->Damage(1000.0f);
@@ -536,7 +894,7 @@ int RunBombProbe(NativeMt& random,PortFrontend& ui){
     if(!live.room||live.enemies.count>=64){delete runtime;return 130;}
     NativePoint at=runtime->playerBody.position;at.x+=150.0f;
     NativeEnemy* enemy=new NativeEnemy;
-    if(!enemy->Begin(10,0,777,at,0,1)){delete enemy;delete runtime;return 131;}
+    if(!enemy->Begin(10,0,0,777,at,0,1)){delete enemy;delete runtime;return 131;}
     live.enemies.entries[live.enemies.count++]=enemy;
     if(!RunProjectileTicks(session,*runtime,-1,-1,180)){delete runtime;return 132;}
     if(runtime->familiars.spawned!=3||(runtime->familiars.shots+runtime->familiars.hits)==0){delete runtime;return 133;}
@@ -573,7 +931,10 @@ int RunBombProbe(NativeMt& random,PortFrontend& ui){
     (void)random;
     PortNormalRuntime* runtime=new PortNormalRuntime;NativeMt local;local.Seed(9100);PortGameSession session(local,ui);
     NativeSceneFiles files={"runtime/game/file_index.bin","runtime/game/",1,0,0};
-    if(!session.ContinueNativeSave("build/gameplay/profile/gamestate1.dat",*runtime,files)){delete runtime;return 144;}
+    if(!session.ContinueNativeSave("build/gameplay/profile/gamestate1.dat",*runtime,files)){
+        printf("NATIVE_CONTINUE_FAIL phase=%d next=%08x residents=%d\n",runtime->phase,
+            runtime->missingNativePrerequisite,runtime->world.residentCount);
+        delete runtime;return 144;}
     if(runtime->phase!=PNR_READY||runtime->run.seeds.start!=1||runtime->run.context.stage!=1||runtime->run.player.player!=0){delete runtime;return 145;}
     if(!RunProjectileTicks(session,*runtime,-1,-1,2)){delete runtime;return 146;}
     printf("NATIVE_CONTINUE seed=%u stage=%d hp=%d/%d\n",runtime->run.seeds.start,runtime->run.context.stage,
@@ -665,11 +1026,19 @@ int RunBombProbe(NativeMt& random,PortFrontend& ui){
     printf("GREED continue wave=%d room=%d count=%d\n",resumedGreed->greedWave,resumedGreed->world.currentGrid,resumedGreed->greedWaveCount);
     delete resumedGreed;
     if(!session.SaveNativeContinue("build/gameplay/greed_native.dat",*runtime)){printf("GREED native save failed=%08x\n",runtime->nativeSaveCaptureAddress);delete runtime;return 186;}
+    NativeSaveSummary greedSummary;
+    if(!NativeReadSaveSummary("build/gameplay/greed_native.dat",greedSummary)||!greedSummary.greed||greedSummary.greedWave!=1){delete runtime;return 186;}
+    PortFrontend greedyResumeUi;greedyResumeUi.Init(false);
+    if(!greedyResumeUi.BindSaveDirectory("build/gameplay/")||greedyResumeUi.music.currentTrack!=0){delete runtime;return 186;}
     PortNormalRuntime* nativeGreed=new PortNormalRuntime;NativeMt nativeRandom;nativeRandom.Seed(888);
-    PortGameSession nativeSession(nativeRandom,ui);NativeSceneFiles nativeFiles={"runtime/game/file_index.bin","runtime/game/",1,0,0};
+    PortGameSession nativeSession(nativeRandom,greedyResumeUi);NativeSceneFiles nativeFiles={"runtime/game/file_index.bin","runtime/game/",1,2,0};
     if(!nativeSession.ContinueNativeSave("build/gameplay/greed_native.dat",*nativeGreed,nativeFiles)){delete nativeGreed;delete runtime;return 187;}
-    if(!nativeGreed->greedMode||nativeGreed->greedWave!=1||nativeGreed->world.currentGrid!=2){delete nativeGreed;delete runtime;return 188;}
-    printf("GREED native continue wave=%d room=%d count=%d\n",nativeGreed->greedWave,nativeGreed->world.currentGrid,nativeGreed->greedWaveCount);
+    if(!nativeGreed->greedMode||nativeGreed->greedWave!=1||nativeGreed->world.currentGrid!=2||
+       nativeGreed->run.context.nativeMode!=2||nativeGreed->run.player.mode!=2||nativeFiles.nativeMode!=2||
+       greedyResumeUi.music.currentTrack==0||greedyResumeUi.music.currentTrack==64||greedyResumeUi.music.currentTrack==95||
+       greedyResumeUi.music.native364!=-100){delete nativeGreed;delete runtime;return 188;}
+    printf("GREED native continue wave=%d room=%d count=%d mode=%d\n",nativeGreed->greedWave,nativeGreed->world.currentGrid,
+        nativeGreed->greedWaveCount,nativeGreed->run.context.nativeMode);
     delete nativeGreed;
     for(int wave=runtime->greedWave+1;wave<runtime->greedWaveCount;++wave){
         NativeRoomState* room=runtime->world.Current();if(!room){delete runtime;return 174;}
@@ -709,7 +1078,21 @@ int RunFloorProbe(NativeMt& random,PortFrontend& ui){
     if(!AdvanceToBoundary(session,*runtime)||runtime->phase!=PNR_READY){delete runtime;return 241;}
     NativeLevelLayout& layout=runtime->world.layout;
     const int count=layout.count,startList=runtime->world.currentList;
+    const NativePlacedRoom* initialDescriptor=runtime->world.CurrentDescriptor();
+    if(!runtime->minimaps.maps[0].ready||!runtime->minimaps.maps[1].ready||!initialDescriptor||
+       runtime->minimaps.maps[0].draws.empty()||runtime->minimaps.maps[1].draws.empty()||
+       !(initialDescriptor->displayFlags&5U)){printf("MINIMAP_INITIAL missing\n");delete runtime;return 267;}
+    unsigned int discovered=DiscoveredRoomCount(layout);
+    float lastSmallX=runtime->minimaps.maps[0].currentMarker.x,lastSmallY=runtime->minimaps.maps[0].currentMarker.y;
+    float lastLargeX=runtime->minimaps.maps[1].currentMarker.x,lastLargeY=runtime->minimaps.maps[1].currentMarker.y;
+    printf("MINIMAP_INITIAL grid=%d small=%u/%u marker=%.3f,%.3f large=%u/%u marker=%.3f,%.3f discovered=%u refreshed=%u\n",
+        runtime->world.currentGrid,(unsigned int)runtime->minimaps.maps[0].draws.size(),
+        runtime->minimaps.maps[0].ready?1:0,runtime->minimaps.maps[0].currentMarker.x,runtime->minimaps.maps[0].currentMarker.y,
+        (unsigned int)runtime->minimaps.maps[1].draws.size(),runtime->minimaps.maps[1].ready?1:0,
+        runtime->minimaps.maps[1].currentMarker.x,runtime->minimaps.maps[1].currentMarker.y,
+        discovered,runtime->minimaps.refreshes);
     std::vector<int> prev(count,-1),viaSlot(count,-1),queue;
+    std::vector<int> reverseSlots(count,-1);
     prev[startList]=startList;queue.push_back(startList);
     int bossList=-1;
     for(unsigned int q=0;q<queue.size()&&bossList<0;++q){
@@ -735,6 +1118,24 @@ int RunFloorProbe(NativeMt& random,PortFrontend& ui){
         NativeRoomState* room=runtime->world.Current();const NativePlacedRoom* descriptor=runtime->world.CurrentDescriptor();
         if(!room||!descriptor||!live.doors){printf("FLOOR_ROOM_MISSING step=%u room=%d doors=%d\n",i,room?1:0,live.doors?1:0);delete runtime;return 246;}
         const NativeRoomDef* definition=NativeRoom(descriptor->definition);
+        const NativeMinimap& small=runtime->minimaps.maps[0];const NativeMinimap& large=runtime->minimaps.maps[1];
+        const unsigned int currentDiscovered=DiscoveredRoomCount(layout);
+        const bool movedMaps=fabsf(small.currentMarker.x-lastSmallX)>0.001f||fabsf(small.currentMarker.y-lastSmallY)>0.001f||
+            fabsf(large.currentMarker.x-lastLargeX)>0.001f||fabsf(large.currentMarker.y-lastLargeY)>0.001f;
+        if(!small.ready||!large.ready||small.draws.empty()||large.draws.empty()||
+           !(descriptor->displayFlags&5U)||currentDiscovered<discovered||(i&&!movedMaps)){
+            printf("MINIMAP_ROOM_FAIL step=%u ready=%d/%d draws=%u/%u display=%u discovered=%u prior=%u moved=%d\n",
+                i,small.ready?1:0,large.ready?1:0,(unsigned int)small.draws.size(),(unsigned int)large.draws.size(),
+                descriptor->displayFlags,currentDiscovered,discovered,movedMaps?1:0);delete runtime;return 268;
+        }
+        discovered=currentDiscovered;
+        printf("MINIMAP_ROOM step=%u grid=%d small=%u marker=%.3f,%.3f large=%u marker=%.3f,%.3f discovered=%u visited=%u clear=%u display=%u activations=%u refreshed=%u clearedVisited=%u\n",
+            i,runtime->world.currentGrid,(unsigned int)small.draws.size(),small.currentMarker.x,small.currentMarker.y,
+            (unsigned int)large.draws.size(),large.currentMarker.x,large.currentMarker.y,discovered,descriptor->visitedCount,
+            descriptor->flags&1U,descriptor->displayFlags,live.activations,runtime->minimaps.refreshes,
+            ClearedVisitedRoomCount(layout));
+        lastSmallX=small.currentMarker.x;lastSmallY=small.currentMarker.y;
+        lastLargeX=large.currentMarker.x;lastLargeY=large.currentMarker.y;
         const int entryEnemies=live.enemies.count;const unsigned int kills0=runtime->enemyKills;
         runtime->playerInvulnerable=0x7fffffff;unsigned int combatTicks=0;
         while(live.enemies.count>0&&combatTicks<30000){
@@ -755,6 +1156,71 @@ int RunFloorProbe(NativeMt& random,PortFrontend& ui){
             i,descriptor->gridIndex,descriptor->definition,definition?definition->type:-1,definition?definition->variant:0,
             entryEnemies,roomKills,remaining,room->clear?1:0,runtime->playerState.redHearts,runtime->playerState.maxRedHearts,combatTicks);
         if(remaining||!room->clear||(entryEnemies&&roomKills==0)){printf("FLOOR_ROOM_FAIL step=%u\n",i);delete runtime;return 249;}
+        if(i==1&&path.size()>2){
+            const int previous=path[i-1],reverse=reverseSlots[expected];
+            if(reverse<0||!(live.doors->attached&(1U<<reverse))){printf("MINIMAP_REENTRY no-back-door reverse=%d\n",reverse);delete runtime;return 269;}
+            NativeDoorActor& back=live.doors->actors[reverse];
+            if(back.state!=2){printf("MINIMAP_REENTRY back-closed state=%d target=%d\n",back.state,back.targetType);delete runtime;return 270;}
+            NativeRoomState* retainedRoom=live.room;NativeDoorSet* retainedDoors=live.doors;bool* retainedGrids=&room->collision.occupied[0];
+            const unsigned int retainedActivation=live.activations,refreshesBefore=runtime->minimaps.refreshes,transitionsBefore=runtime->roomTransitions;
+            NativeMt backRngBefore=random,backRngExpected=random;
+            backRngExpected.Next();
+            float bx,by;if(!room->geometry.Position(back.grid,&bx,&by)){delete runtime;return 271;}
+            runtime->playerBody.position.x=bx+20.0f;runtime->playerBody.position.y=by+20.0f;
+            runtime->playerBody.previousPosition=runtime->playerBody.position;runtime->playerBody.velocity.x=runtime->playerBody.velocity.y=0;
+            for(int t=0;t<12&&runtime->world.currentList==expected;++t)if(!RunProjectileTicks(session,*runtime,-1,-1,1)){delete runtime;return 272;}
+            NativeWorldResident& home=runtime->world.resident[runtime->world.currentList];
+            const NativePlacedRoom* homeDescriptor=runtime->world.CurrentDescriptor();
+            if(runtime->world.currentList!=previous||!home.room||!home.doors||!home.perimeterReady||
+               runtime->roomTransitions!=transitionsBefore+1||runtime->minimaps.refreshes!=refreshesBefore+1||
+               !homeDescriptor||!(homeDescriptor->displayFlags&5U)||memcmp(&random,&backRngExpected,sizeof(random))){
+                printf("MINIMAP_REENTRY back-fail current=%d want=%d room=%d doors=%d perimeter=%d mapRefresh=%u transition=%u\n",
+                    runtime->world.currentList,previous,home.room?1:0,home.doors?1:0,home.perimeterReady?1:0,
+                    runtime->minimaps.refreshes,runtime->roomTransitions);delete runtime;return 273;
+            }
+            printf("MINIMAP_REENTRY direction=back grid=%d visited=%u clear=%u display=%u activations=%u rngOneDraw=%d small=%.3f,%.3f large=%.3f,%.3f refreshed=%u\n",
+                homeDescriptor->gridIndex,homeDescriptor->visitedCount,homeDescriptor->flags&1U,homeDescriptor->displayFlags,
+                home.activations,memcmp(&backRngBefore,&random,sizeof(random))?1:0,
+                runtime->minimaps.maps[0].currentMarker.x,runtime->minimaps.maps[0].currentMarker.y,
+                runtime->minimaps.maps[1].currentMarker.x,runtime->minimaps.maps[1].currentMarker.y,runtime->minimaps.refreshes);
+            NativeRoomState* homeRoom=runtime->world.Current();
+            runtime->playerBody.position.x=(homeRoom->space.left+homeRoom->space.right)*0.5f;
+            runtime->playerBody.position.y=(homeRoom->space.top+homeRoom->space.bottom)*0.5f;
+            runtime->playerBody.previousPosition=runtime->playerBody.position;runtime->playerBody.velocity.x=runtime->playerBody.velocity.y=0;
+            if(!RunProjectileTicks(session,*runtime,-1,-1,31)){delete runtime;return 274;}
+            const int forward=viaSlot[expected];
+            if(forward<0||!(home.doors->attached&(1U<<forward))){delete runtime;return 275;}
+            NativeDoorActor& forwardDoor=home.doors->actors[forward];
+            float fx,fy;if(!homeRoom->geometry.Position(forwardDoor.grid,&fx,&fy)){delete runtime;return 276;}
+            runtime->playerBody.position.x=fx+20.0f;runtime->playerBody.position.y=fy+20.0f;
+            runtime->playerBody.previousPosition=runtime->playerBody.position;runtime->playerBody.velocity.x=runtime->playerBody.velocity.y=0;
+            const unsigned int transitions=runtime->roomTransitions;
+            NativeMt forwardRngExpected=random;forwardRngExpected.Next();
+            for(int t=0;t<12&&runtime->roomTransitions==transitions;++t)if(!RunProjectileTicks(session,*runtime,-1,-1,1)){delete runtime;return 277;}
+            NativeWorldResident& retained=runtime->world.resident[runtime->world.currentList];
+            if(runtime->world.currentList!=expected||retained.room!=retainedRoom||retained.doors!=retainedDoors||
+               retained.perimeterReady!=1||&runtime->world.Current()->collision.occupied[0]!=retainedGrids||
+               retained.activations!=retainedActivation+1||runtime->minimaps.refreshes!=refreshesBefore+2||
+               memcmp(&random,&forwardRngExpected,sizeof(random))){
+                printf("MINIMAP_REENTRY forward-fail current=%d want=%d room=%d doors=%d perimeter=%d activations=%u/%u refresh=%u\n",
+                    runtime->world.currentList,expected,retained.room==retainedRoom?1:0,retained.doors==retainedDoors?1:0,
+                    retained.perimeterReady?1:0,retained.activations,retainedActivation,runtime->minimaps.refreshes);delete runtime;return 278;
+            }
+            printf("MINIMAP_REENTRY direction=forward grid=%d roomRetained=1 doorsRetained=1 perimeterRetained=1 activations=%u rngOneDraw=%d small=%.3f,%.3f large=%.3f,%.3f refreshed=%u\n",
+                runtime->world.currentGrid,retained.activations,memcmp(&backRngBefore,&random,sizeof(random))?1:0,
+                runtime->minimaps.maps[0].currentMarker.x,runtime->minimaps.maps[0].currentMarker.y,
+                runtime->minimaps.maps[1].currentMarker.x,runtime->minimaps.maps[1].currentMarker.y,
+                runtime->minimaps.refreshes);
+            NativeRoomState* retainedCurrent=runtime->world.Current();
+            runtime->playerBody.position.x=(retainedCurrent->space.left+retainedCurrent->space.right)*0.5f;
+            runtime->playerBody.position.y=(retainedCurrent->space.top+retainedCurrent->space.bottom)*0.5f;
+            runtime->playerBody.previousPosition=runtime->playerBody.position;
+            runtime->playerBody.velocity.x=runtime->playerBody.velocity.y=0;
+            if(!RunProjectileTicks(session,*runtime,-1,-1,31)){delete runtime;return 284;}
+            discovered=DiscoveredRoomCount(layout);lastSmallX=runtime->minimaps.maps[0].currentMarker.x;
+            lastSmallY=runtime->minimaps.maps[0].currentMarker.y;lastLargeX=runtime->minimaps.maps[1].currentMarker.x;
+            lastLargeY=runtime->minimaps.maps[1].currentMarker.y;
+        }
         if(i+1==path.size()){
             printf("FLOOR_BOSS identity=%d award=%d room=%d variant=%u entryEnemies=%d kills=%u\n",
                 definition?definition->subtype:-1,runtime->bossAwardIdentity,
@@ -778,6 +1244,19 @@ int RunFloorProbe(NativeMt& random,PortFrontend& ui){
             printf("FLOOR_TRAPDOOR state=2 descend=1 stage=%d grid=%d hp=%d/%d soul=%d kills=%u\n",
                 runtime->run.context.stage,nextFloor?nextFloor->gridIndex:-1,runtime->playerState.redHearts,
                 runtime->playerState.maxRedHearts,runtime->playerState.soulHearts,kills);
+            if(!nextFloor||!(nextFloor->displayFlags&5U)||!runtime->minimaps.maps[0].ready||
+               !runtime->minimaps.maps[1].ready||runtime->minimaps.maps[0].draws.empty()||
+               runtime->minimaps.maps[1].draws.empty()||runtime->minimaps.refreshes!=1){
+                printf("MINIMAP_FLOOR fail stage=%d display=%u ready=%d/%d draws=%u/%u refreshed=%u\n",
+                    runtime->run.context.stage,nextFloor?nextFloor->displayFlags:0,runtime->minimaps.maps[0].ready?1:0,
+                    runtime->minimaps.maps[1].ready?1:0,(unsigned int)runtime->minimaps.maps[0].draws.size(),
+                    (unsigned int)runtime->minimaps.maps[1].draws.size(),runtime->minimaps.refreshes);
+                delete runtime;return 281;
+            }
+            printf("MINIMAP_FLOOR stage=%d grid=%d refreshed=%u discovered=%u small=%.3f,%.3f large=%.3f,%.3f\n",
+                runtime->run.context.stage,runtime->world.currentGrid,runtime->minimaps.refreshes,
+                DiscoveredRoomCount(layout),runtime->minimaps.maps[0].currentMarker.x,runtime->minimaps.maps[0].currentMarker.y,
+                runtime->minimaps.maps[1].currentMarker.x,runtime->minimaps.maps[1].currentMarker.y);
             //Persistence across the floor boundary carries floor, grid, resources
             //and owned inventory (the continue probe owns the item matrix).
             if(!session.SaveContinue("build/gameplay/floor_continue.dat",*runtime)){delete runtime;return 257;}
@@ -794,16 +1273,37 @@ int RunFloorProbe(NativeMt& random,PortFrontend& ui){
         }
         const int next=path[i+1],slot=viaSlot[next];
         if(slot<0||!(live.doors->attached&(1U<<slot))){printf("FLOOR_DOOR missing step=%u slot=%d\n",i,slot);delete runtime;return 260;}
+        int reverse=-1;const NativePlacedRoom* linked=layout.DoorTarget(expected,slot,&reverse);
+        if(!linked||linked->listIndex!=next){delete runtime;return 279;}
+        reverseSlots[next]=reverse;
         NativeDoorActor& door=live.doors->actors[slot];
         if(door.state!=2){printf("FLOOR_DOOR closed step=%u slot=%d state=%d targetType=%d\n",i,slot,door.state,door.targetType);delete runtime;return 261;}
+        printf("FLOOR_CROSS_REQUEST step=%u currentList=%d currentGrid=%d slot=%d targetList=%d storedTarget=%d doorGrid=%d actorTargetGrid=%d\n",
+            i,runtime->world.currentList,runtime->world.currentGrid,slot,next,linked->listIndex,door.grid,door.targetGrid);
         float px,py;if(!room->geometry.Position(door.grid,&px,&py)){delete runtime;return 262;}
         runtime->playerBody.position.x=px+20.0f;runtime->playerBody.position.y=py+20.0f;
         runtime->playerBody.previousPosition=runtime->playerBody.position;runtime->playerBody.velocity.x=runtime->playerBody.velocity.y=0;
         const unsigned int transitions=runtime->roomTransitions;
-        for(int t=0;t<12&&runtime->roomTransitions==transitions;++t)if(!RunProjectileTicks(session,*runtime,-1,-1,1)){delete runtime;return 263;}
+        for(int t=0;t<12&&runtime->roomTransitions==transitions;++t)if(!RunProjectileTicks(session,*runtime,-1,-1,1)){
+            printf("FLOOR_TICK_STOP step=%u prereq=%08x phase=%d update=%08x room=%d clear=%d npc=%d/%d\n",i,
+                runtime->missingNativePrerequisite,runtime->phase,runtime->playerUpdate.address,runtime->world.currentList,
+                room->clear?1:0,room->native12c0,room->native12c4);
+            delete runtime;return 263;}
         if(runtime->roomTransitions==transitions||runtime->world.currentList!=next){
             printf("FLOOR_TRANSITION fail step=%u slot=%d transitions=%u want=%d got=%d\n",i,slot,runtime->roomTransitions,next,runtime->world.currentList);
             delete runtime;return 264;}
+        const NativePlacedRoom* enteredDescriptor=runtime->world.CurrentDescriptor();
+        const NativeMinimap& enteredSmall=runtime->minimaps.maps[0];const NativeMinimap& enteredLarge=runtime->minimaps.maps[1];
+        if(!enteredDescriptor||!(enteredDescriptor->displayFlags&5U)||!enteredSmall.ready||!enteredLarge.ready||
+           enteredSmall.draws.empty()||enteredLarge.draws.empty()){
+            printf("MINIMAP_TRANSITION fail step=%u grid=%d display=%u ready=%d/%d draws=%u/%u\n",i,runtime->world.currentGrid,
+                enteredDescriptor?enteredDescriptor->displayFlags:0,enteredSmall.ready?1:0,enteredLarge.ready?1:0,
+                (unsigned int)enteredSmall.draws.size(),(unsigned int)enteredLarge.draws.size());delete runtime;return 280;
+        }
+        printf("MINIMAP_TRANSITION step=%u fromGrid=%d toGrid=%d refreshed=%u discovered=%u small=%.3f,%.3f large=%.3f,%.3f\n",
+            i,descriptor->gridIndex,runtime->world.currentGrid,runtime->minimaps.refreshes,
+            DiscoveredRoomCount(layout),enteredSmall.currentMarker.x,enteredSmall.currentMarker.y,
+            enteredLarge.currentMarker.x,enteredLarge.currentMarker.y);
     }
     delete runtime;return 265;
 }
@@ -880,9 +1380,18 @@ int RunStatProbe(NativeMt& random,PortFrontend& ui){
     if(start.result!=NPS_WORLD_PENDING){printf("HARD start=%d\n",start.result);delete runtime;return 100;}
     if(!AdvanceToBoundary(session,*runtime)||runtime->phase!=PNR_READY){printf("HARD advance phase=%d prereq=%08x\n",runtime->phase,runtime->missingNativePrerequisite);delete runtime;return 101;}
     if(!RunProjectileTicks(session,*runtime,-1,-1,2)){delete runtime;return 102;}
-    printf("HARD mode=%d phase=%d player=%d hp=%d/%d slots=%d\n",runtime->run.player.mode,runtime->phase,
+    if(!session.SaveNativeContinue("build/gameplay/hard_gamestate.dat",*runtime)){delete runtime;return 103;}
+    PortFrontend resumedUi;resumedUi.Init(false);
+    if(!resumedUi.BindSaveDirectory("build/gameplay/")||resumedUi.music.currentTrack!=0){delete runtime;return 103;}
+    PortNormalRuntime resumed;NativeMt resumedRandom;resumedRandom.Seed(778);
+    NativeSceneFiles resumedFiles={"runtime/game/file_index.bin","runtime/game/",1,2,0};
+    if(!PortGameSession(resumedRandom,resumedUi).ContinueNativeSave("build/gameplay/hard_gamestate.dat",resumed,resumedFiles,0)||
+       resumed.phase!=PNR_READY||resumed.run.context.nativeMode!=1||resumed.run.player.mode!=1||resumedFiles.nativeMode!=1||
+       resumedUi.music.currentTrack==0||resumedUi.music.currentTrack==64||resumedUi.music.currentTrack==95||
+       resumedUi.music.native364!=-100){delete runtime;return 104;}
+    printf("HARD mode=%d phase=%d player=%d hp=%d/%d slots=%d savedMode=%d\n",runtime->run.player.mode,runtime->phase,
         runtime->playerState.playerType,runtime->playerState.redHearts,runtime->playerState.maxRedHearts,
-        (int)runtime->playerState.collectibleCounts.size());
+        (int)runtime->playerState.collectibleCounts.size(),resumed.run.context.nativeMode);
     delete runtime;return 0;
 }int RunCharacterMatrixProbe(NativeMt& random,PortFrontend& ui){
     (void)random;(void)ui;
@@ -1116,5 +1625,9 @@ int main(int argc,char** argv){
     if(!failed){int greed=RunGreedProbe(random,ui);if(greed){printf("GREED_RESULT failed=%d\n",greed);failed=true;}}
     if(!failed){int chars=RunCharacterMatrixProbe(random,ui);if(chars){printf("CHARACTER_RESULT failed=%d\n",chars);failed=true;}}
     if(!failed){int death=RunDeathProbe(random,ui);if(death){printf("DEATH_RESULT failed=%d\n",death);failed=true;}}
+    if(!failed){int pickup=RunGeneratedPickupProbe(random,ui);if(pickup){printf("GENERATED_PICKUP_RESULT failed=%d\n",pickup);failed=true;}}
+    if(!failed){int codec=RunNativePickupCodecProbe(random,ui);if(codec){printf("CODEC_FIXTURE_RESULT failed=%d\n",codec);failed=true;}}
+    if(!failed){int restart=RunPendingRestartProbe(random,ui);if(restart){printf("PENDING_RESTART_RESULT failed=%d\n",restart);failed=true;}}
+    if(!failed){int selectedIntent=RunSelectedRunIntentProbe();if(selectedIntent){printf("SELECTED_RUN_INTENT_RESULT failed=%d\n",selectedIntent);failed=true;}}
     delete runtime;return failed?5:0;
 }

@@ -10,7 +10,7 @@ struct NativeDoorActor {
     //door behavior are separate services, not an accepted complete grid actor.
     int grid,slot,direction,type,variant,state,auxiliary;
     int sourceType,targetType,targetGrid,previousState,previousVariant;
-    unsigned int seed,initializations,spawnFrame,flags;
+    unsigned int seed,initializations,spawnFrame,flags,tail;
     NativeRng local;
     float x,y,rotation,overlayRotation;
     bool initialized,native278,native279,native27a;
@@ -21,8 +21,9 @@ struct NativeDoorSet {
     NativeDoorActor actors[8];
 };
 enum NativeDoorResult { NDR_OK,NDR_BAD_REQUEST,NDR_ALREADY_ATTACHED,NDR_MISSING_TARGET };
-//0079c7b0/006cbe50: one global MT value per initialized door, even when a
-//saved grid door object is reused. Attached slots return before any draw.
+//Fresh 0079c7b0/006cbe50 assigns one global MT value. The saved-grid path
+//constructs the same common door after copying its serialized seed, so it
+//must not replay that fresh assignment. Attached slots return before any work.
 NativeDoorResult NativeCreateDoor(int slot,int grid,unsigned int frame,NativeMt&,NativeDoorSet*,const NativeDoorActor* savedGridDoor=0);
 bool NativeInitDoorSet(int shape,const NativeRoomGrid&,unsigned int allowed,unsigned int frame,NativeMt&,NativeDoorSet*);
 //006cbe50 reset only; the room's post-construction virtual+4 dispatch is

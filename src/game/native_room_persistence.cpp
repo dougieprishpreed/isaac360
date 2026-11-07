@@ -22,26 +22,56 @@ bool Ambient(const NativeRoomEffect& effect,NativePersistentFields& f){
     f.Unwritten(0x64,4); //No fresh common-record store in79d7b6..838.
     f.Put(0,b.type);f.Put(4,b.variant);f.Put(8,b.subtype);
     f.Put(0x28,FloatBits(b.position.x));f.Put(0x2c,FloatBits(b.position.y));
-    f.Put(0x34,b.initialSeed);f.Put(0x38,b.random.state);f.Put(0x3c,b.native34);f.Put(0x40,b.native38);f.Put(0x20,b.frameCount,2);
+    //79d150 MOVSXes serialized word+20 into entity+27c. Entity+24/frameCount
+    //is a different 66f544/674ef3 owner and is not serialized by this word.
+    f.Put(0x20,(unsigned int)((unsigned int)b.native27c&0xffffU),2);
+    f.Put(0x34,b.initialSeed);f.Put(0x38,b.random.state);f.Put(0x3c,b.native34);f.Put(0x40,b.native38);
     //79cf73's special effect payload applies to116/120/159/39. These three
     //admitted ambient variants use only the common record above.
+    return true;
+}
+bool Pickup(const NativePickup& pickup,NativePersistentFields& f){
+    //79cb60's common type5 branch is variant-agnostic. The key30/bomb40 path
+    //was the first reached owner; created clear rewards (card/trinket/chest/
+    //pill/battery/grab bag) carry the same 82-byte common record. Reject only
+    //the variant100-style extra/child payload until those child services exist.
+    if(!pickup.ready||pickup.collected||pickup.type!=5||pickup.grid<0||
+       pickup.nativeExtraCount||pickup.nativeChildCount)return false;
+    //79cb60's reached type5 branch through79d093, emitted by90c0c0. Every
+    //value here is an explicit live owner established by0066e910,
+    //0066f440 or006a1900; no unknown member is zero-filled by the writer.
+    f.Put(0x00,5);f.Put(0x04,pickup.variant);f.Put(0x08,pickup.subtype);
+    f.Put(0x0c,pickup.grid);f.Put(0x10,pickup.native46c);f.Put(0x14,pickup.native478);
+    f.Put(0x18,pickup.native480);f.Put(0x1c,pickup.native484);
+    f.Put(0x20,pickup.native27c,2);f.Put(0x22,pickup.native474,1);f.Put(0x23,pickup.native476,1);
+    f.Put(0x24,pickup.native4cc);f.Put(0x28,FloatBits(pickup.position.x));
+    f.Put(0x2c,FloatBits(pickup.position.y));f.Put(0x30,pickup.native470);
+    f.Put(0x34,pickup.currentSeed);f.Put(0x38,pickup.initialSeed);
+    f.Put(0x3c,pickup.native34);f.Put(0x40,pickup.native38);
+    f.Put(0x44,pickup.native360);
+    //entity+d8 is inside the00402360 subobject initialized at00402f24.
+    f.Put(0x48,FloatBits(pickup.nativeD8));f.Put(0x4c,pickup.native4e0);
+    f.Put(0x50,(unsigned int)pickup.native47c,1);f.Put(0x54,pickup.nativeExtraCount);
+    f.Put(0x5c,pickup.nativeChildCount);
     return true;
 }
 }
 bool NativeRoomPersistent::CaptureInitial(const NativeRoomState& room,const NativeWorldResident& live,const NativePlacedRoom& descriptor,unsigned int* next){
     if(next)*next=0x79d610;
     if(room.native6f60>0||!descriptor.visitedCount||descriptor.gridIndex==-3||!(descriptor.flags&1)||
-       !live.effects||!live.doors||!live.gridPostConstructed||room.native11ec||room.geometry.cells<1)return false;
+       !live.effects||(!live.doors&&descriptor.doors)||!live.gridPostConstructed||room.native11ec||
+       room.geometry.cells<1)return false;
     //79d700 clears the actual descriptor's saved entity vector. Every cell
     //gets its live grid record or79d73a's empty record, in native cell order.
     std::vector<NativePersistentFields> newGrids(defaultGridCount),newEntities;
     for(unsigned int cell=0;cell<defaultGridCount;++cell)Grid(newGrids[cell],0,0,0,0,0x16a9de81U,0,false,0x16a9de81U);
     for(int cell=0;cell<room.geometry.cells;++cell){NativePersistentFields& f=newGrids[cell];bool found=false;
-        for(int slot=0;slot<8;++slot)if((live.doors->attached&(1U<<slot))&&live.doors->actors[slot].grid==cell){
-            const NativeDoorActor& d=live.doors->actors[slot];Grid(f,d.type,d.variant,d.state,d.initializations,d.seed,d.auxiliary,d.initialized,0x16a9de81U);found=true;break;}
+        for(int slot=0;slot<8&&live.doors;++slot)if((live.doors->attached&(1U<<slot))&&live.doors->actors[slot].grid==cell){
+            const NativeDoorActor& d=live.doors->actors[slot];Grid(f,d.type,d.variant,d.state,d.initializations,d.seed,d.auxiliary,d.initialized,d.tail);found=true;break;}
         if(found)continue;
         for(int i=0;i<room.staticGridCount;++i)if(room.staticGrids[i].grid==cell){const NativeStaticGrid& g=room.staticGrids[i];
-            Grid(f,g.type,g.variant,g.state,g.initializations,g.seed,g.native18,g.initialized,g.native20);found=true;break;}
+            if(!g.nativeType){if(next)*next=0x79d610;return false;}
+            Grid(f,g.nativeType,g.variant,g.state,g.initializations,g.seed,g.native18,g.initialized,g.native20);found=true;break;}
         if(found)continue;
         for(int i=0;i<room.decorationCount;++i)if(room.decorations[i].cell==cell){const NativeDecoration& d=room.decorations[i];
             Grid(f,1,d.variant,0,1,d.initialSeed,0,true,0x16a9de81U);found=true;break;}
@@ -55,6 +85,9 @@ bool NativeRoomPersistent::CaptureInitial(const NativeRoomState& room,const Nati
     for(unsigned int i=0;i<live.effects->entities.size();++i){const NativeRoomEffect& e=*live.effects->entities[i];
         if(e.body.removed||(e.body.flagsHigh&0x20)||e.body.childToken)continue;
         NativePersistentFields f;if(!Ambient(e,f)){if(next)*next=0x79cb60;return false;}newEntities.push_back(f);}
+    for(int i=0;i<live.pickups.count;++i){const NativePickup* p=live.pickups.entries[i];
+        if(!p||!p->ready||p->collected)continue;
+        NativePersistentFields f;if(!Pickup(*p,f)){if(next)*next=0x79cb60;return false;}newEntities.push_back(f);}
     grids.swap(newGrids);entities.swap(newEntities);captured=true;if(next)*next=0;return true;
 }
 bool NativeWorld::CaptureInitialRoom(unsigned int* next){

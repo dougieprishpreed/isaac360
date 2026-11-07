@@ -21,8 +21,11 @@ struct NativeSpawnPlan {
 // still draw. Main actor/grid construction and saved skip cells are separate.
 // All prepared records fit448 choices. Capacity errors never truncate a plan.
 NativeRoomSpawnResult NativePlanRoomSpawns(const RoomRecord& room,const NativeRoomSeeds& seeds,NativeSpawnPlan* output);
-// Ordinary backdrop1 decoration: native grid includes the one-cell border.
-// Local5/9/7 seed is descriptor.spawn + grid; no room/global owner advances.
-bool NativeBasementDecoration(unsigned int spawnSeed,int grid,unsigned int* seed,int* animation);
-bool NativeBasementDecoration(unsigned int spawnSeed,const NativeRoomGrid& geometry,int grid,unsigned int* seed,int* animation);
+// Ordinary room decoration owned by the backdrop's props animation set. The
+// native grid includes the one-cell border. Local5/9/7 seed is
+// descriptor.spawn + grid; no room/global owner advances. Count0 means the
+// backdrop has no inherited props set and cannot own decoration records.
+int NativeDecorationAnimationCount(int backdrop);
+bool NativeRoomDecoration(unsigned int spawnSeed,const NativeRoomGrid& geometry,int grid,
+                          int backdrop,unsigned int* seed,int* animation);
 #endif

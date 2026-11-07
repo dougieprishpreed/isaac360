@@ -10,6 +10,7 @@ class GpcResourceIndex {
     std::map<uint64_t,size_t> effective;
 public:
     GpcResult Load(FILE* stream);
+    GpcResult LoadBytes(const unsigned char* data,size_t size);
     GpcResult FindHashes(uint32_t a,uint32_t b,GpcEntry* output) const;
     GpcResult FindOriginal(const char* relativeName,GpcEntry* output) const;
     size_t Count() const {return entries.size();}

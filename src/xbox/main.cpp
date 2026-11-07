@@ -702,23 +702,39 @@ VOID __cdecl main() {
             static unsigned int actionFrameNumber=0;
             NativeActionFrame actionFrame;NativeFrameActions frameActions(actionFrame);
             BuildActions(p,++actionFrameNumber,&actionFrame);
-            //Native profile disk format and complete run persistence remain open.
-            if(action==UI_SELECT_SLOT){gUi.profile=gProfiles[gUi.selectedSlot];gUi.SlotLoaded(true,false);}
-            if(action==UI_DELETE_SLOT){ZeroMemory(&gProfiles[gUi.selectedSlot],sizeof(NativeProfile));gUi.SlotDeleted(true);}
+            //Native profile disk format remains open. The selected slot owns
+            //the native run filename; New Run and Continue are separate intents.
+            if(action==UI_SELECT_SLOT){
+                std::string primary,rerun;bool resume=false;
+                if(gUi.LocalRunFilenames(&primary,&rerun)){
+                    FILE* nativeRun=fopen(primary.c_str(),"rb");
+                    if(nativeRun){resume=true;fclose(nativeRun);}
+                }
+                gUi.profile=gProfiles[gUi.selectedSlot];gUi.SlotLoaded(true,resume);
+            }
+            if(action==UI_DELETE_SLOT){
+                std::string primary,rerun;
+                if(gUi.LocalRunFilenames(&primary,&rerun)){remove(primary.c_str());remove(rerun.c_str());}
+                ZeroMemory(&gProfiles[gUi.selectedSlot],sizeof(NativeProfile));gUi.SlotDeleted(true);
+            }
+            if(action==UI_CONTINUE_RUN){
+                NativeSceneFiles continueFiles={"game:\\game\\file_index.bin","game:\\game\\",1,2,0};
+                //The cold controller/player-token owners match the reached
+                //restored ordinary player. Continue consumes the same complete
+                //frame; the next loop rebuilds it with the restored identity.
+                std::string continuePrimary,continueRerun;
+                if(gUi.LocalRunFilenames(&continuePrimary,&continueRerun))
+                    Log("PORT native continue path=%s",continuePrimary.c_str());
+                if(PortGameSession(gMenuRandom,gUi).ContinueSelectedNativeRun(gNormalRuntime,continueFiles,&frameActions))
+                    Log("PORT native continue slot=%d seed=%u",gUi.selectedSlot,gNormalRuntime.run.seeds.start);
+                else Log("PORT native continue failed slot=%d phase=%d prereq=%08x entry=%d source=%d next=%08x",
+                    gUi.selectedSlot,gNormalRuntime.phase,gNormalRuntime.missingNativePrerequisite,
+                    gNormalRuntime.entryIssue.result,gNormalRuntime.entryIssue.source,gNormalRuntime.entryIssue.nativeNext);
+                continue;
+            }
             if(action==UI_START_CHARACTER){unsigned int runSeed=0;
-                NativeSceneFiles continueFiles={"game:\\game\\file_index.bin","game:\\game\\",1,gNormalRuntime.run.context.nativeMode,0};
-                FILE* nativeContinue=fopen("game:\\profile\\gamestate1.dat","rb");
-                if(nativeContinue){fclose(nativeContinue);
-                    if(PortGameSession(gMenuRandom,gUi).ContinueNativeSave("game:\\profile\\gamestate1.dat",gNormalRuntime,continueFiles,&frameActions))
-                        Log("PORT native continue seed=%u",gNormalRuntime.run.seeds.start);
-                    else Log("PORT native continue failed");
-                    continue;}
-                FILE* continueFile=fopen("game:\\continue.dat","rb");
-                if(continueFile){fclose(continueFile);
-                    if(PortGameSession(gMenuRandom,gUi).ContinueSavedRun("game:\\continue.dat",gNormalRuntime,continueFiles,&frameActions))
-                        Log("PORT continue stage=%d room=%d",gNormalRuntime.run.context.stage,gNormalRuntime.world.currentList);
-                    else Log("PORT continue failed");
-                    continue;}
+                //UI_START_CHARACTER is always a selected fresh New Run. Existing
+                //valid or invalid native files are consumed only by Continue.
                 
                 //Optional local QA seed; absent in ordinary release layouts.
                 FILE* seedFile=fopen("game:\\port\\target_seed.txt","rb");
@@ -740,9 +756,8 @@ VOID __cdecl main() {
                 if(gNormalRuntime.tickFrame>lastContinueSave+300){
                     lastContinueSave=gNormalRuntime.tickFrame;
                     PortGameSession saver(gMenuRandom,gUi);
-                    const bool nativeSaved=saver.SaveNativeContinue("game:\\profile\\gamestate1.dat",gNormalRuntime);
-                    const bool maintainedSaved=saver.SaveContinue("game:\\continue.dat",gNormalRuntime);
-                    Log("PORT autosave native=%d maintained=%d",nativeSaved?1:0,maintainedSaved?1:0);
+                    const bool nativeSaved=saver.SaveSelectedNativeContinue(gNormalRuntime);
+                    Log("PORT autosave native=%d slot=%d",nativeSaved?1:0,gUi.selectedSlot);
                 }
                 static bool readyLogged=false;
                 if(!readyLogged){NativeWorldResident& first=gNormalRuntime.world.resident[gNormalRuntime.world.currentList];

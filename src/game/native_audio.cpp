@@ -1,4 +1,5 @@
 #include "native_audio.h"
+#include "../content/port_data.h"
 #include <algorithm>
 #include <map>
 #include <math.h>
@@ -19,9 +20,6 @@ void JoinAssetPath(std::string& out,const std::string& root,const std::string& r
     out=root;
     if(!out.empty()&&out[out.size()-1]!='/'&&out[out.size()-1]!='\\')out+='/';
     out+=relative;
-#ifdef _XBOX
-    for(unsigned int i=0;i<out.size();++i)if(out[i]=='/')out[i]='\\';
-#endif
 }
 
 struct WavInfo {
@@ -30,19 +28,19 @@ struct WavInfo {
     WavInfo():format(0),channels(0),bits(0),rate(0),dataOffset(0),dataBytes(0){}
 };
 
-bool ReadWavInfo(FILE* file,WavInfo* info){
-    if(!file||!info)return false;
+bool ReadWavInfo(PortDataStream& file,WavInfo* info){
+    if(!file.IsOpen()||!info)return false;
     unsigned char header[12];
-    if(fread(header,1,12,file)!=12||memcmp(header,"RIFF",4)!=0||memcmp(header+8,"WAVE",4)!=0)return false;
+    if(file.Read(header,12)!=12||memcmp(header,"RIFF",4)!=0||memcmp(header+8,"WAVE",4)!=0)return false;
     bool haveFormat=false,haveData=false;
     for(int guard=0;guard<64&&!(haveFormat&&haveData);++guard){
         unsigned char chunk[8];
-        if(fread(chunk,1,8,file)!=8)return false;
+        if(file.Read(chunk,8)!=8)return false;
         const unsigned int size=LE32(chunk+4);
         if(memcmp(chunk,"fmt ",4)==0){
             if(size<16||size>256)return false;
             unsigned char fmt[256];
-            if(fread(fmt,1,size,file)!=size)return false;
+            if(file.Read(fmt,size)!=size)return false;
             info->format=(int)LE16(fmt);
             info->channels=(int)LE16(fmt+2);
             info->rate=(int)LE32(fmt+4);
@@ -53,13 +51,13 @@ bool ReadWavInfo(FILE* file,WavInfo* info){
             }
             haveFormat=true;
         }else if(memcmp(chunk,"data",4)==0){
-            info->dataOffset=(unsigned int)ftell(file);
+            info->dataOffset=file.Tell();
             info->dataBytes=size;
             haveData=true;
             if(size&1U)++info->dataBytes;
             break;
         }else{
-            if(fseek(file,(long)(size+(size&1U)),SEEK_CUR)!=0)return false;
+            if(!file.Skip(size+(size&1U)))return false;
         }
     }
     if(!haveFormat||!haveData)return false;
@@ -83,13 +81,12 @@ struct NativeSoundClip {
 
 bool LoadClip(const std::string& path,NativeSoundClip* clip){
     if(!clip)return false;
-    FILE* file=fopen(path.c_str(),"rb");if(!file)return false;
+    PortDataStream file;if(!file.Open(path.c_str()))return false;
     WavInfo info;
-    if(!ReadWavInfo(file,&info)||info.dataBytes>32U*1024U*1024U){fclose(file);return false;}
+    if(!ReadWavInfo(file,&info)||info.dataBytes>32U*1024U*1024U)return false;
     std::vector<unsigned char> data(info.dataBytes);
-    if(fseek(file,(long)info.dataOffset,SEEK_SET)!=0||
-       fread(&data[0],1,info.dataBytes,file)!=info.dataBytes){fclose(file);return false;}
-    fclose(file);
+    if(!file.Seek(info.dataOffset)||file.Read(&data[0],info.dataBytes)!=info.dataBytes)return false;
+    file.Close();
     const int bytes=info.bits/8;
     const int sourceFrames=(int)(info.dataBytes/(unsigned int)(info.channels*bytes));
     if(sourceFrames<=0)return false;
@@ -115,26 +112,26 @@ bool LoadClip(const std::string& path,NativeSoundClip* clip){
 }
 
 struct WavStream {
-    FILE* file;
+    PortDataStream file;
     WavInfo info;
     unsigned int positionBytes;
     bool loop;
     unsigned int loops;
     std::vector<unsigned char> readBuffer;
-    WavStream():file(0),positionBytes(0),loop(false),loops(0){}
+    WavStream():positionBytes(0),loop(false),loops(0){}
     ~WavStream(){Close();}
-    void Close(){if(file){fclose(file);file=0;}positionBytes=0;}
+    void Close(){file.Close();positionBytes=0;}
     bool Open(const std::string& path,int rate){
         Close();
-        file=fopen(path.c_str(),"rb");if(!file)return false;
+        if(!file.Open(path.c_str()))return false;
         if(!ReadWavInfo(file,&info)||info.rate!=rate||info.channels<1||info.channels>2||info.bits!=16){
             Close();return false;
         }
-        if(fseek(file,(long)info.dataOffset,SEEK_SET)!=0){Close();return false;}
+        if(!file.Seek(info.dataOffset)){Close();return false;}
         positionBytes=0;readBuffer.resize(4096);return true;
     }
     int Read(short* output,int frames){
-        if(!file||!output||frames<=0)return 0;
+        if(!file.IsOpen()||!output||frames<=0)return 0;
         for(int i=0;i<frames*kEngineChannels;++i)output[i]=0;
         int produced=0;
         const int frameBytes=info.channels*2;
@@ -144,13 +141,13 @@ struct WavStream {
             int available=(int)(remainingBytes/(unsigned int)frameBytes);
             if(available<=0){
                 if(!loop)break;
-                if(fseek(file,(long)info.dataOffset,SEEK_SET)!=0)break;
+                if(!file.Seek(info.dataOffset))break;
                 positionBytes=0;++loops;continue;
             }
             int take=frames-produced;if(take>available)take=available;
             const size_t bytesNeeded=(size_t)take*frameBytes;
             if(readBuffer.size()<bytesNeeded)readBuffer.resize(bytesNeeded);
-            if(fread(&readBuffer[0],1,bytesNeeded,file)!=bytesNeeded)break;
+            if(file.Read(&readBuffer[0],(unsigned int)bytesNeeded)!=bytesNeeded)break;
             for(int i=0;i<take;++i){
                 const unsigned char* at=&readBuffer[(size_t)i*frameBytes];
                 if(info.channels==1){

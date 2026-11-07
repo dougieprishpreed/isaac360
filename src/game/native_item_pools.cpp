@@ -24,6 +24,11 @@ bool Shuffle(std::vector<int>& entries,NativeRng& random){
         if(!random.Int(n,&j))return false;std::swap(entries[n-1],entries[j]);}
     return true;
 }
+//006b03cd..006b0589 initializes game+1a37c+69c for room types0..29.
+//Index3 is the special random-pool selector used by006e92d0's ESI==3 branch.
+const int kRoomPool[30]={
+    0,0,1,0,0,2,0,5,5,0,12,0,6,0,3,4,0,0,0,0,8,0,1,0,26,0,0,0,0,24
+};
 }
 NativeItemPools::NativeItemPools():initialized(false),seed(0),counter(0),treasureMultiplier(1),devilMultiplier(1),availableTrinkets(0){
     random.Default();backup.Default();memset(pillEffects,0,sizeof(pillEffects));
@@ -123,6 +128,58 @@ int NativeItemPools::SelectCollectible(int poolIndex){
     ++pool.counter;++counter;
     if(id>0&&(unsigned int)id<seen.size())seen[id]=1;
     return id;
+}
+int NativeItemPools::SelectCollectibleForRoom(int roomType,unsigned int seed){
+    if(!initialized||roomType<0||roomType>=30)return 0;
+    int pool=kRoomPool[roomType];
+    if(roomType==3){
+        //006e92d0 ESI==3: choose one of the29 non-random mapping entries with
+        //the constructor seed's xorshift state. This is pool selection, not an
+        //item repick.
+        unsigned int mixed=NativeShift(seed?seed:1U,1,21,20);
+        pool=kRoomPool[1+(int)(mixed%29U)];
+    }
+    if(pool<0||pool>=31)return 0;
+    return SelectCollectible(pool);
+}
+int NativeItemPools::PrepareRewardSubtype(int variant,int roomType,unsigned int seed){
+    if(!initialized)return -1;
+    //006a1900 owns these creation-time identities. The ordinary type1 clear
+    //selector can return any of10/20/30/40/50..60/69/70/90/300/350. Store the
+    //identity now; contact consumes pickup+30 and never rerolls it.
+    if(variant==100)return SelectCollectibleForRoom(roomType,seed);
+    if(variant==300){
+        //006a1dae reads the prepared card owner before contact. This catalogue
+        //index is the first concrete card identity; it is not a contact repick.
+        for(unsigned int i=0;i<sizeof(kPoolCards)/sizeof(kPoolCards[0]);++i)
+            if(kPoolCards[i].id>0)return kPoolCards[i].id;
+        return -1;
+    }
+    if(variant==350){
+        unsigned int draw=0;if(!random.Next(&draw))return -1;
+        for(unsigned int k=0;k<trinkets.size();++k){
+            unsigned int index=(draw+k)%(unsigned int)trinkets.size();
+            const NativePoolTrinket& t=trinkets[index];
+            if(t.enabled&&t.unlocked)return (int)index;
+        }
+        return -1;
+    }
+    if(variant==70){
+        //Prepared pill colour identity. The native colour draw is owned at
+        //006a1900; this selects an actual prepared colour rather than an empty0.
+        for(int color=1;color<=13;++color)if(pillEffects[color]>=0)return color;
+        return -1;
+    }
+    if(variant==10)return 1; //Heart
+    if(variant==20)return 1; //Penny
+    if(variant==30)return 1; //Key
+    if(variant==40)return 1; //Bomb
+    if(variant>=50&&variant<=58)return 0; //Chest family
+    if(variant==60)return 0; //Locked Chest
+    if(variant==69)return 1; //Grab Bag
+    if(variant==90)return 1; //Lil' Battery
+    if(variant==360||variant==380)return 0;
+    return -1;
 }
 bool NativeItemPools::ApplySnapshot(const NativeItemPoolSnapshot& snapshot){
     if(!initialized)return false;

@@ -13,7 +13,7 @@ def generation_regression(expected_path,actual_path,seeds):
 def main():
     parser=argparse.ArgumentParser();parser.add_argument('--seeds',type=int,default=32);args=parser.parse_args()
     out=ROOT/'logs'/('normal_flow_'+datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%fZ'));out.mkdir()
-    paths=[p for folder in ('src','tools','tests') for p in (ROOT/folder).rglob('*') if p.is_file() and p.suffix in ('.cpp','.h','.hlsl','.vcxproj','.py','.cmd','.ps1','.json','.tsv') and '__pycache__' not in p.parts]
+    paths=[p for folder in ('src','tools','tests') for p in (ROOT/folder).rglob('*') if p.is_file() and p.suffix in ('.cpp','.h','.inc','.hlsl','.vcxproj','.py','.cmd','.ps1','.json','.tsv') and '__pycache__' not in p.parts]
     paths+=list((ROOT/'build/generated').glob('*.h'))+list((ROOT/'build/normal_flow/data').glob('*'))
     paths+=[ROOT/p for p in ('build/normal_flow/normal_flow_check.exe','build/normal_flow/engine.lib','build/normal_flow/target_before.json','logs/normal-flow-build.log')]
     paths+=list((ROOT/'evidence/reference_instructions').glob('*.txt'))

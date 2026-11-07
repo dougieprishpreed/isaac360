@@ -25,7 +25,11 @@ NativeWorldResult NativeWorld::ContinueInitialRoom(NormalRunFlow& run,const Nati
     //Reached ordinary New Run. The original descriptor lists for saved grids,
     //entities and particles are empty at placement. Main-pass construction has
     //not admitted any live-actor factory. Unsupported candidates stop there.
-    if(!live.roomInitAddress)live.roomInitAddress=0x7a16e4;
+    //A serialized resident follows7a1130's saved-grid branch: it skips the
+    //preliminary construction gate and grid factories already applied by
+    //NativeWorld::Enter, then resumes the ordinary post-init continuation.
+    const bool restored=RestoredRoom(currentList)!=0;
+    if(!live.roomInitAddress)live.roomInitAddress=restored?0x7a1f99:0x7a16e4;
     if(live.roomInitAddress==0x7a16e4){
         if(p->visitedCount||!run.levelSeed)return NWR_BAD_REQUEST;
         live.tintedRockGrid=-1;live.tintedRockRoom=-1;
@@ -55,6 +59,24 @@ NativeWorldResult NativeWorld::ContinueInitialRoom(NormalRunFlow& run,const Nati
         //teleport destinations to -99999, so6f6100 cannot select this room.
         live.roomInitAddress=0x7a20f0;
     }
+    if(live.roomInitAddress==0x7a1f99){
+        const NativeSaveSummary::SavedRoom* saved=RestoredRoom(currentList);
+        if(!saved||!live.effects){*next=0x79daf0;return NWR_CONSTRUCTION_GAP;}
+        if(!live.savedActorsRestored){
+            for(unsigned int i=0;i<saved->entities.size();++i){
+                const NativeSaveSummary::Entity& entity=saved->entities[i];
+                if(entity.fields[0x00]==5)continue;
+                if(!live.effects->RestoreSaved(entity.fields,*room,body,player,live.configStage,live.backdrop,
+                    manager,global,0,next)){
+                    live.restoreAddress=*next;return NWR_CONSTRUCTION_GAP;}
+            }
+            live.savedActorsRestored=true;
+        }
+        //79dab0 consumes the descriptor's saved entity vector. A restored
+        //resident therefore resumes at7a20f0 without replaying the fresh
+        //ambient group lottery and factories at7a2e18/7a300e.
+        live.roomInitAddress=0x7a20f0;
+    }
     if(live.roomInitAddress==0x7a20f0){
         //Reached manager inventory queries in original order.
         //Post-generation starting grants have not run yet (6b4b88).
@@ -66,11 +88,14 @@ NativeWorldResult NativeWorld::ContinueInitialRoom(NormalRunFlow& run,const Nati
         if(run.context.challenge||(run.runFlagsHigh&0x10000U)){*next=0x7a2bbe;return NWR_CONSTRUCTION_GAP;}
         room->native1210=0; //7a2cc3, before the ambient-selection owner.
         live.update->active=true; //7a2ccd.
-        //7a2e18 retains descriptor+5c (award) in a separate local
-        //5/9/7 owner. One advance precedes the optional ambient-effect branch.
-        live.roomInitRandom.Set(p->seeds.award,35);unsigned int value;
-        if(!live.roomInitRandom.Next(&value))return NWR_BAD_REQUEST;
-        live.roomInitAddress=(value&1)?0x7a3b8a:0x7a300e;
+        if(restored)live.roomInitAddress=0x7a3b8a;
+        else {
+            //7a2e18 retains descriptor+5c (award) in a separate local
+            //5/9/7 owner. One advance precedes the optional ambient group.
+            live.roomInitRandom.Set(p->seeds.award,35);unsigned int value;
+            if(!live.roomInitRandom.Next(&value))return NWR_BAD_REQUEST;
+            live.roomInitAddress=(value&1)?0x7a3b8a:0x7a300e;
+        }
     }
     if(live.roomInitAddress==0x7a300e){
         if(!Absent(player,148)||!Absent(player,234)){*next=0x7a302a;return NWR_CONSTRUCTION_GAP;}

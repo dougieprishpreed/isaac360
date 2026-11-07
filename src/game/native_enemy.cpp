@@ -21,12 +21,13 @@ void MoveBody(const NativeRoomState& room,NativeEntityBody& body,float vx,float 
     if(Passable(room,body.position.x,body.position.y+vy)){body.position.y+=vy;}
 }
 }
-NativeEnemy::NativeEnemy():ready(false),dead(false),type(0),seed(0){}
-bool NativeEnemy::Begin(int type,int variant,unsigned int seed,const NativePoint& position,unsigned int frame,int stage){
-    if(!NativePreparedEnemyBody(type,variant)||!seed)return false;
+NativeEnemy::NativeEnemy():ready(false),dead(false),participates(true),type(0),seed(0){}
+bool NativeEnemy::Begin(int type,int variant,int subtype,unsigned int seed,const NativePoint& position,unsigned int frame,int stage){
+    if(!NativePreparedEnemyBody(type,variant)||subtype<0||!seed)return false;
     NativeEntityBody next;
-    if(next.BeginFresh(type,variant,0,seed,frame,stage,&position)!=NEB_OK)return false;
-    body.Swap(next);this->type=type;this->seed=seed;dead=false;ready=true;return true;
+    if(next.BeginFresh(type,variant,subtype,seed,frame,stage,&position)!=NEB_OK)return false;
+    body.Swap(next);this->type=type;this->seed=seed;dead=false;ready=true;
+    participates=!NativeNonCombatEntityType(type,variant);return true;
 }
 void NativeEnemy::Update(const NativeRoomState& room,const NativeEntityBody& player,NativeEnemyShotSystem* shots){
     if(!ready||dead||body.removed||!player.ready)return;
@@ -37,7 +38,7 @@ void NativeEnemy::Update(const NativeRoomState& room,const NativeEntityBody& pla
     const int phase=(int)body.time;
     const unsigned int salt=seed&63U;
     float vx=0.0f,vy=0.0f;
-    if(type==13||type==18||type==25||type==61||type==240||type==242||type==248||type==38||type==90||type==91||type==92||type==93||type==212||type==219||type==254||(type==260&&body.variant==10)||type==213||type==223||type==246||type==258||type==288||type==83||type==868||type==58||type==60||(type==229&&body.variant==1)||type==286||type==859||type==285||type==259||type==816||type==225||type==279){
+    if(type==13||type==18||type==25||type==61||type==240||type==242||type==248||type==38||type==90||type==91||type==92||type==93||type==212||type==219||type==254||(type==260&&body.variant==10)||type==213||type==223||type==246||type==258||type==288||type==83||type==868||type==58||type==60||(type==229&&body.variant==1)||type==286||type==859||type==285||type==259||type==816||type==225||type==279||type==222||type==214||type==249||type==281){
         //Fly: fast erratic drift with a per-entity phase offset.
         const float wobble=sinf(phase*0.45f+(float)salt*0.19f);
         const float sway=cosf(phase*0.37f+(float)salt*0.11f);
@@ -369,6 +370,70 @@ void NativeEnemy::Update(const NativeRoomState& room,const NativeEntityBody& pla
     }else if(type==33||type==235||type==42||type==80||type==205||type==202||type==236||type==306||type==203||type==291||type==833){
         //Fireplace: stationary environmental hazard.
         vx=0.0f;vy=0.0f;
+    }else if(type==271||type==272){
+        //Uriel/Gabriel: floating boss with a slow approach and a spread.
+        const bool fallen=body.variant==1;
+        vx=dx*(fallen?0.42f:0.34f);vy=dy*(fallen?0.42f:0.34f);
+        const int cycle=phase%150;
+        if(shots&&distance<600.0f&&cycle==90){
+            const float px=-dy,py=dx;
+            for(int k=-2;k<=2;++k){
+                NativePoint origin={body.position.x+dx*26.0f,body.position.y+dy*26.0f};
+                shots->Fire(origin,dx*3.0f+px*(float)k*0.75f,dy*3.0f+py*(float)k*0.75f,1.0f,8.0f,300,body.entityToken);
+            }
+        }
+    }else if(type==274){
+        //Mega Satan's head: stationary with a radial hostile burst. The hands
+        //remain inert prepared actors until their own lifecycle is ported.
+        vx=0.0f;vy=0.0f;
+        const int cycle=phase%210;
+        if(body.variant==0&&shots&&distance<700.0f&&cycle==160){
+            for(int k=0;k<10;++k){
+                const float angle=(float)(6.283185307179586*(double)k/10.0);
+                shots->Fire(body.position,(float)cos((double)angle)*3.0f,(float)sin((double)angle)*3.0f,1.5f,9.0f,300,body.entityToken);
+            }
+        }
+    }else if(type==405){
+        //Ragman: slow chase with a committed lunge and an aimed spread.
+        const int cycle=phase%170;
+        if(cycle>=50&&cycle<82){vx=dx*1.7f;vy=dy*1.7f;}
+        else{vx=dx*0.32f;vy=dy*0.32f;}
+        if(shots&&distance<560.0f&&cycle==120){
+            const float px=-dy,py=dx;
+            for(int k=-1;k<=1;++k){
+                NativePoint origin={body.position.x+dx*26.0f,body.position.y+dy*26.0f};
+                shots->Fire(origin,dx*3.2f+px*(float)k*0.8f,dy*3.2f+py*(float)k*0.8f,1.0f,8.0f,300,body.entityToken);
+            }
+        }
+    }else if(type==79&&body.variant==2){
+        //Blighted Ovum: stationary boss volley.
+        vx=0.0f;vy=0.0f;
+        const int cycle=phase%180;
+        if(shots&&distance<620.0f&&cycle==110){
+            for(int k=0;k<8;++k){
+                const float angle=(float)(6.283185307179586*(double)k/8.0);
+                shots->Fire(body.position,(float)cos((double)angle)*2.7f,(float)sin((double)angle)*2.7f,1.0f,8.0f,300,body.entityToken);
+            }
+        }
+    }else if(type==12||(type==11&&body.variant==0)){
+        //Horf/Gusher: stationary wall actor with a periodic aimed shot.
+        vx=0.0f;vy=0.0f;
+        const int cycle=phase%(type==12?110:140);
+        if(shots&&distance<600.0f&&distance>8.0f&&cycle==70)
+            shots->Fire(body.position,dx*3.1f,dy*3.1f,1.0f,8.0f,240,body.entityToken);
+    }else if(type==6||type==17||type==302||type==289||type==276||type==218||type==292||type==255||type==206||type==207||type==33){
+        //Stoney, Ulcer, Roundy, Wall Hugger, pushable TNT, Night Crawler and
+        //the Long Legs families are stationary at this boundary.
+        vx=0.0f;vy=0.0f;
+    }else if(type==884||type==818||type==215||type==250){
+        //Fast spider families.
+        vx=dx*(type==884?1.35f:1.15f);vy=dy*(type==884?1.35f:1.15f);
+    }else if(type==54){
+        //Flaming Hopper: short committed hop cycles.
+        const int cycle=phase%75;
+        if(cycle<10){vx=dx*1.7f;vy=dy*1.7f;}
+        else if(cycle<24){vx=body.velocity.x*0.9f;vy=body.velocity.y*0.9f;}
+        else{vx=dx*0.2f;vy=dy*0.2f;}
     }else{
         //Gaper family walk with a short periodic pause.
         const int cycle=phase%80;
@@ -383,7 +448,8 @@ void NativeEnemy::Damage(float amount){
     body.hitPoints-=amount;
     if(body.hitPoints<=0.0f){body.hitPoints=0.0f;body.removed=true;dead=true;}
 }
-void NativeEnemy::Swap(NativeEnemy& b){body.Swap(b.body);bool r=ready;ready=b.ready;b.ready=r;r=dead;dead=b.dead;b.dead=r;unsigned int s=seed;seed=b.seed;b.seed=s;}
+void NativeEnemy::Swap(NativeEnemy& b){body.Swap(b.body);bool r=ready;ready=b.ready;b.ready=r;r=dead;dead=b.dead;b.dead=r;
+    r=participates;participates=b.participates;b.participates=r;unsigned int s=seed;seed=b.seed;b.seed=s;}
 void NativeEnemyList::Clear(){for(int i=0;i<count;++i)delete entries[i];for(int i=0;i<64;++i)entries[i]=0;count=0;}
 
 NativeDeathFxSystem::NativeDeathFxSystem():spawned(0){}

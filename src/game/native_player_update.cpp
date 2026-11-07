@@ -362,19 +362,12 @@ void DamageAllEnemies(PortNormalRuntime& runtime,float amount){
     NativeWorldResident& live=runtime.world.resident[runtime.world.currentList];
     NativeRoomState* room=runtime.world.Current();if(!room)return;
     for(int i=0;i<live.enemies.count;++i){NativeEnemy* enemy=live.enemies.entries[i];
-        if(!enemy||!enemy->ready||enemy->dead)continue;
-        const float px=enemy->body.position.x,py=enemy->body.position.y;
+        if(!enemy||!enemy->participates||!enemy->ready||enemy->dead)continue;
         enemy->Damage(amount);
-        if(enemy->dead&&NativeBossEntityType(enemy->type,enemy->body.variant)){
+        if(enemy->dead&&NativeBossEntityType(enemy->type,enemy->body.variant))
             runtime.bossDefeated=true;
-            if(room->trapdoorState==0){room->trapdoorState=1;room->trapdoorTimer=0;room->trapdoorX=px;room->trapdoorY=py;}
-        }
         if(enemy->dead)++runtime.enemyKills;
     }
-    for(int e=0;e<live.enemies.count;){NativeEnemy* enemy=live.enemies.entries[e];
-        if(enemy&&enemy->dead){runtime.deathFx.Spawn(*enemy);delete enemy;for(int j=e+1;j<live.enemies.count;++j)live.enemies.entries[j-1]=live.enemies.entries[j];--live.enemies.count;live.enemies.entries[live.enemies.count]=0;continue;}
-        ++e;}
-    if(live.enemies.count==0)room->clear=true;
 }
 void UsePill(PortNormalRuntime& runtime,int effect){
     NativePlayerState& state=runtime.playerState;

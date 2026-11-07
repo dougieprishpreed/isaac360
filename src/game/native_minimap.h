@@ -3,6 +3,7 @@
 #include "native_sprite.h"
 class NativeWorld;
 class NativePlayerState;
+struct NativePlacedRoom;
 struct NormalRunFlow;
 struct NativeMinimapDraw {
     const NativeSpriteAsset* asset;const char* animation;int frame,grid;NativePoint position;
@@ -21,13 +22,18 @@ struct NativeMinimap {
 class NativeMinimaps {
 public:
     NativeMinimap maps[2];NativeSprite icons;
-    bool ready,discoveryPrepared,entryPrepared;unsigned int refreshes;
-    NativeMinimaps():ready(false),discoveryPrepared(false),entryPrepared(false),refreshes(0){}
+    bool ready,discoveryPrepared,entryPrepared;unsigned int refreshes,lastEntrySerial,lastError;
+    NativeMinimaps():ready(false),discoveryPrepared(false),entryPrepared(false),refreshes(0),lastEntrySerial(0),lastError(0){}
     bool Prepare();
     void Reset();
     bool EnterInitial(const NormalRunFlow&,NativeWorld&,const NativePlayerState&,unsigned int* next);
+    //6f4e20 for every later resident activation. Discovery remains separate
+    //from descriptor visit/clear ownership and does not consume RNG.
+    bool EnterLinked(const NormalRunFlow&,NativeWorld&,const NativePlayerState&,unsigned int* next);
 private:
-    bool BuildInitial(int,const NativeWorld&,unsigned int* next);
+    bool EnterWorld(const NormalRunFlow&,NativeWorld&,const NativePlayerState&,unsigned int* next);
+    bool DiscoverTarget(NativeWorld&,const NativePlacedRoom&,const NativePlacedRoom&,int,const NativePlayerState&,unsigned int* next);
+    bool Build(int,const NativeWorld&,unsigned int* next);
     NativeMinimaps(const NativeMinimaps&);
     NativeMinimaps& operator=(const NativeMinimaps&);
 };

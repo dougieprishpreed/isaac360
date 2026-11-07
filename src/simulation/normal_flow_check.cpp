@@ -396,14 +396,17 @@ void DoorActors(const char* root) {
     for(int s=0;s<7;++s)for(int v=0;v<5;++v)for(int g=0;g<4;++g)for(int slot=0;slot<8;++slot) {
         NativeDoorActor saved={0};saved.grid=cells[g];saved.type=16;saved.state=states[s];saved.variant=variants[v];saved.auxiliary=73;
         saved.sourceType=6;saved.targetType=29;saved.targetGrid=-7;saved.previousState=-4;saved.previousVariant=-9;
-        saved.seed=19;saved.initializations=0xffffffffU;saved.flags=0xffffffffU;saved.local.Set(0x654321,11);
+        saved.seed=19;saved.initializations=0xffffffffU;saved.flags=0xffffffffU;saved.tail=0x6d5e4f3aU;saved.local.Set(0x654321,11);
         saved.x=12;saved.y=34;saved.native278=saved.native279=saved.native27a=true;
-        NativeDoorActor before=saved;NativeDoorSet doors={0};NativeMt mt;mt.Seed(123);NativeMt expected=mt;unsigned int next=expected.Next();
+        NativeDoorActor before=saved;NativeDoorSet doors={0};NativeMt mt;mt.Seed(123);NativeMt expected=mt;
         Check(NativeCreateDoor(slot,cells[g],567,mt,&doors,&saved)==NDR_OK,"door-reuse-existing-grid-door");const NativeDoorActor& a=doors.actors[slot];
         int state=states[s]==0||states[s]==2?1:states[s];
         Check(a.state==state&&a.previousState==state&&a.variant==variants[v]&&a.previousVariant==variants[v]&&a.auxiliary==73&&a.initializations==0&&a.initialized&&a.spawnFrame==567,"door-saved-state-variant-aux-and-counter-preserved");
         Check(a.sourceType==0&&a.targetType==0&&a.targetGrid==-1&&a.flags==0&&!a.native278&&!a.native279&&!a.native27a&&doors.native76c[cells[g]]==1000,"door-saved-transient-reset");
-        Check(a.seed==next&&a.x==saved.x&&a.y==saved.y&&!memcmp(&mt,&expected,sizeof(mt))&&!memcmp(&a.local,&saved.local,sizeof(a.local))&&!memcmp(&saved,&before,sizeof(saved)),"door-reuse-consumes-only-global-MT");
+        NativeDoorActor defaultLocal={0};defaultLocal.local.Default();
+        Check(a.seed==saved.seed&&a.tail==saved.tail&&a.x==0&&a.y==0&&!memcmp(&mt,&expected,sizeof(mt))&&
+            !memcmp(&a.local,&defaultLocal.local,sizeof(a.local))&&doors.draws==0&&!memcmp(&saved,&before,sizeof(saved)),
+            "door-saved-factory-preserves-seed-and-does-not-draw");
         NativeDoorSet old=doors;NativeMt invalid={0};
         Check(NativeCreateDoor(slot,-1,99,invalid,&doors)==NDR_ALREADY_ATTACHED&&!memcmp(&doors,&old,sizeof(old))&&invalid.index==0,"door-attached-slot-returns-before-RNG-and-grid-validation");++n;
     }
@@ -797,8 +800,22 @@ void StaticWalls(const char* root) {
     NativeStaticGrid wall;memset(&wall,0x43,sizeof(wall));NativeStaticGrid previous=wall;
     Check(!NativeSelectedWall(16,67,0,0,1,0,&wall)&&!memcmp(&wall,&previous,sizeof(wall)),"wall-room16-graphics-dependency-is-atomic");
     Check(!NativeSelectedWall(1,448,0,0,1,0,&wall)&&!memcmp(&wall,&previous,sizeof(wall)),"wall-grid-storage-boundary-atomic");
-    Check(NativeSelectedWall(1,134,65535,17,0xfedcba98U,29,&wall)&&wall.grid==134&&wall.type==15&&wall.variant==65535&&wall.state==0&&
+    Check(NativeSelectedWall(1,134,65535,17,0xfedcba98U,29,&wall)&&wall.grid==134&&wall.type==1999&&wall.nativeType==15&&wall.variant==65535&&wall.state==0&&
         wall.seed==0xfedcba98U&&wall.native18==0&&wall.native20==0x16a9de81U&&wall.collisionClass==4&&wall.initializations==1&&wall.initialized&&wall.initializedFrame==29,"wall-native-instruction-writes");
+    NativeStaticGrid restored;memset(&restored,0x51,sizeof(restored));
+    Check(NativeRestoreSerializedGrid(23,4,0,0,1,0xfb547066U,0,0,37,&restored)&&
+        restored.grid==23&&restored.type==1000&&restored.nativeType==4&&restored.initializations==2&&
+        restored.initializedFrame==37&&restored.collisionClass==4&&restored.seed==0xfb547066U,
+        "saved-grid-common-record-init-and-counter-increment");
+    Check(NativeRestoreSerializedGrid(67,6,0,0,1,0xdc8dbf72U,0,0,37,&restored)&&
+        restored.type==1002&&restored.nativeType==6&&restored.initializations==2&&
+        restored.collisionClass==3&&restored.initializedFrame==37,
+        "saved-type6-state0-init-and-collision-class");
+    NativeStaticGrid restoredAtomic=restored;NativeStaticGrid restoredBefore=restoredAtomic;
+    Check(!NativeRestoreSerializedGrid(23,1,0,0,1,1,0,0,37,&restoredAtomic)&&
+        !NativeRestoreSerializedGrid(23,16,8,2,1,1,0x16a9de81U,0,37,&restoredAtomic)&&
+        !memcmp(&restoredAtomic,&restoredBefore,sizeof(restoredAtomic)),
+        "unsupported-saved-grid-classes-stop-atomically");
     FILE* f=Input(root,"static_wall_room.bin");if(!f)return;char magic[8];Check(fread(magic,1,8,f)==8&&!memcmp(magic,"NGSWALL1",8),"wall-original-record-packet");
     int id=(int)U32(f);unsigned int size=U32(f);std::vector<unsigned char> raw(size);Check(size<65536&&fread(&raw[0],1,size,f)==size&&fgetc(f)==EOF,"wall-original-record-size");fclose(f);
     RoomRecord record;Check(record.Open(&raw[0],size,RRF_STB1)==RRR_OK&&record.shape==2&&record.stackCount==18,"wall-original-record-view");
@@ -856,7 +873,7 @@ void EntityBodies(const char* root){
             body.native2a0==0&&body.native2ec==1&&Bits(body.native2fc)==0x3f666666U,"entity-body-inherited-physics-and-base-HP-not-player-hearts");
         unsigned int hash=body.StateHash(),draw;
         Check(body.BeginFresh(1,variant,0,0,0,1)==NEB_BAD_REQUEST&&body.StateHash()==hash,"entity-body-zero-seed-atomic");
-        Check(body.BeginFresh(11,0,0,seeds[seed],0,1)==NEB_UNSUPPORTED_PROPERTIES&&body.StateHash()==hash,"entity-body-missing-properties-never-substitute-player");
+        Check(body.BeginFresh(11,2,0,seeds[seed],0,1)==NEB_UNSUPPORTED_PROPERTIES&&body.StateHash()==hash,"entity-body-missing-properties-never-substitute-player");
         Check(body.random.Next(&draw)&&draw==NativeShift(seeds[seed],4,3,17),"entity-body-draw-uses-entity-owner-not-startup-bank-index35");
         const NativeEntityBodyProperties* props=NativePreparedPlayerBody(variant);
         Check(body.collision.Resize(3.5f,2.0f,0.5f,7,*props)&&body.collision.points.size()==7,"entity-body-real-size-service-mutates-owned-samples");

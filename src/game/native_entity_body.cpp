@@ -242,13 +242,91 @@ const NativeEntityBodyProperties kEnemyBodies[]={
     {406,0,0,40,60.0f,1.0f,25.0f,1.0f,1.0f,2.0f,50.0f,3500.0f,0.0f,"gfx/406.000_UltraGreed.anm2"},
     {406,1,0,40,60.0f,1.0f,25.0f,1.0f,1.0f,2.0f,70.0f,2500.0f,0.0f,"gfx/406.001_UltraGreedier.anm2"},
     {17,0,0,0,24.0f,1.0f,1.0f,1.0f,1.0f,0.0f,100.0f,5.0f,0.0f,"gfx/017.001_Shopkeeper.anm2"},
-    {17,1,0,0,24.0f,1.0f,1.0f,1.0f,1.0f,0.0f,100.0f,5.0f,0.0f,"gfx/017.002_Secret Room Keeper.anm2"}
+    {17,1,0,0,24.0f,1.0f,1.0f,1.0f,1.0f,0.0f,100.0f,5.0f,0.0f,"gfx/017.002_Secret Room Keeper.anm2"},
+    //Inherited hostile/ordinary actor records reached by the fresh normal packet.
+    //Values are entities2 physical fields; AI/death FX remain separate services.
+    {10,2,0,12,0.14f,1.0f,13.0f,1.0f,1.0f,1.0f,5.0f,9.0f,0.0f,"gfx/010.002_FlamingGaper.anm2"},
+    {11,0,0,12,0.13f,1.0f,13.0f,1.0f,1.0f,1.0f,3.0f,10.0f,0.0f,"gfx/011.000_Gusher.anm2"},
+    {11,1,0,12,0.13f,1.0f,13.0f,1.0f,1.0f,1.0f,3.0f,10.0f,0.0f,"gfx/011.001_Pacer.anm2"},
+    {12,0,0,12,0.13f,1.0f,13.0f,1.0f,1.0f,1.0f,3.0f,10.0f,0.0f,"gfx/012.000_Horf.anm2"},
+    {17,2,0,0,0.24f,1.0f,1.0f,1.0f,1.0f,0.0f,100.0f,5.0f,0.0f,"gfx/017.003_ErrorKeeper.anm2"},
+    {17,3,0,0,0.24f,1.0f,1.0f,1.0f,1.0f,0.0f,100.0f,5.0f,0.0f,"gfx/017.004_Special Shopkeeper.anm2"},
+    {17,4,0,0,0.24f,1.0f,1.0f,1.0f,1.0f,0.0f,100.0f,5.0f,0.0f,"gfx/017.005_Special Secret Room Keeper.anm2"},
+    {274,0,0,12,0.0f,1.0f,50.0f,1.0f,1.0f,2.0f,400.0f,3000.0f,0.0f,"gfx/274.000_MegaSatanHead.anm2"},
+    {274,1,0,12,0.6f,1.0f,45.0f,1.0f,1.0f,2.0f,400.0f,600.0f,0.0f,"gfx/274.001_MegaSatanHand.anm2"},
+    {274,2,0,12,0.6f,1.0f,45.0f,1.0f,1.0f,2.0f,400.0f,600.0f,0.0f,"gfx/274.001_MegaSatanHand.anm2"},
+    {222,0,0,4,0.11f,1.0f,17.0f,1.0f,1.0f,1.0f,3.0f,5.0f,0.0f,"gfx/222.000_Ring Fly.anm2"},
+    {302,0,0,12,0.14f,1.0f,13.0f,1.0f,1.0f,0.0f,15.0f,50.0f,0.0f,"gfx/302.000_Stoney.anm2"},
+    {226,2,0,12,0.14f,1.0f,13.0f,1.0f,1.0f,1.0f,14.0f,12.0f,4.0f,"gfx/226.002_Crispy.anm2"},
+    {884,0,0,12,0.11f,1.0f,13.0f,1.0f,1.0f,1.0f,5.0f,4.5f,0.2f,"gfx/884.000_swarm spider.anm2"},
+    {214,0,0,8,0.14f,1.0f,13.0f,1.0f,1.0f,1.0f,6.0f,10.0f,0.0f,"gfx/213.000_Level2Fly.anm2"},
+    {215,0,0,12,0.16f,1.0f,13.0f,1.0f,1.0f,1.0f,10.0f,13.0f,0.0f,"gfx/214.000_Level2Spider.anm2"},
+    {250,0,0,12,0.16f,1.0f,13.0f,1.0f,1.0f,1.0f,10.0f,13.0f,0.0f,"gfx/250.000_Ticking Spider.anm2"},
+    {281,0,0,4,0.11f,1.0f,14.0f,1.0f,1.0f,1.0f,3.0f,5.0f,0.0f,"gfx/281.000_Swarm.anm2"},
+    {289,0,0,12,0.0f,1.0f,13.0f,1.0f,1.0f,1.0f,100.0f,10.0f,0.0f,"gfx/289.000_Ulcer.anm2"},
+    {276,0,0,12,0.0f,1.0f,13.0f,1.0f,1.0f,1.0f,100.0f,10.0f,0.0f,"gfx/276.000_Roundy.anm2"},
+    {299,0,0,12,0.14f,1.0f,13.0f,1.0f,1.0f,1.0f,5.0f,9.0f,0.0f,"gfx/299.000_GreedGaper.anm2"},
+    {869,0,0,12,0.16f,1.0f,13.0f,1.0f,1.0f,1.0f,10.0f,16.0f,0.0f,"gfx/869.000_migraine.anm2"},
+    {206,0,0,12,0.11f,1.0f,13.0f,1.0f,1.0f,1.0f,6.0f,16.0f,4.0f,"gfx/205.000_Baby Long Legs.anm2"},
+    {206,1,0,12,0.08f,1.0f,13.0f,1.0f,1.0f,1.0f,6.0f,12.0f,4.0f,"gfx/205.001_Small Baby Long Legs.anm2"},
+    {207,0,0,12,0.11f,1.0f,13.0f,1.0f,1.0f,1.0f,6.0f,16.0f,4.0f,"gfx/206.000_Crazy Long Legs.anm2"},
+    {207,1,0,12,0.08f,1.0f,13.0f,1.0f,1.0f,1.0f,6.0f,12.0f,4.0f,"gfx/206.001_Small Crazy Long Legs.anm2"},
+    {208,2,0,12,0.16f,1.0f,13.0f,1.0f,1.0f,1.0f,10.0f,18.0f,0.0f,"gfx/207.002_FlamingFatty.anm2"},
+    {249,0,0,8,0.14f,1.0f,13.0f,1.0f,1.0f,1.0f,6.0f,10.0f,0.0f,"gfx/249.000_Full Fly.anm2"},
+    {405,0,0,12,0.16f,1.0f,20.0f,1.0f,1.0f,1.0f,50.0f,200.0f,0.0f,"gfx/405.000_Ragman.anm2"},
+    {218,0,0,12,0.0f,1.0f,16.0f,1.0f,1.0f,1.0f,15.0f,100.0f,0.0f,"gfx/218.000_Wall Hugger.anm2"},
+    {54,0,0,12,0.14f,1.0f,13.0f,1.0f,1.0f,1.0f,10.0f,20.0f,0.0f,"gfx/054.000_Flaming Hopper.anm2"},
+    {79,2,0,12,0.16f,1.0f,13.0f,1.0f,1.0f,1.0f,20.0f,140.0f,0.0f,"gfx/079.002_The Blighted Ovum.anm2"},
+    {292,0,0,12,0.0f,1.0f,20.0f,1.0f,1.0f,0.0f,20.0f,4.0f,0.0f,"gfx/grid/grid_tnt_pushable.anm2"},
+    {297,0,0,12,0.14f,1.0f,13.0f,1.0f,1.0f,1.0f,5.0f,16.0f,2.0f,"gfx/297.000_BlueGaper.anm2"},
+    {33,1,0,0,0.0f,0.5f,13.0f,1.0f,1.0f,1.0f,100.0f,5.0f,0.0f,"gfx/033.001_Red Fireplace.anm2"},
+    {46,0,0,12,0.14f,1.0f,13.0f,1.0f,1.0f,2.0f,30.0f,60.0f,20.0f,"gfx/046.000_Sloth.anm2"},
+    {50,1,0,12,0.17f,1.0f,13.0f,1.0f,1.0f,2.0f,30.0f,60.0f,25.0f,"gfx/050.001_Super Greed.anm2"},
+    {47,0,0,12,0.14f,1.0f,13.0f,1.0f,1.0f,2.0f,30.0f,60.0f,20.0f,"gfx/047.000_Lust.anm2"},
+    {48,0,0,12,0.14f,1.0f,13.0f,1.0f,1.0f,2.0f,30.0f,60.0f,24.0f,"gfx/048.000_Wrath.anm2"},
+    {51,0,0,12,0.14f,1.0f,13.0f,1.0f,1.0f,1.0f,30.0f,40.0f,7.5f,"gfx/051.000_Envy.anm2"},
+    {49,0,0,12,0.17f,1.0f,13.0f,1.0f,1.0f,2.0f,30.0f,60.0f,20.0f,"gfx/049.000_Gluttony.anm2"},
+    {255,0,0,12,0.0f,1.0f,13.0f,1.0f,1.0f,1.0f,100.0f,35.0f,0.0f,"gfx/255.000_NightCrawler.anm2"},
+    {257,0,0,12,0.16f,1.0f,13.0f,1.0f,1.0f,1.0f,10.0f,20.0f,0.0f,"gfx/257.000_ConjoinedFatty.anm2"},
+    {818,2,0,12,0.15f,1.0f,13.0f,1.0f,1.0f,1.0f,5.0f,15.0f,0.0f,"gfx/818.002_coal spider 3.anm2"},
+    {246,1,0,12,0.28f,1.0f,13.0f,1.0f,1.0f,1.0f,10.0f,30.0f,0.0f,"gfx/246.001_Ragmans Ragling.anm2"},
+    //Angel fight identities; raw5001 is a teleporter, not the statue owner.
+    {271,0,0,12,0.28f,1.0f,22.0f,1.0f,1.0f,2.0f,100.0f,400.0f,0.0f,"gfx/271.000_angel.anm2"},
+    {271,1,0,12,0.28f,1.0f,22.0f,1.0f,1.0f,2.0f,100.0f,450.0f,0.0f,"gfx/271.000_angel.anm2"},
+    {272,0,0,12,0.28f,1.0f,22.0f,1.0f,1.0f,2.0f,100.0f,660.0f,0.0f,"gfx/272.000_angel2.anm2"},
+    {272,1,0,12,0.28f,1.0f,22.0f,1.0f,1.0f,2.0f,100.0f,750.0f,0.0f,"gfx/272.000_angel2.anm2"},
+    //Type6 machines, beggars and other NPC service actors. They are physical
+    //entities but do not participate in the hostile room-clear count.
+    {6,1,0,24,0.33f,1.0f,12.0f,1.0f,1.0f,0.0f,3.0f,0.0f,0.0f,"gfx/006.001_Slot Machine.anm2"},
+    {6,2,0,24,0.33f,1.0f,12.0f,1.0f,1.0f,0.0f,3.0f,0.0f,0.0f,"gfx/006.002_Blood Donation Machine.anm2"},
+    {6,3,0,24,0.33f,1.0f,12.0f,1.0f,1.0f,0.0f,3.0f,0.0f,0.0f,"gfx/006.003_Fortune Telling Machine.anm2"},
+    {6,4,0,24,0.15f,1.0f,12.0f,1.0f,1.0f,0.0f,3.0f,0.0f,0.0f,"gfx/006.004_Beggar.anm2"},
+    {6,5,0,24,0.15f,1.0f,12.0f,1.0f,1.0f,0.0f,3.0f,0.0f,0.0f,"gfx/006.005_Devil Beggar.anm2"},
+    {6,6,0,24,0.33f,1.0f,12.0f,1.0f,1.0f,0.0f,3.0f,0.0f,0.0f,"gfx/006.006_Shell Game.anm2"},
+    {6,7,0,24,0.15f,1.0f,12.0f,1.0f,1.0f,0.0f,3.0f,0.0f,0.0f,"gfx/006.007_Key Master.anm2"},
+    {6,8,0,24,0.33f,1.0f,12.0f,1.0f,1.0f,0.0f,3.0f,0.0f,0.0f,"gfx/006.008_DonationMachine.anm2"},
+    {6,9,0,24,0.15f,1.0f,12.0f,1.0f,1.0f,0.0f,3.0f,0.0f,0.0f,"gfx/006.009_Bomb Bum.anm2"},
+    {6,10,0,24,0.33f,1.0f,12.0f,1.0f,1.0f,0.0f,3.0f,0.0f,0.0f,"gfx/006.010_RestockMachine.anm2"},
+    {6,11,0,24,0.33f,1.0f,12.0f,1.0f,1.0f,0.0f,3.0f,0.0f,0.0f,"gfx/006.011_GreedDonationMachine.anm2"},
+    {6,12,0,24,0.33f,1.0f,12.0f,1.0f,1.0f,0.0f,3.0f,0.0f,0.0f,"gfx/006.012_MomDressingTable.anm2"},
+    {6,13,0,24,0.15f,1.0f,12.0f,1.0f,1.0f,0.0f,3.0f,0.0f,0.0f,"gfx/006.013_Battery Bum.anm2"},
+    {6,14,0,24,0.15f,1.0f,20.0f,1.0f,1.0f,0.0f,3.0f,0.0f,0.0f,"gfx/006.014_Isaac.anm2"},
+    {6,15,0,24,0.33f,1.0f,12.0f,1.0f,1.0f,0.0f,3.0f,0.0f,0.0f,"gfx/006.015_Hell Game.anm2"},
+    {6,16,0,24,0.33f,1.0f,12.0f,1.0f,1.0f,0.0f,3.0f,0.0f,0.0f,"gfx/006.016_Crane Game.anm2"},
+    {6,17,0,24,0.33f,1.0f,12.0f,1.0f,1.0f,0.0f,3.0f,0.0f,0.0f,"gfx/006.017_Confessional.anm2"},
+    {6,18,0,24,0.15f,1.0f,12.0f,1.0f,1.0f,0.0f,3.0f,0.0f,0.0f,"gfx/006.018_Rotten Beggar.anm2"}
 };
 }
 const NativeEntityBodyProperties* NativePreparedEnemyBody(int type,int variant){
     for(unsigned int i=0;i<sizeof(kEnemyBodies)/sizeof(kEnemyBodies[0]);++i)
         if(kEnemyBodies[i].type==type&&kEnemyBodies[i].variant==variant)return &kEnemyBodies[i];
     return 0;
+}
+bool NativeNonCombatEntityType(int type,int variant){
+    (void)variant;
+    //Type6 machines/beggars and type17 keepers are physical NPCs whose
+    //presence does not gate room completion.
+    return type==6||type==17;
 }
 bool NativeBossEntityType(int type,int variant){
     //Prepared floor-boss families. Variant coverage expands with each
@@ -296,6 +374,15 @@ bool NativeBossEntityType(int type,int variant){
     if(type==267)return variant==0;
     if(type==268)return variant==0;
     if(type==269)return variant==0;
+    //Reached multi-part and Super Sin boss families. Type274's hands remain
+    //ordinary prepared actors so a hand death cannot own the boss clear.
+    if(type==274)return variant==0;
+    if(type==405)return variant==0;
+    if(type==271)return variant==0||variant==1;
+    if(type==272)return variant==0||variant==1;
+    if(type==79)return variant==2;
+    if(type==46||type==47||type==48||type==49||type==51)return variant==0;
+    if(type==50)return variant==1;
     return false;
 }
 const NativeEntityBodyProperties* NativePreparedPlayerBody(int variant){
@@ -332,8 +419,10 @@ NativeEntityBody::NativeEntityBody():ready(false),native168(false),native169(fal
 }
 NativeEntityBodyResult NativeEntityBody::BeginFresh(int t,int v,int sub,unsigned int seed,unsigned int frame,int stage,const NativePoint* pos,const NativePoint* vel){
     if(t<0||v<0||sub<0||!seed||stage<0)return NEB_BAD_REQUEST;
+    //Enemy subtype is the champion/colour selector; it does not select a
+    //different physical body record. Effect subtype remains identity-bearing.
     const NativeEntityBodyProperties* p=t==1?NativePreparedPlayerBody(v):
-        (t==1000?NativePreparedEffectBody(v,sub):(sub==0?NativePreparedEnemyBody(t,v):0));
+        (t==1000?NativePreparedEffectBody(v,sub):NativePreparedEnemyBody(t,v));
     if(!p)return NEB_UNSUPPORTED_PROPERTIES;
     NativeEntityBody next;next.type=t;next.variant=v;next.subtype=sub;next.initialSeed=seed;next.random.Set(seed,30);
     next.frameCount=0; //66f544: native+24 reset.

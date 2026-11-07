@@ -16,7 +16,7 @@ bool NativeSaveWriter::InitialGame(NativeGamePersistent& game){
     if(!Fields(f,0x80,6,0x91839a))return false;
     for(int i=0;i<30;++i)if(!Field(f,0x98+4*i,4,0x918482)||!Field(f,0x114+4*i,4,0x9184a1))return false;
     if(!Field(f,0x110,4,0x9184d2)||!Field(f,0x18c,4,0x9184fa))return false;
-    for(unsigned int i=0;i<8;++i)if(!Field(f,0x198+4*i,4,0x90cf7e+0x31*i))return false;
+    for(unsigned int i=0;i<8;++i)if(!Field(f,0x198+4*i,4,0x90cf7e + 0x31*i))return false;
     for(unsigned int i=0;i<4;++i)if(!Field(f,0x1b8+i,1,0x90d10a+0x32*i))return false;
     if(!Field(f,0x1bc,2,0x90d1d2))return false;unsigned int levelFlags;
     if(!f.Get(0x1bc,2,&levelFlags)||levelFlags>24)return Fail(0x90d206,0x1bc);

@@ -21,18 +21,22 @@ void NativeResetDoor(NativeDoorActor& door) {
 NativeDoorResult NativeCreateDoor(int slot,int grid,unsigned int frame,NativeMt& global,NativeDoorSet* output,const NativeDoorActor* saved) {
     if(!output||slot<0||slot>7)return NDR_BAD_REQUEST;
     if(output->attached&(1U<<slot))return NDR_ALREADY_ATTACHED;
-    if(grid<0||grid>=kNativeRoomGridLimit||!global.Valid()||(saved&&(saved->grid!=grid||saved->type!=16)))return NDR_BAD_REQUEST;
-    NativeDoorActor door;
-    if(saved)door=*saved;
-    else {memset(&door,0,sizeof(door));door.type=16;door.local.Default();}
-    door.grid=grid;door.seed=global.Next();
+    if(grid<0||grid>=kNativeRoomGridLimit)return NDR_BAD_REQUEST;
+    if(saved&&(saved->grid!=grid||saved->type!=16))return NDR_BAD_REQUEST;
+    if(!saved&&!global.Valid())return NDR_BAD_REQUEST;
+    NativeDoorActor door;memset(&door,0,sizeof(door));door.type=16;door.local.Default();door.tail=0x16a9de81U;
+    if(saved){door.variant=saved->variant;door.state=saved->state;door.auxiliary=saved->auxiliary;
+        door.seed=saved->seed;door.initializations=saved->initializations;door.tail=saved->tail;}
+    else door.seed=global.Next();
+    door.grid=grid;
     //006cbe50 resets state0/2 to1; other saved states and variants survive.
     NativeResetDoor(door);
     ++door.initializations;door.initialized=true;door.spawnFrame=frame;
     static const float angles[4]={-90,0,90,180};door.direction=slot&3;
     door.rotation=door.overlayRotation=angles[door.direction];door.slot=slot;
     //Position needs the actual stride; NativeInitDoorSet fills it below.
-    output->actors[slot]=door;output->native76c[grid]=1000;output->attached|=1U<<slot;++output->draws;return NDR_OK;
+    output->actors[slot]=door;output->native76c[grid]=1000;output->attached|=1U<<slot;
+    if(!saved)++output->draws;return NDR_OK;
 }
 bool NativeInitDoorSet(int shape,const NativeRoomGrid& geometry,unsigned int allowed,unsigned int frame,NativeMt& global,NativeDoorSet* output) {
     if(!output||allowed>255||!global.Valid())return false;

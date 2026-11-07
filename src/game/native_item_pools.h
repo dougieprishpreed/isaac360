@@ -43,6 +43,12 @@ public:
     //native selection stream, applies DecreaseBy to the chosen entry and
     //removes it below RemoveOn. Returns0 when no eligible entry remains.
     int SelectCollectible(int poolIndex);
+    //006e92d0's room-type -> prepared pool ordinal table (game+1a37c+69c).
+    //Room type3 selects one of table entries1..29 with the constructor seed.
+    int SelectCollectibleForRoom(int roomType,unsigned int seed);
+    //Type5 constructor identity owners reached before contact. Returns -1 for
+    //a variant whose initialization service has not been established.
+    int PrepareRewardSubtype(int variant,int roomType=1,unsigned int seed=0);
     bool Capture(NativeItemPoolSnapshot&) const;
     //Restore the current-state weights/counters/owners from a native snapshot
     //onto the freshly initialized prepared pools. Definitions/eligibility are

@@ -43,7 +43,8 @@ bool NativeDescriptorPersistent::CaptureInitial(const NativePlacedRoom* descript
     if(p.definition>=0&&!d)return false;
     fields.Put(0,p.gridIndex);fields.Put(4,p.safeGridIndex);fields.Put(8,p.listIndex);fields.Put(12,p.dimension);
     fields.Put(0x10,0); //6fccfa clears the source RoomConfig pointer AFTER6b6c50.
-    fields.Put(0x18,p.doors);fields.Put(0x3c,p.displayFlags);fields.Put(0x40,p.visitedCount);fields.Put(0x44,p.flags);
+    fields.Put(0x18,p.doors);fields.Put(0x3c,p.displayFlags);fields.Put(0x40,p.visitedCount);
+    fields.Put(0x44,p.flags);fields.Put(0x48,p.native48,2);fields.Put(0x4a,p.clearEventCount,2);
     fields.Put(0x58,p.seeds.spawn);fields.Put(0x5c,p.seeds.award);fields.Put(0x60,p.seeds.decoration);fields.Put(0x64,p.seeds.auxiliary);
     fields.Put(0xb4,p.nativeB4);
     if(p.linksPrepared)for(int slot=0;slot<8;++slot){fields.Put(0x94+slot*2,(unsigned short)p.doorTargets[slot],2);fields.Put(0xa4+slot,(unsigned char)p.doorTargetSlots[slot],1);}
@@ -118,7 +119,7 @@ bool NativeGamePersistent::CaptureState(const NormalRunFlow& run,NativeWorld& wo
         {0x243370,0x1e54c,4},{0x243374,0x1e550,4}};
     for(unsigned int i=0;i<sizeof(map)/sizeof(map[0]);++i){unsigned int value;
         if(!history.fields.Get(map[i][0],map[i][2],&value))return false;fields.Put(map[i][1],value,map[i][2]);}
-    fields.Put(0xc,49,2);for(unsigned int i=0;i<49;++i)fields.Put(0xe+i,i<32?(run.runFlagsLow>>i)&1:(run.runFlagsHigh>>(i-32))&1,1);
+    fields.Put(0xc,49,2);for(unsigned int i=0;i<49;++i)fields.Put(0xe + i,i<32?(run.runFlagsLow>>i)&1:(run.runFlagsHigh>>(i-32))&1,1);
     //6b7104..179. Constructor/reset-owned lists243364,283b28 and283b34
     //are empty before any gameplay. Their logical owners remain distinct.
     if(!history.native243364.empty())return false;
@@ -128,7 +129,12 @@ bool NativeGamePersistent::CaptureState(const NormalRunFlow& run,NativeWorld& wo
     levelConfigurations.clear();
     if(next)*next=0x6b7147;if(!itemPools.Capture(pools))return false;
     if(next)*next=0x6b7159;if(!NativeCaptureBossState(run.bosses,&bosses))return false;
-    if(allowCurrent){unsigned int ignored=0;(void)world.CaptureInitialRoom(&ignored);}
+    if(allowCurrent){
+        //Current-state capture still requires79d610 to rebuild the active
+        //descriptor's room record. A live pickup count cannot justify retaining
+        //an older snapshot after removal or another capture failure.
+        if(!world.CaptureInitialRoom(next))return false;
+    }
     else{if(next)*next=0x6b71bf;if(!world.CaptureInitialRoom(next))return false;}
     //6fca60 transfers every descriptor slot, all507 grid owners and the
     //level's actual fields. Unwritten/inactive source bytes remain so; they
@@ -141,7 +147,7 @@ bool NativeGamePersistent::CaptureState(const NormalRunFlow& run,NativeWorld& wo
     fields.Put(0x1a4,run.bossSequence.lastLayoutIndex);fields.Put(0x1a8,run.context.effectiveCurses);
     fields.Put(0x1ac,run.levelSeed);fields.Put(0x1b0,run.floor.plan.streams.secondary.state);fields.Unwritten(0x1b4,4);
     fields.Put(0x1b8,0,1);fields.Put(0x1b9,0,1);fields.Put(0x1ba,0,1);fields.Unwritten(0x1bb,1);
-    fields.Put(0x1bc,24,2);for(unsigned int i=0;i<24;++i)fields.Put(0x1be+i,0,1);
+    fields.Put(0x1bc,24,2);for(unsigned int i=0;i<24;++i)fields.Put(0x1be + i,0,1);
     fields.Put(0x1d8,0);for(unsigned int at=0x1dc;at<0x218;at+=4)fields.Put(at,0);
     fields.Unwritten(0x20c,4); //18200's ordinary-mode source is never assigned or queried on this path.
     fields.Put(0x250,world.layout.count);

@@ -15,7 +15,15 @@ bool AddWall(NativeRoomState& room,int x,int y,NativeMt& random,unsigned int fra
 }
 NativeWorldResult NativeWorld::PreparePerimeter(NativeMt& random,unsigned int frame){
     NativeRoomState* room=Current();const NativePlacedRoom* descriptor=CurrentDescriptor();
-    if(!room||!descriptor||!resident[currentList].doors||resident[currentList].perimeterReady||descriptor->visitedCount)return NWR_BAD_REQUEST;
+    if(!room||!descriptor||!resident[currentList].doors)return NWR_BAD_REQUEST;
+    //Reentry keeps the already prepared grids and the RNG state they
+    //consumed. Only a genuinely fresh resident performs79c52c's work.
+    if(resident[currentList].perimeterReady)return NWR_OK;
+    //The common perimeter pass follows saved-grid construction. Records that
+    //occupied a cell return before any MT draw; a zero record is skipped by
+    //7a1130 and the common pass may still create that perimeter wall. This is
+    //why zero is a saved-grid skip, not a universal delete.
+    if(descriptor->visitedCount&&!RestoredRoom(currentList))return NWR_BAD_REQUEST;
     //The actual normal starting selector requires shape1. Types16 and the
     //four L-shape loops have additional native branches; they are not repicked
     //or replaced by a rectangle when entered later in the game.

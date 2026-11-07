@@ -1,10 +1,11 @@
 #include "game_session.h"
 #include "native_room_update.h"
+#include "native_rooms.h"
 #include "native_rng.h"
 #include "native_save_reader.h"
 #include <string.h>
 #include <stdio.h>
-PortNormalRuntime::PortNormalRuntime():audio(0),initialSaveFileWritten(false),phase(PNR_IDLE),missingNativePrerequisite(0),completePlayerInitializations(0),completePlayerTicks(0),completeWholeGameplayTicks(0),enemyKills(0),doorsOpened(0),roomTransitions(0),playerHits(0),playerDeathTicks(0),doorsUnlocked(0),gameOverCount(0),pickupsCollected(0),collectiblesCollected(0),playerInvulnerable(0),lastCollectible(0),playerDead(false),bossDefeated(false),descendRequested(false),startingItemsGranted(false),greedMode(false),greedComplete(false),greedWave(0),greedWaveCount(0),greedBossWave(0),greedConfigStage(0),bossAwardIdentity(0),bossAwardAchievement(0),doorTransitionGrace(0),tickFrame(0),nativeSaveCaptureAddress(0),playerTailTrailSegments(0),playerTailRenderCallbacks(0),playerTailTicks(0),roomEntryPrefixPrepared(false) {
+PortNormalRuntime::PortNormalRuntime():audio(0),initialSaveFileWritten(false),suppressInitialNewRunPublish(false),pendingRestoreStage(0),pendingRestoreGrid(-1),pendingRestoreDimension(-1),phase(PNR_IDLE),missingNativePrerequisite(0),completePlayerInitializations(0),completePlayerTicks(0),completeWholeGameplayTicks(0),enemyKills(0),doorsOpened(0),roomTransitions(0),playerHits(0),playerDeathTicks(0),doorsUnlocked(0),gameOverCount(0),pickupsCollected(0),collectiblesCollected(0),playerInvulnerable(0),lastCollectible(0),playerDead(false),bossDefeated(false),descendRequested(false),startingItemsGranted(false),greedMode(false),greedComplete(false),greedWave(0),greedWaveCount(0),greedBossWave(0),greedConfigStage(0),bossAwardIdentity(0),bossAwardAchievement(0),doorTransitionGrace(0),tickFrame(0),nativeSaveCaptureAddress(0),playerTailTrailSegments(0),playerTailRenderCallbacks(0),playerTailTicks(0),roomEntryPrefixPrepared(false) {
     memset(&run,0,sizeof(run));memset(&entryIssue,0,sizeof(entryIssue));
     gameRandom.Default();
 }
@@ -50,6 +51,8 @@ PortSessionStart PortGameSession::StartNormalCharacter(unsigned int seed,PortNor
         runtime.playerUpdate=NativePlayerUpdate();runtime.projectiles.Reset();runtime.enemyShots.Clear();runtime.bombs.Clear();runtime.familiars.Clear();runtime.deathFx.Clear();
         runtime.roomFx.Swap(roomFx);
         runtime.minimaps.Reset();
+        runtime.pendingSavedRooms.clear();runtime.pendingRestoreStage=0;
+        runtime.pendingRestoreGrid=runtime.pendingRestoreDimension=-1;
         //Virtual Init, the reached resource/callback services and manager
         //registration have returned before006b4b5e generation begins.
         runtime.missingNativePrerequisite=0;runtime.phase=PNR_GENERATING;runtime.tickFrame=0;
@@ -62,6 +65,16 @@ PortSessionStart PortGameSession::StartNormalCharacter(unsigned int seed,PortNor
     return start;
 }
 namespace {
+struct PendingRestoreCleanup {
+    PortNormalRuntime* runtime;
+    explicit PendingRestoreCleanup(PortNormalRuntime& value):runtime(&value){}
+    ~PendingRestoreCleanup(){runtime->pendingSavedRooms.clear();runtime->pendingRestoreStage=0;
+        runtime->pendingRestoreGrid=runtime->pendingRestoreDimension=-1;
+        runtime->suppressInitialNewRunPublish=false;}
+private:
+    PendingRestoreCleanup(const PendingRestoreCleanup&);
+    PendingRestoreCleanup& operator=(const PendingRestoreCleanup&);
+};
 bool GreedWaveDefinitions(int stage,unsigned int seed,const NativeSceneFiles& files,unsigned int wanted,std::vector<int>& output){
     output.clear();
     for(unsigned int variant=0;variant<2048&&output.size()<wanted;++variant){
@@ -144,6 +157,11 @@ PortSessionStart PortGameSession::StartGreedCharacter(unsigned int seed,PortNorm
     runtime.run.player.mode=requestedMode;
     NativeRoomState* room=runtime.world.Current();
     if(!room){frontend.characterMode=requestedMode;start.result=NPS_BAD_REQUEST;return start;}
+    NativeWorldResident& live=runtime.world.resident[runtime.world.currentList];
+    if(!live.gridPostConstructed&&room->type!=16)live.gridPostConstructed=true;
+    if(runtime.world.RecordActivation(runtime.run)!=NWR_OK){
+        runtime.missingNativePrerequisite=0x7a3b8a;frontend.characterMode=requestedMode;start.result=NPS_BAD_REQUEST;return start;
+    }
     runtime.playerBody.position.x=(room->space.left+room->space.right)*0.5f;
     runtime.playerBody.position.y=(room->space.top+room->space.bottom)*0.5f;
     runtime.playerBody.previousPosition=runtime.playerBody.position;
@@ -170,6 +188,11 @@ bool PortGameSession::AdvanceGreedWave(PortNormalRuntime& runtime,const NativeSc
     runtime.greedWave=next;runtime.run.currentGrid=grid;runtime.run.previousGrid=grid;
     NativeRoomState* room=runtime.world.Current();
     if(room){
+        NativeWorldResident& live=runtime.world.resident[runtime.world.currentList];
+        if(!live.gridPostConstructed&&room->type!=16)live.gridPostConstructed=true;
+        if(runtime.world.RecordActivation(runtime.run)!=NWR_OK){
+            runtime.missingNativePrerequisite=0x7a3b8a;return false;
+        }
         NativePoint at={(room->space.left+room->space.right)*0.5f,(room->space.top+room->space.bottom)*0.5f};
         runtime.playerBody.position=at;runtime.playerBody.previousPosition=at;
         runtime.playerBody.velocity.x=runtime.playerBody.velocity.y=0;runtime.playerBody.removed=false;
@@ -215,7 +238,9 @@ bool PortGameSession::DescendNormal(PortNormalRuntime& runtime,NativeSceneFiles&
     if(next.phase!=NRF_NEED_ROOM_ENTRY){runtime.missingNativePrerequisite=0x6403;return false;}
     files.backdrop=NativeStageBackdrop(nextStage);
     runtime.world.Reset();runtime.roomEntryPrefixPrepared=false;memset(&runtime.entryIssue,0,sizeof(runtime.entryIssue));
-    NativeWorldResult wr=PrepareNormalWorld(next,runtime.world,files,&runtime.entryIssue);
+    const std::vector<NativeSaveSummary::SavedRoom>* restored=
+        runtime.pendingRestoreStage==next.context.stage&&!runtime.pendingSavedRooms.empty()?&runtime.pendingSavedRooms:0;
+    NativeWorldResult wr=PrepareNormalWorld(next,runtime.world,files,&runtime.entryIssue,restored);
     if(wr!=NWR_OK){runtime.missingNativePrerequisite=0x6404;return false;}
     runtime.run=next;
     NativeWorldResident& live=runtime.world.resident[runtime.world.currentList];
@@ -227,6 +252,18 @@ bool PortGameSession::DescendNormal(PortNormalRuntime& runtime,NativeSceneFiles&
     runtime.world.PrepareDoorVisuals(runtime.run.context.stage,runtime.run.context.stageType,
         runtime.run.context.nativeMode,runtime.run.context.challenge,runtime.playerState);
     NativeRoomState* room=runtime.world.Current();if(!room){runtime.missingNativePrerequisite=0x6407;return false;}
+    //7a1ec4's grid virtual+4 is the direct006d8ef5 return for this reached
+    //non-type16 ordinary room, and the later type>=10 entity pass is empty.
+    //Descend completes the same post-construction phase before7a3b8a.
+    if(!live.gridPostConstructed&&room->type!=16)live.gridPostConstructed=true;
+    if(runtime.world.RecordActivation(runtime.run)!=NWR_OK){runtime.missingNativePrerequisite=0x7a3b8a;return false;}
+    //Descend replaces the active floor, so the map owners start from that
+    //floor's descriptor and actual first room rather than retaining floor N.
+    runtime.minimaps.Reset();
+    unsigned int minimapNext=0;
+    if(!runtime.minimaps.EnterLinked(runtime.run,runtime.world,runtime.playerState,&minimapNext)){
+        runtime.missingNativePrerequisite=minimapNext?minimapNext:0x6f4e20;return false;
+    }
     runtime.playerBody.position.x=(room->space.left+room->space.right)*0.5f;
     runtime.playerBody.position.y=(room->space.top+room->space.bottom)*0.5f;
     runtime.playerBody.previousPosition=runtime.playerBody.position;
@@ -252,6 +289,26 @@ NormalRunResult PortGameSession::AdvanceNormalSetup(PortNormalRuntime& runtime,c
         NormalRunResult r=runtime.run.Step();
         if(runtime.run.phase==NRF_BLOCKED){runtime.phase=PNR_ERROR;frontend.CharacterStarted();return r;}
         if(runtime.run.phase!=NRF_NEED_ROOM_ENTRY)return r;
+        if(runtime.pendingRestoreStage==runtime.run.context.stage){
+            const NativePlacedRoom* actual=runtime.run.layout.ByCell(runtime.pendingRestoreGrid,runtime.pendingRestoreDimension);
+            const NativeRoomDef* definition=actual?NativeRoom(actual->definition):0;
+            const NativeSaveSummary::SavedRoom* saved=0;
+            for(unsigned int i=0;actual&&definition&&i<runtime.pendingSavedRooms.size();++i){
+                const NativeSaveSummary::SavedRoom& candidate=runtime.pendingSavedRooms[i];
+                if(candidate.listIndex==actual->listIndex&&candidate.grid==actual->gridIndex&&
+                   candidate.safeGrid==actual->safeGridIndex&&candidate.dimension==actual->dimension&&
+                   candidate.definitionStage==definition->stage&&candidate.definitionType==definition->type&&
+                   candidate.definitionVariant==(int)definition->variant){
+                    if(saved){runtime.missingNativePrerequisite=0x6fa670;runtime.phase=PNR_ERROR;return NFR_BAD_REQUEST;}
+                    saved=&candidate; }
+            }
+            if(!actual||!definition||!saved){runtime.missingNativePrerequisite=!actual||!definition?0x6faa68:0x7a1130;
+                runtime.phase=PNR_ERROR;return NFR_BAD_REQUEST;}
+            //Commit the saved actual entry identity only after its generated
+            //descriptor is available, and before the first resident is made.
+            runtime.run.currentGrid=runtime.run.previousGrid=runtime.pendingRestoreGrid;
+            runtime.run.placement.dimension=runtime.pendingRestoreDimension;
+        }
         //NRF_NEED_ROOM_ENTRY is still INSIDE6f9d20, at6fab0a ->6f3b30.
         //The explicit6b4b88 ->76c990 follows the entire generation/entry
         //return.8a1450 is a save caller, not selected-room entry.
@@ -285,7 +342,10 @@ NormalRunResult PortGameSession::AdvanceNormalSetup(PortNormalRuntime& runtime,c
         runtime.missingNativePrerequisite=runtime.roomFx.nextAddress?runtime.roomFx.nextAddress:0x7a0ce3;
         frontend.CharacterStarted();return NFR_PENDING;
     }
-    NativeWorldResult r=runtime.world.Current()?NWR_OK:PrepareNormalWorld(runtime.run,runtime.world,files,&runtime.entryIssue);
+    const std::vector<NativeSaveSummary::SavedRoom>* restored=
+        runtime.pendingRestoreStage==runtime.run.context.stage&&!runtime.pendingSavedRooms.empty()?&runtime.pendingSavedRooms:0;
+    NativeWorldResult r=runtime.world.Current()?NWR_OK:PrepareNormalWorld(runtime.run,runtime.world,files,&runtime.entryIssue,restored);
+    if(r!=NWR_OK){runtime.missingNativePrerequisite=runtime.entryIssue.nativeNext?runtime.entryIssue.nativeNext:0x6404;runtime.phase=PNR_ERROR;return NFR_BAD_REQUEST;}
     if(r==NWR_OK){runtime.phase=PNR_NEED_NATIVE_INIT;
         //7cc580 finds no group records: every successfully constructed
         //main-pass factory here is a wall, decoration or no-actor marker.
@@ -293,9 +353,19 @@ NormalRunResult PortGameSession::AdvanceNormalSetup(PortNormalRuntime& runtime,c
         //are excluded by this actual first-floor context. Door creation now
         //precedes7c8a90's perimeter in the shared global MT's original order.
         NativeWorldResident& live=runtime.world.resident[runtime.world.currentList];
-        if(!live.doors&&runtime.world.PrepareDoorActors(globalRandom,files.frame)!=NDR_OK){runtime.phase=PNR_ERROR;return NFR_BAD_REQUEST;}
+        if(!live.doors&&runtime.world.PrepareDoorActors(globalRandom,files.frame)!=NDR_OK){
+            runtime.missingNativePrerequisite=live.restoreAddress?live.restoreAddress:0x6cbe50;
+            runtime.phase=PNR_ERROR;return NFR_BAD_REQUEST;}
         r=live.perimeterReady?NWR_OK:runtime.world.PreparePerimeter(globalRandom,files.frame);
         if(r!=NWR_OK){runtime.phase=r==NWR_CONSTRUCTION_GAP?PNR_FACTORY_GAP:PNR_ERROR;return NFR_BAD_REQUEST;}
+        if(runtime.world.CurrentRoomRestored()&&!live.gridPostConstructed){
+            //The restored saved-grid pass has created every present grid. The
+            //reached 7a1ec4 virtual+4 calls are no-ops for this ordinary
+            //non-16 room; its later entity list must already be empty. Do not
+            //mark this ready for rooms whose entity lifecycle is unsupported.
+            if(live.room->type==16||live.enemies.count){runtime.missingNativePrerequisite=0x7a1ec4;runtime.phase=PNR_ERROR;return NFR_BAD_REQUEST;}
+            live.gridPostConstructed=true;
+        }
         r=runtime.world.ContinueInitialRoom(runtime.run,runtime.playerState,runtime.playerBody,runtime.playerCreation,runtime.playerManager,runtime.roomFx,globalRandom,&runtime.missingNativePrerequisite);
         if(r!=NWR_OK&&r!=NWR_CONSTRUCTION_GAP){runtime.phase=PNR_ERROR;return NFR_BAD_REQUEST;}
         if(r==NWR_CONSTRUCTION_GAP&&runtime.missingNativePrerequisite==0x9062b1){
@@ -394,7 +464,8 @@ NormalRunResult PortGameSession::AdvanceNormalSetup(NormalRunFlow& flow) {
     if(flow.phase==NRF_NEED_FLOOR_CONTEXT||flow.phase==NRF_NEED_ROOM_ENTRY||flow.phase==NRF_BLOCKED)frontend.CharacterStarted();
     return result;
 }
-NativeWorldResult PortGameSession::PrepareNormalWorld(const NormalRunFlow& flow,NativeWorld& world,const NativeSceneFiles& files,NativeWorldIssue* issue) {
+NativeWorldResult PortGameSession::PrepareNormalWorld(const NormalRunFlow& flow,NativeWorld& world,const NativeSceneFiles& files,NativeWorldIssue* issue,
+    const std::vector<NativeSaveSummary::SavedRoom>* restored) {
     if(flow.phase!=NRF_NEED_ROOM_ENTRY||flow.floor.phase!=NF_COMPLETE||flow.currentGrid!=flow.previousGrid||
         files.nativeMode!=flow.context.nativeMode)return NWR_BAD_REQUEST;
     //This caller currently enters only the confirmed first ordinary chapter.
@@ -403,7 +474,7 @@ NativeWorldResult PortGameSession::PrepareNormalWorld(const NormalRunFlow& flow,
     //Later stages retain their explicit unsupported-context boundary.
     if(flow.context.stage<1||flow.context.stage>12||flow.context.stageType<0||flow.context.stageType>2||files.backdrop!=NativeStageBackdrop(flow.context.stage))return NWR_BAD_REQUEST;
     NativeRoomSetupContext setup={files.backdrop,flow.floor.plan.configStage,false,0};
-    return world.Start(flow.layout,flow.currentGrid,flow.placement.dimension,files,issue,&setup);
+    return world.Start(flow.layout,flow.currentGrid,flow.placement.dimension,files,issue,&setup,restored);
 }
 namespace {
 bool SelectedPlayer(const NormalRunFlow& flow,const NativeWorld& world,const NativePlayerInputContext& c) {
@@ -579,45 +650,122 @@ bool NativeSaveSeed(const char* path,unsigned int* seed){
     }
     return false;
 }
+bool ValidateCurrentRoomPickups(const NativeSaveSummary& summary,PortNormalRuntime& runtime){
+    const NativePlacedRoom* descriptor=runtime.world.CurrentDescriptor();
+    if(!descriptor||runtime.world.currentList<0||runtime.world.currentList>=kNativeWorldRoomLimit)return false;
+    const NativeRoomDef* definition=NativeRoom(descriptor->definition);
+    const NativeSaveSummary::SavedRoom* savedRoom=runtime.world.RestoredRoom(runtime.world.currentList);
+    if(!definition||!summary.hasCurrentRoom||summary.currentSavedRoomIndex<0||!savedRoom||
+       savedRoom->listIndex!=runtime.world.currentList||
+       savedRoom->grid!=descriptor->gridIndex||savedRoom->safeGrid!=descriptor->safeGridIndex||
+       savedRoom->dimension!=descriptor->dimension||
+       runtime.world.layout.currentDimension!=summary.dimension||
+       savedRoom->definitionStage!=definition->stage||savedRoom->definitionType!=definition->type||
+       savedRoom->definitionVariant!=(int)definition->variant)return false;
+    NativeWorldResident& live=runtime.world.resident[runtime.world.currentList];
+    std::vector<bool> used(live.pickups.count?live.pickups.count:0,false);
+    std::vector<int> matches(summary.currentRoomPickups.size(),-1);
+    for(unsigned int savedIndex=0;savedIndex<summary.currentRoomPickups.size();++savedIndex){
+        const NativeSaveSummary::Pickup& saved=summary.currentRoomPickups[savedIndex];
+        int matched=-1;
+        for(int liveIndex=0;liveIndex<live.pickups.count;++liveIndex){
+            const NativePickup* pickup=live.pickups.entries[liveIndex];
+            if(!pickup||used[liveIndex]||pickup->type!=saved.type||pickup->variant!=saved.variant||
+               pickup->subtype!=saved.subtype||pickup->grid!=saved.grid||
+               pickup->initialSeed!=saved.initialSeed)continue;
+            if(matched>=0)return false; //Ambiguous duplicate live identity.
+            matched=liveIndex;
+        }
+        if(matched<0)return false; //Saved live owner has no reconstructed lifecycle owner.
+        used[matched]=true;matches[savedIndex]=matched;
+    }
+    if(live.pickups.count!=(int)summary.currentRoomPickups.size())return false;
+    //NativeWorld::Enter has already applied the one authoritative saved
+    //pickup reconciliation. This second pass verifies every resulting owner
+    //without mutating or re-running callbacks/RNG.
+    for(unsigned int savedIndex=0;savedIndex<summary.currentRoomPickups.size();++savedIndex){
+        const NativeSaveSummary::Pickup& saved=summary.currentRoomPickups[savedIndex];
+        NativePickup* pickup=live.pickups.entries[matches[savedIndex]];
+        if(!pickup||!pickup->ready||pickup->collected||pickup->type!=saved.type||pickup->variant!=saved.variant||
+           pickup->subtype!=saved.subtype||pickup->grid!=saved.grid||pickup->currentSeed!=saved.currentSeed||
+           pickup->initialSeed!=saved.initialSeed||memcmp(&pickup->position.x,&saved.x,4)||memcmp(&pickup->position.y,&saved.y,4)||
+           pickup->native46c!=saved.native46c||pickup->native478!=saved.native478||pickup->native480!=saved.native480||
+           pickup->native484!=saved.native484||pickup->native27c!=saved.native27c||pickup->native474!=saved.native474||
+           pickup->native476!=saved.native476||pickup->native4cc!=saved.native4cc||pickup->native470!=saved.native470||
+           pickup->native34!=saved.native34||pickup->native38!=saved.native38||pickup->native360!=saved.native360||
+           pickup->native4e0!=saved.native4e0||pickup->native47c!=saved.native47c||
+           pickup->nativeExtraCount!=saved.nativeExtraCount||pickup->nativeChildCount!=saved.nativeChildCount||
+           memcmp(&pickup->nativeD8,&saved.nativeD8,4))return false;
+    }
+    return true;
 }
-namespace { bool NativeSavePlayerId(const char*,int*); }
+}
+bool PortGameSession::ContinueSelectedNativeRun(PortNormalRuntime& runtime,NativeSceneFiles& files,NativeActionSource* actions){
+    std::string primary,rerun;
+    if(!frontend.LocalRunFilenames(&primary,&rerun))return false;
+    return ContinueNativeSave(primary.c_str(),runtime,files,actions);
+}
+bool PortGameSession::SaveSelectedNativeContinue(PortNormalRuntime& runtime){
+    std::string primary,rerun;
+    if(!frontend.LocalRunFilenames(&primary,&rerun))return false;
+    return SaveNativeContinue(primary.c_str(),runtime);
+}
 bool PortGameSession::ContinueNativeSave(const char* path,PortNormalRuntime& runtime,NativeSceneFiles& files,NativeActionSource* actions){
     unsigned int seed=0;
     if(!NativeSaveSeed(path,&seed))return false;
     NativeSaveSummary summary;
-    const bool exact=NativeReadSaveSummary(path,summary)&&summary.valid&&summary.hasPlayer&&summary.seed==seed;
-    
-    int savedPlayer=-1;
-    if(exact)savedPlayer=summary.playerId;
-    else if(!NativeSavePlayerId(path,&savedPlayer))savedPlayer=-1;
-    if(savedPlayer>=0){
-        bool found=false;
-        for(int page=0;page<2&&!found;++page)for(int choice=0;choice<kNativeCharacterCount;++choice){
-            const NativeCharacterDef* c=NativeCharacter(page,choice);
-            if(c&&c->player==savedPlayer){frontend.characterPage=page;frontend.characterChoice=choice;found=true;break;}
-        }
+    //A native Continue is authoritative. Decode and validate the complete
+    //supported GSR0142 payload before touching frontend or runtime state.
+    if(!NativeReadSaveSummary(path,summary)||!summary.valid||!summary.hasPlayer||summary.seed!=seed)return false;
+    PendingRestoreCleanup pendingCleanup(runtime);
+    const int savedMode=summary.greed?(summary.greedWaveCount>11?3:2):summary.nativeMode;
+    if((summary.greed&&(savedMode<2||savedMode>3))||(!summary.greed&&(savedMode<0||savedMode>1)))return false;
+    //The native load path cannot execute8a163d/8a1745's fresh-run publication.
+    //Keep the selected canonical file untouched while the existing bootstrap
+    //reconstructs the owned run and room records in memory.
+    runtime.suppressInitialNewRunPublish=true;
+    const int savedPlayer=summary.playerId;
+    if(savedPlayer<0)return false;
+    int savedPage=-1,savedChoice=-1;
+    for(int page=0;page<2&&savedPage<0;++page)for(int choice=0;choice<kNativeCharacterCount;++choice){
+        const NativeCharacterDef* c=NativeCharacter(page,choice);
+        if(c&&c->player==savedPlayer){savedPage=page;savedChoice=choice;break;}
     }
+    if(savedPage<0||savedChoice<0)return false;
+    frontend.characterPage=savedPage;frontend.characterChoice=savedChoice;frontend.characterMode=savedMode;
     files.backdrop=NativeStageBackdrop(1);
     PortSessionStart start;
-    if(exact&&summary.greed){
-        frontend.characterMode=2;
+    if(summary.greed){
         start=StartGreedCharacter(seed,runtime,files);
         if(start.result!=NPS_WORLD_PENDING)return false;
         if(runtime.phase!=PNR_READY)return false;
     }else{
         start=StartNormalCharacter(seed,runtime);
         if(start.result!=NPS_WORLD_PENDING)return false;
+        files.nativeMode=runtime.run.context.nativeMode;
+        if(runtime.phase!=PNR_GENERATING||runtime.run.context.nativeMode!=savedMode||
+           summary.currentGrid<0||summary.dimension<0||summary.dimension>2){
+            runtime.missingNativePrerequisite=0x6faa68;return false;}
+        runtime.pendingSavedRooms=summary.savedRooms;
+        runtime.pendingRestoreStage=summary.stage;
+        runtime.pendingRestoreGrid=summary.currentGrid;
+        runtime.pendingRestoreDimension=summary.dimension;
         for(int step=0;step<2000&&(runtime.phase==PNR_GENERATING||runtime.phase==PNR_ROOM_COMPONENTS);++step){
             NativeActionFrame frame;frame.Clear(runtime.playerCreation.native153c,runtime.playerBody.entityToken,files.frame+step);
             frame.SupplyConnection(true);frame.SupplyDrop(false);
             for(int a=0;a<12;++a){frame.SupplyHeld(a,false);frame.SupplyPressed(a,false);if(a<8)frame.SupplyValue(a,0);}
             NativeFrameActions generated(frame);
-            NormalRunResult r=AdvanceNormalSetup(runtime,files,actions?actions:&generated);
+            //The load path rebuilds the restored player identity before this
+            //loop. A pre-load caller frame still carries the old controller/
+            //token owner, so it cannot service the restored player's first
+            //setup tick. Use the frame constructed from the restored creation;
+            //the next live gameplay frame is built normally after Continue.
+            NormalRunResult r=AdvanceNormalSetup(runtime,files,&generated);
             if(r==NFR_BAD_REQUEST)return false;
         }
         if(runtime.phase!=PNR_READY)return false;
     }
-    if(!exact)return true;
+    files.nativeMode=runtime.run.context.nativeMode;
     if(summary.greed){
         const int targetWave=summary.greedWave;
         if(targetWave<0||targetWave>runtime.greedWaveCount)return false;
@@ -677,8 +825,36 @@ bool PortGameSession::ContinueNativeSave(const char* path,PortNormalRuntime& run
     if(!summary.greed&&summary.currentGrid>=0&&(runtime.world.currentGrid!=summary.currentGrid||
        runtime.world.layout.currentDimension!=summary.dimension)){
         NativeWorldIssue issue;NativeRoomSetupContext setup={files.backdrop,runtime.run.floor.plan.configStage,false,0};
-        if(runtime.world.Enter(summary.currentGrid,summary.dimension,files,&issue,&setup)!=NWR_OK)return false;
+        if(runtime.world.Enter(summary.currentGrid,summary.dimension,files,&issue,&setup)!=NWR_OK){
+            runtime.missingNativePrerequisite=issue.nativeNext?issue.nativeNext:0x6f5037;return false;}
     }
+    if(!summary.greed){
+        //The save stores descriptor origins, while currentGrid is the actual
+        //entered cell. Resolve through the generated layout so a large-room
+        //footprint cannot alias another descriptor.
+        const NativePlacedRoom* actual=runtime.world.CurrentDescriptor();
+        const NativeSaveSummary::SavedRoom* saved=0;
+        int savedIndex=-1;
+        for(unsigned int i=0;actual&&i<summary.savedRooms.size();++i){
+            const NativeSaveSummary::SavedRoom& candidate=summary.savedRooms[i];
+            if(candidate.listIndex==runtime.world.currentList&&candidate.grid==actual->gridIndex&&
+               candidate.safeGrid==actual->safeGridIndex&&candidate.dimension==actual->dimension){
+                if(saved)return false;
+                saved=&candidate;savedIndex=(int)i;
+            }
+        }
+        if(!actual||!saved)return false;
+        summary.currentSavedRoomIndex=savedIndex;
+        summary.roomDefinition=saved->definitionStage;summary.roomDefinitionType=saved->definitionType;
+        summary.roomDefinitionVariant=saved->definitionVariant;
+        summary.hasCurrentRoom=saved->visitedCount!=0;
+        if(summary.hasCurrentRoom){
+            const NativeSaveSummary::SavedRoom* restored=runtime.world.RestoredRoom(runtime.world.currentList);
+            if(!restored||restored->listIndex!=saved->listIndex||restored->grid!=saved->grid)return false;
+            summary.currentRoomPickups=saved->pickups;
+        }
+    }
+    if(!summary.greed&&summary.hasCurrentRoom&&!ValidateCurrentRoomPickups(summary,runtime))return false;
     NativeRoomState* room=runtime.world.Current();
     if(summary.hasExtras){
         runtime.playerBody.position.x=summary.positionX;runtime.playerBody.position.y=summary.positionY;
@@ -700,66 +876,17 @@ bool PortGameSession::ContinueNativeSave(const char* path,PortNormalRuntime& run
 bool PortGameSession::SaveNativeContinue(const char* path,PortNormalRuntime& runtime){
     if(!path||runtime.phase!=PNR_READY||runtime.playerDead)return false;
     NativeGamePersistent snapshot;unsigned int next=0;
-    if(!snapshot.CaptureCurrent(runtime.run,runtime.world,runtime.gameRandom,runtime.itemPools,runtime.nightmares,runtime.history,
-        runtime.playerState,runtime.playerStartup,runtime.playerCreation,runtime.playerSprites,runtime.playerBody,runtime.playerManager,&next))return false;
+    const bool captured=snapshot.CaptureCurrent(runtime.run,runtime.world,runtime.gameRandom,runtime.itemPools,runtime.nightmares,runtime.history,
+        runtime.playerState,runtime.playerStartup,runtime.playerCreation,runtime.playerSprites,runtime.playerBody,runtime.playerManager,&next);
     runtime.nativeSaveCaptureAddress=next;
+    if(!captured)return false;
     NativeSaveWriter writer;
-    if(!writer.InitialGame(snapshot)){runtime.nativeSaveCaptureAddress=writer.nextAddress;return false;}
+    if(!writer.InitialGame(snapshot)){
+        runtime.nativeSaveCaptureAddress=writer.nextAddress;return false;
+    }
     FILE* file=fopen(path,"wb");
     if(!file)return false;
     size_t wrote=writer.data.empty()?0:fwrite(&writer.data[0],1,writer.data.size(),file);
     bool closed=fclose(file)==0;
     return wrote==writer.data.size()&&closed;
-}
-
-namespace {
-class NativeSaveCursor {
-public:
-    const unsigned char* data;size_t size,pos;bool ok;
-    NativeSaveCursor(const unsigned char* d,size_t n):data(d),size(n),pos(16),ok(true){}
-    bool Skip(unsigned int count){
-        if(!ok||pos+count>size-4){ok=false;return false;}
-        pos+=count;return true;
-    }
-    bool Read(unsigned int count,unsigned int* value){
-        if(!ok||!value||count>4||pos+count>size-4){ok=false;return false;}
-        unsigned int n=0;for(unsigned int i=0;i<count;++i)n|=(unsigned int)data[pos+i]<<(8*i);
-        pos+=count;*value=n;return true;
-    }
-};
-bool SkipRoom(NativeSaveCursor& c){
-    if(!c.Skip(12+2+2+2+1+4+32+12+2+2+4+20))return false;
-    for(int i=0;i<448;++i){
-        unsigned int type=0;if(!c.Read(2,&type))return false;
-        if(type&&!c.Skip(8+2+4+4+4))return false;
-    }
-    unsigned int entities=0;if(!c.Read(4,&entities))return false;
-    if(entities>4096)return false;
-    if(!c.Skip(entities*(24+1+8+1+32+1+8+2+4+1)))return false;
-    return c.Skip(4+4+2+2+16+8+4+2);
-}
-bool NativeSavePlayerId(const char* path,int* playerId){
-    if(!path||!playerId)return false;
-    FILE* f=fopen(path,"rb");if(!f)return false;
-    if(fseek(f,0,SEEK_END)!=0){fclose(f);return false;}long size=ftell(f);
-    if(size<64||fseek(f,0,SEEK_SET)!=0){fclose(f);return false;}
-    std::vector<unsigned char> bytes((unsigned int)size);
-    size_t got=fread(&bytes[0],1,(size_t)size,f);fclose(f);
-    if(got!=(size_t)size||memcmp(&bytes[0],"ISAACNG_GSR0142",15))return false;
-    NativeSaveCursor c(&bytes[0],(size_t)size);
-    if(!c.Skip(4+1+1+1+4))return false;
-    unsigned int flags=0;if(!c.Read(2,&flags)||flags>49)return false;
-    if(!c.Skip(flags+14*4+4+4+1+4+6*4+30*4+30*4+4+4+8*4+4))return false;
-    unsigned int levelFlags=0;if(!c.Read(2,&levelFlags)||levelFlags>24)return false;
-    if(!c.Skip(levelFlags+4+12*4+3*4+14*4))return false;
-    unsigned int configs=0,rooms=0;if(!c.Read(4,&configs)||!c.Skip(configs*4))return false;
-    if(!c.Read(4,&rooms)||rooms>507)return false;
-    for(unsigned int i=0;i<rooms+18;++i)if(!SkipRoom(c))return false;
-    unsigned int ownerWords=0;if(!c.Read(2,&ownerWords)||!c.Skip(ownerWords*2))return false;
-    static const unsigned int sizes[]={4,1,1,4,4,4,4,4,4,4,1,1,4,4,4,4,4,1,1,4,4,1};
-    int id=-1;
-    for(unsigned int i=0;i<22;++i){unsigned int value=0;if(!c.Read(sizes[i],&value))return false;if(i==20)id=(int)value;}
-    if(id<0||id>255)return false;
-    *playerId=id;return true;
-}
 }

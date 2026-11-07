@@ -20,3 +20,8 @@ build/
 __pycache__/
 *.pyc
 /steam-screenshots/
+/tools/.venv/
+# console logs copied off the USB drive, and the info file early runs wrote at the root
+/work/
+/savedatapath.txt
+

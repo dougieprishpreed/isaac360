@@ -50,6 +50,19 @@ bool ReadBits(Cursor& c){
     unsigned int count=0;if(!c.Read(2,&count)||count>65535)return false;
     return c.Skip((count+7)/8);
 }
+bool ReadEntity(Cursor& c,unsigned int fields[0x60]){
+    for(unsigned int i=0;i<0x60;++i)fields[i]=0;
+    static const unsigned int first[6]={0x00,0x04,0x08,0x0c,0x10,0x14};
+    for(unsigned int i=0;i<6;++i)if(!c.Read(4,&fields[first[i]]))return false;
+    if(!c.Read(1,&fields[0x50]))return false;
+    if(!c.Read(4,&fields[0x18])||!c.Read(4,&fields[0x1c])||!c.Read(1,&fields[0x22]))return false;
+    for(unsigned int at=0x24;at<=0x40;at+=4)if(!c.Read(4,&fields[at]))return false;
+    if(!c.Read(1,&fields[0x23])||!c.Read(4,&fields[0x44])||!c.Read(4,&fields[0x48]))return false;
+    if(!c.Read(2,&fields[0x20]))return false;
+    if(!c.Read(4,&fields[0x4c]))return false;
+    unsigned int extra=1;if(!c.Read(1,&extra)||extra)return false;
+    return true;
+}
 bool ReadPlayer(Cursor& c,NativeSaveSummary& out){
     unsigned int w[11];for(int i=0;i<11;++i)if(!c.Read(4,&w[i]))return false;
     out.playerId=(int)w[0];out.redHearts=(int)w[1];out.maxRedHearts=(int)w[2];
@@ -136,17 +149,53 @@ bool ReadPlayer(Cursor& c,NativeSaveSummary& out){
 bool ReadRoom(Cursor& c,NativeSaveSummary& out){
     unsigned int def[3];for(int i=0;i<3;++i)if(!c.Read(4,&def[i]))return false;
     unsigned int grid=0,safe=0,list=0,dimension=0;
+    NativeSaveSummary::SavedRoom savedRoom;savedRoom.grid=0;savedRoom.dimension=0;
+    savedRoom.definitionStage=(int)def[0];savedRoom.definitionType=(int)def[1];savedRoom.definitionVariant=(int)def[2];
     if(!c.Read(2,&grid)||!c.Read(2,&safe)||!c.Read(2,&list)||!c.Read(1,&dimension))return false;
-    if(!c.Skip(4)||!c.Skip(32)||!c.Skip(12)||!c.Skip(2)||!c.Skip(2)||!c.Skip(4)||!c.Skip(20))return false;
+    if(!c.Skip(4)||!c.Skip(32)||!c.Read(4,&savedRoom.displayFlags)||!c.Read(4,&savedRoom.visitedCount)||
+       !c.Read(4,&savedRoom.flags)||!c.Read(2,&savedRoom.native48)||
+       !c.Read(2,&savedRoom.clearEventCount)||!c.Skip(4)||!c.Skip(20))return false;
+    savedRoom.grids.resize(448);
     for(int i=0;i<448;++i){
         unsigned int type=0;if(!c.Read(2,&type))return false;
-        if(type&&!c.Skip(22))return false;
+        savedRoom.grids[i].type=(int)type;
+        if(type){
+            unsigned int variant=0,state=0,count=0;
+            if(!c.Read(4,&variant)||!c.Read(4,&state)||!c.Read(2,&count)||!c.Read(4,&savedRoom.grids[i].seed)||
+               !c.Read(4,&savedRoom.grids[i].tail)||!c.Read(4,&savedRoom.grids[i].auxiliary))return false;
+            savedRoom.grids[i].variant=(int)variant;savedRoom.grids[i].state=(int)state;
+            savedRoom.grids[i].count=(int)count;
+        }
     }
     unsigned int entities=0;if(!c.Read(4,&entities)||entities>4096)return false;
-    if(!c.Skip((size_t)entities*82))return false;
+    for(unsigned int i=0;i<entities;++i){
+        unsigned int fields[0x60];if(!ReadEntity(c,fields))return false;
+        NativeSaveSummary::Entity entity;
+        for(unsigned int field=0;field<0x60;++field)entity.fields[field]=fields[field];
+        savedRoom.entities.push_back(entity);
+        if(fields[0]==5){
+            NativeSaveSummary::Pickup pickup;
+            pickup.type=(int)fields[0];pickup.variant=(int)fields[4];pickup.subtype=(int)fields[8];
+            pickup.grid=(int)fields[0xc];pickup.native46c=fields[0x10];pickup.native478=fields[0x14];
+            pickup.native480=fields[0x18];pickup.native484=fields[0x1c];
+            //0079d150 uses MOVSX from the serialized word into complete+27c.
+            pickup.native27c=(fields[0x20]&0x8000U)?(fields[0x20]|0xffff0000U):fields[0x20];
+            pickup.native474=fields[0x22];
+            pickup.native476=fields[0x23];pickup.native4cc=fields[0x24];
+            pickup.native470=fields[0x30];
+            pickup.currentSeed=fields[0x34];pickup.initialSeed=fields[0x38];
+            pickup.native34=fields[0x3c];pickup.native38=fields[0x40];pickup.native360=fields[0x44];
+            pickup.native4e0=fields[0x4c];pickup.native47c=fields[0x50];
+            pickup.nativeExtraCount=0;pickup.nativeChildCount=0;
+            memcpy(&pickup.x,&fields[0x28],4);memcpy(&pickup.y,&fields[0x2c],4);
+            memcpy(&pickup.nativeD8,&fields[0x48],4);
+            savedRoom.pickups.push_back(pickup);
+        }
+    }
     if(!c.Skip(4)||!c.Skip(4)||!c.Skip(34))return false;
-    if((int)grid==out.currentGrid&&(out.dimension<0||(int)dimension==out.dimension))
-        out.roomDefinition=(int)def[0];
+    savedRoom.grid=(int)grid;savedRoom.safeGrid=(int)safe;savedRoom.listIndex=(int)list;
+    savedRoom.dimension=(int)dimension;
+    out.savedRooms.push_back(savedRoom);
     return true;
 }
 bool ReadPools(Cursor& c,NativeSaveSummary& out){
@@ -167,7 +216,11 @@ bool ReadPools(Cursor& c,NativeSaveSummary& out){
     out.hasPools=true;return true;
 }
 }
-NativeSaveSummary::NativeSaveSummary():valid(false),hasPlayer(false),hasPools(false),greed(false),seed(0),playerId(-1),stage(0),stageType(0),currentGrid(-1),dimension(-1),roomDefinition(-1),roomCount(0),greedWave(0),greedWaveCount(0),greedBossWave(0),
+NativeSaveSummary::Entity::Entity(){
+    for(unsigned int i=0;i<0x60;++i)fields[i]=0;
+}
+NativeSaveSummary::NativeSaveSummary():valid(false),hasPlayer(false),hasPools(false),hasCurrentRoom(false),greed(false),seed(0),nativeMode(-1),playerId(-1),stage(0),stageType(0),currentGrid(-1),dimension(-1),roomDefinition(-1),roomDefinitionType(-1),roomDefinitionVariant(-1),roomCount(0),greedWave(0),greedWaveCount(0),greedBossWave(0),
+    currentSavedRoomIndex(-1),
     redHearts(0),maxRedHearts(0),soulHearts(0),blackHeartMask(0),keys(0),bombs(0),coins(0),heldCard(0),heldPill(-1),hasExtras(false),hasTriggerCache(false),
     positionX(0.0f),positionY(0.0f),fireDelay(0.0f),damage(0.0f),moveSpeed(0.0f),luck(0.0f),
     permDamageBonus(0.0f),permFireRateBonus(0.0f),permRangeBonus(0.0f),permShotSpeedBonus(0.0f),permSpeedBonus(0.0f),permLuckBonus(0.0f),
@@ -189,7 +242,8 @@ bool NativeReadSaveSummary(const char* path,NativeSaveSummary& output){
     if(stored!=(checksum^0x96696996U))return false;
     Cursor c(&bytes[0],(size_t)length);
     unsigned int value=0;
-    if(!c.Read(4,&value)||!c.Skip(1+1+1+4))return false;
+    if(!c.Read(4,&value)||!c.Skip(1+1+1)||!c.Read(4,&value)||value>3)return false;
+    output.nativeMode=(int)value;
     if(!c.Read(2,&value)||value>49||!c.Skip(value))return false;
     if(!c.Skip(56+4+4+1+4+24))return false;
     for(int i=0;i<30;++i)if(!c.Skip(8))return false;
@@ -206,6 +260,20 @@ bool NativeReadSaveSummary(const char* path,NativeSaveSummary& output){
     static const unsigned int sizes[]={4,1,1,4,4,4,4,4,4,4,1,1,4,4,4,4,4,1,1,4,4,1};
     if(!c.Skip(sizes[0])||!c.Read(1,&value))return false;
     output.dimension=(int)value;
+    int currentMatches=0;
+    for(unsigned int i=0;i<output.savedRooms.size();++i){
+        const NativeSaveSummary::SavedRoom& room=output.savedRooms[i];
+        if(room.grid==output.currentGrid&&room.dimension==output.dimension){
+            ++currentMatches;output.roomDefinition=room.definitionStage;
+            output.roomDefinitionType=room.definitionType;
+            output.roomDefinitionVariant=room.definitionVariant;
+            output.currentRoomEntities=room.entities;
+            output.currentRoomPickups=room.pickups;
+            output.currentSavedRoomIndex=(int)i;
+        }
+    }
+    if(currentMatches>1)return false;
+    output.hasCurrentRoom=currentMatches==1;
     for(int i=2;i<22;++i)if(!c.Skip(sizes[i]))return false;
     unsigned int players=0;if(!c.Read(1,&players)||players!=1)return false;
     if(!ReadPlayer(c,output)){return false;}

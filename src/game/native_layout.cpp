@@ -49,4 +49,9 @@ const NativePlacedRoom* NativeLevelLayout::ByCell(int gridIndex,int dimension) c
     return ByList(owners[dimension][gridIndex]);
 }
 const NativePlacedRoom* NativeLevelLayout::ByList(int index) const { return index>=0 && index<count && index<kNativePlacedRoomLimit?&rooms[index]:0; }
+NativePlacedRoom* NativeLevelLayout::ByList(int index) {
+    if(index>=0 && index<count && index<kNativePlacedRoomLimit)return &rooms[index];
+    if(index>=507 && index<507+18)return &offGrid[index-507];
+    return 0;
+}
 NativePlacedRoom* NativeLevelLayout::Special(int gridIndex) {return gridIndex>=-18&&gridIndex<0?&offGrid[-gridIndex-1]:0;}

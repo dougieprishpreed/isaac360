@@ -10,11 +10,11 @@ class NativeEnemyShotSystem;
 class NativeEnemy {
 public:
     NativeEntityBody body;
-    bool ready,dead;
+    bool ready,dead,participates;
     int type;
     unsigned int seed;
     NativeEnemy();
-    bool Begin(int type,int variant,unsigned int seed,const NativePoint& position,unsigned int frame,int stage);
+    bool Begin(int type,int variant,int subtype,unsigned int seed,const NativePoint& position,unsigned int frame,int stage);
     void Update(const NativeRoomState&,const NativeEntityBody& player,NativeEnemyShotSystem* shots=0);
     void Damage(float amount);
     void Swap(NativeEnemy&);

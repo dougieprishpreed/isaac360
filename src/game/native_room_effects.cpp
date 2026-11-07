@@ -12,6 +12,10 @@ float Sub(float a,float b){volatile float f=a-b;return f;}
 float Mul(float a,float b){volatile float f=a*b;return f;}
 float Div(float a,float b){volatile float f=a/b;return f;}
 float GlobalFloat(NativeMt& r){volatile float f=(float)r.Next();return Mul(f,F(kEffectGlobalFloatScale));}
+unsigned int GlobalDraws(int before,int after){
+    if(before<0||before>624||after<0||after>624)return 0xffffffffU;
+    return after>=before?(unsigned int)(after-before):(unsigned int)(624-before+after);
+}
 NativePoint Times(NativePoint p,float f){p.x=Mul(p.x,f);p.y=Mul(p.y,f);return p;}
 NativePoint Difference(NativePoint a,NativePoint b){a.x=Sub(a.x,b.x);a.y=Sub(a.y,b.y);return a;}
 float Squared(NativePoint p){return Add(Mul(p.x,p.x),Mul(p.y,p.y));}
@@ -56,7 +60,7 @@ const NativeEntityBodyProperties* NativePreparedEffectBody(int v,int sub){
         if(kRoomEffectBodies[i].variant==v&&kRoomEffectBodies[i].subtype==sub)return kRoomEffectBodies+i;
     return 0;
 }
-NativeRoomEffect::NativeRoomEffect():ready(false),anchored(false),nextAddress(0),updates(0),native398(0),native3a4(-1),native3a8(1),renderDepth(0),native39c(0),native3a0(0),native3b8(0),angle(0),native3c0(1){native284.x=native284.y=0;}
+NativeRoomEffect::NativeRoomEffect():ready(false),anchored(false),nextAddress(0),updates(0),native398(0),native3a4(-1),native3a8(1),renderDepth(0),native39c(0),native3a0(0),native3b8(0),angle(0),native3c0(1),restoreInitGlobalDraws(0),restorePostGlobalDraws(0){native284.x=native284.y=0;}
 bool NativeRoomEffect::Init(int variant,unsigned int seed,const NativePoint& position,int configStage,int backdrop,NativeMt& global){
     nextAddress=0x5aa8d0;
     const NativeEntityBodyProperties* p=NativePreparedEffectBody(variant,0);
@@ -78,6 +82,49 @@ bool NativeRoomEffect::Init(int variant,unsigned int seed,const NativePoint& pos
     if(sprite.RefreshSheets()!=NSPR_OK)return false;
     //7eb1f0's original unmodified callback registry has no subscribers.
     nextAddress=0;ready=true;return true;
+}
+bool NativeRoomEffect::RestoreSaved(int variant,int subtype,const NativePoint& position,int configStage,int backdrop,
+    const unsigned int fields[0x60],NativeMt& global){
+    nextAddress=0x79d0b0;
+    const NativeEntityBodyProperties* p=NativePreparedEffectBody(variant,subtype);
+    if(ready||!p||!fields||subtype!=0||(variant!=33&&variant!=68)||configStage!=1||(backdrop!=1&&backdrop!=2))return false;
+    unsigned int initial=fields[0x34],current=fields[0x38];
+    //The default record sentinels are not stores into body.native18/1c.
+    if(!initial||!current||fields[0x18]!=0xffffffffU||fields[0x1c]!=0xffffffffU)return false;
+    //79dbc6..de passes saved+34 to6bb0c0, whose virtual+4 constructor is
+    //005aa8d0. Keep that factory/Init work, including variant68's two draws;
+    //restore does not erase Init merely because common fields are serialized.
+    const int beforeInit=global.index;
+    if(!Init(variant,initial,position,configStage,backdrop,global))return false;
+    restoreInitGlobalDraws=GlobalDraws(beforeInit,global.index);
+    if(restoreInitGlobalDraws==0xffffffffU)return false;
+    nextAddress=0x79d0b0;
+    //79d150 reads +38 and MOVSXes only word+20 into complete+27c. The
+    //66f544/674ef3 frame-count owner is separate and is not reconstructed
+    //from that serialized word.
+    body.native27c=(fields[0x20]&0x8000U)?(int)(fields[0x20]|0xffff0000U):(int)fields[0x20];
+    body.position.x=position.x;body.position.y=position.y;body.previousPosition=position;
+    body.initialSeed=initial;body.random.state=current;
+    nextAddress=0;ready=true;return true;
+}
+bool NativeRoomEffect::PostRestore(const NativeRoomState& room,const NativeEntityBody& player,
+    const NativePlayerState& state,const NativePlayerManager& manager,const NativePlayerEffects& roomEffects,
+    NativeMt& global,unsigned int frame){
+    if(!ready||!global.Valid())return false;
+    const int beforePost=global.index;restorePostGlobalDraws=0;
+    if(body.variant==33){
+        //79d359 and79d37e draw Y then X;79d3ab/3c3 map them through the
+        //actual room bounds loaded from game+18190+14..20.
+        float y=GlobalFloat(global),x=GlobalFloat(global);
+        body.position.x=Add(Mul(Sub(room.space.right,room.space.left),x),room.space.left);
+        body.position.y=Add(Mul(Sub(room.space.bottom,room.space.top),y),room.space.top);
+        body.previousPosition=body.position;
+    }else if(body.variant==68){
+        //79d2f3..2fc invokes vtable+0xc, the reached005b0d50 update path.
+        if(!Update(room,player,state,manager,roomEffects,global,frame))return false;
+    }else return false;
+    restorePostGlobalDraws=GlobalDraws(beforePost,global.index);
+    return restorePostGlobalDraws!=0xffffffffU;
 }
 bool NativeRoomEffect::Update(const NativeRoomState& room,const NativeEntityBody& player,const NativePlayerState& state,const NativePlayerManager& manager,const NativePlayerEffects& roomEffects,NativeMt& global,unsigned int frame){
     nextAddress=0x5b0d50;
@@ -166,5 +213,20 @@ bool NativeRoomEffects::Spawn(int variant,unsigned int seed,const NativePoint& p
     NativeRoomEffect* effect=new NativeRoomEffect;
     if(!effect->Init(variant,seed,position,stage,backdrop,global)){if(next)*next=effect->nextAddress;delete effect;return false;}
     if(!manager.RegisterEntity(effect->body)){delete effect;return false;}
+    entities.push_back(effect);return true;
+}
+bool NativeRoomEffects::RestoreSaved(const unsigned int fields[0x60],NativeRoomState& room,
+    const NativeEntityBody& player,const NativePlayerState& state,int configStage,int backdrop,
+    NativePlayerManager& manager,NativeMt& global,unsigned int frame,unsigned int* next){
+    if(!fields){if(next)*next=0x79daf0;return false;}
+    int type=(int)fields[0x00],variant=(int)fields[0x04],subtype=(int)fields[0x08];
+    if(type!=1000||(variant!=33&&variant!=68)||subtype!=0){if(next)*next=0x79daf0;return false;}
+    NativePoint position;memcpy(&position.x,&fields[0x28],4);memcpy(&position.y,&fields[0x2c],4);
+    NativeRoomEffect* effect=new NativeRoomEffect;
+    if(!effect->RestoreSaved(variant,subtype,position,configStage,backdrop,fields,global)){
+        if(next)*next=effect->nextAddress;delete effect;return false;}
+    if(!manager.RegisterEntity(effect->body)){delete effect;if(next)*next=0x79dc45;return false;}
+    if(!effect->PostRestore(room,player,state,manager,roomEffects,global,frame)){
+        if(next)*next=effect->nextAddress;delete effect;return false;}
     entities.push_back(effect);return true;
 }

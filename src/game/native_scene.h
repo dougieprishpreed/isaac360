@@ -17,7 +17,8 @@ NativeSceneResult NativeSceneInspectPlan(const RoomRecord&,const NativeSpawnPlan
 //Selected raw record and original seed ownership. This prepares room components;
 //complete native Init, player/actors/doors and dynamic saves remain unfinished.
 NativeSceneResult NativeSceneBuildRoom(const RoomRecord&,const NativeRoomSeeds&,int backdrop,int nativeMode,int configStage,
-    NativeRoomState*,NativeConstructionIssue* issue=0,NativeRoomMarkers* markers=0,unsigned int frame=0,NativeEnemyList* enemies=0,NativePickupList* pickups=0);
+    NativeRoomState*,NativeConstructionIssue* issue=0,NativeRoomMarkers* markers=0,unsigned int frame=0,NativeEnemyList* enemies=0,
+    NativePickupList* pickups=0,bool restoreStaticGrids=false);
 struct NativeSceneFiles {const char* indexPath;const char* objectRoot;int backdrop,nativeMode;unsigned int frame;};
 NativeSceneResult NativeSceneReadRecord(const NativeSceneFiles&,int definition,unsigned char** bytes,unsigned int* size,unsigned int* recordHash);
 #endif

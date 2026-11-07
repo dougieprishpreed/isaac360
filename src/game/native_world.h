@@ -4,6 +4,7 @@
 #include "native_doors.h"
 #include "native_enemy.h"
 #include "native_pickup.h"
+#include "native_save_reader.h"
 static const int kNativeWorldRoomLimit=kNativePlacedRoomLimit+18;
 struct NormalRunFlow;
 class NativePlayerState;
@@ -20,6 +21,7 @@ enum NativeWorldResult { NWR_OK,NWR_BAD_REQUEST,NWR_NO_ROOM,NWR_NO_DOOR,NWR_SOUR
 struct NativeWorldIssue {
     NativeWorldResult result;int listIndex,gridIndex,dimension,definition;
     NativeSceneResult source;NativeConstructionIssue construction;
+    unsigned int nativeNext;
 };
 struct NativeWorldResident {
     NativeRoomState* room;unsigned int hash,activations;
@@ -42,6 +44,8 @@ struct NativeWorldResident {
     int doorVisualGaps;
     NativeRng roomInitRandom;
     bool gridPostConstructed;
+    bool savedActorsRestored;
+    unsigned int restoreAddress;
     int ambientCounts[3],ambientGroup,ambientIndex;
     NativeRoomSetupState setup;
 };
@@ -55,12 +59,14 @@ public:
     int currentGrid,previousGrid; //Actual entered cells, including occupied L cells.
     unsigned int entrySerial;
     NativeWorldResident resident[kNativeWorldRoomLimit];
+    std::vector<NativeSaveSummary::SavedRoom> restoredRooms;
     NativeWorld();
     ~NativeWorld();
     void Reset();
     //Atomic level replacement. No raw reads, room construction or RNG draws.
     bool Bind(const NativeLevelLayout& selected);
-    NativeWorldResult Start(const NativeLevelLayout&,int startGrid,int dimension,const NativeSceneFiles&,NativeWorldIssue* issue=0,const NativeRoomSetupContext* setup=0);
+    NativeWorldResult Start(const NativeLevelLayout&,int startGrid,int dimension,const NativeSceneFiles&,NativeWorldIssue* issue=0,const NativeRoomSetupContext* setup=0,
+        const std::vector<NativeSaveSummary::SavedRoom>* restored=0);
     void Swap(NativeWorld&);
     NativeWorldResult Enter(int gridIndex,int dimension,const NativeSceneFiles&,NativeWorldIssue* issue=0,const NativeRoomSetupContext* setup=0);
     //Descriptor link traversal only. Interactive lock/payment/blast/secret-door
@@ -81,6 +87,17 @@ public:
     NativeRoomState* Current();
     const NativeRoomState* Current() const;
     const NativePlacedRoom* CurrentDescriptor() const;
+    NativePlacedRoom* CurrentDescriptor();
+    //Room::Init's reached descriptor bookkeeping at7a3b8a. Call after the
+    //resident is prepared; this does not infer clear from a bare entry.
+    NativeWorldResult RecordActivation(NormalRunFlow&);
+    void SyncCurrentRoomClear();
+    //Install a native current-floor room set before constructing its first
+    //resident. Matching uses saved descriptor identity, not a current-cell
+    //alias; all visited-room identities are validated before mutation.
+    bool InstallSavedRooms(const NativeSaveSummary&,NativeWorldIssue*);
+    const NativeSaveSummary::SavedRoom* RestoredRoom(int listIndex) const;
+    bool CurrentRoomRestored() const;
     const NativeWorldResident* At(int listIndex) const;
 private:
     NativeWorld(const NativeWorld&);

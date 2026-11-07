@@ -24,6 +24,10 @@ struct NativeMusicState {
     bool ready;
     void Begin();
     bool StartCharacter(int page); //896bfd/8ce325 ->791210.
+    //79965f selects791210 with the evaluated transition rate when that rate
+    //is below one, and otherwise selects791110 with the owned music volume.
+    bool StartFloorTrackCrossfade(int id,float rate);
+    bool StartFloorTrack(int id,float gain);
     bool EnterStartingRoom(const NormalRunFlow&,const NativeWorld&,const NativePlayerState&,unsigned int* next);
 };
 //Resolved original stream identity for the platform audio adapter.

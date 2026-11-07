@@ -35,10 +35,42 @@ def prepare():
     (out/'native_data.json').write_text(json.dumps(report,indent=2)+'\n')
     from prepare_normal_catalog import prepare as prepare_normal_catalog
     prepare_normal_catalog()
-    from original_resources import OriginalResources
-    props,binding=OriginalResources(ROOT/'runtime/game').read('gfx/grid/props_01_basement.anm2')
-    animations=list(ET.fromstring(props).find('Animations'))
-    assert [a.get('Name') for a in animations]==['Prop%02d'%i for i in range(1,44)]
-    (gen/'native_decoration_data.h').write_text('//Original inherited backdrop1 animation order.\nstatic const unsigned int kNativeDecorationCount=43;\n')
+    prepare_decorations()
     print('Prepared81 verified RNG triples and normal inherited room data.')
+
+def prepare_decorations():
+    """Copy the backdrop->props animation-count ownership used by room decorations.
+
+    The original backdrop definition owns one props ANM2. Only its leading
+    PropNN animations participate in the room-decoration animation roll; the
+    puddle animations that follow in some files are selected by water state,
+    not by this count. Keeping the mapping per backdrop also preserves the
+    shorter DLC sets instead of reusing the basement's 43 entries.
+    """
+    from original_resources import OriginalResources
+    gen=ROOT/'build/generated'
+    resources=OriginalResources(ROOT/'runtime/game')
+    backdrops,_=resources.read('backdrops.xml')
+    root=ET.fromstring(backdrops)
+    entries=[];counts={}
+    for backdrop in root:
+        prop=backdrop.get('props')
+        if not prop:
+            continue
+        data,_=resources.read('gfx/grid/'+prop)
+        names=[animation.get('Name','') for animation in ET.fromstring(data).find('Animations')]
+        props=[name for name in names if name.startswith('Prop') and name[4:].isdigit()]
+        assert props and names[:len(props)]==props,prop
+        count=len(props)
+        key=prop.lower()
+        assert key not in counts or counts[key]==count,prop
+        counts[key]=count
+        entries.append((int(backdrop.get('id')),count))
+    assert entries
+    lines=['//Backdrop props animation sets from inherited backdrops.xml and ANM2s.',
+           'struct NativeDecorationSet { unsigned int backdrop,animations; };',
+           'static const NativeDecorationSet kNativeDecorationSets[] = {']
+    lines+=['{%d,%d},'%(backdrop,count) for backdrop,count in entries]
+    lines+=['};']
+    (gen/'native_decoration_data.h').write_text('\n'.join(lines)+'\n',encoding='ascii')
 if __name__=='__main__':prepare()

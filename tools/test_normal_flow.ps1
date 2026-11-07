@@ -20,7 +20,7 @@ try {
         if($LASTEXITCODE -ne 0) {throw "Preparation failed: $script"}
     }
     $sources=@(Get-ChildItem -LiteralPath src/game -Filter '*.cpp' | Sort-Object Name | ForEach-Object {$_.FullName})
-    $sources+=@('src/content/game_content.cpp','src/content/resource_index.cpp','src/content/room_record.cpp') | ForEach-Object {(Join-Path $projectRoot $_)}
+    $sources+=@('src/content/game_content.cpp','src/content/port_data.cpp','src/content/resource_index.cpp','src/content/room_record.cpp') | ForEach-Object {(Join-Path $projectRoot $_)}
     $sources | ForEach-Object {'"'+$_+'"'} | Set-Content -Encoding ASCII build/normal_flow/sources.rsp
     $sources | ForEach-Object {'"build/normal_flow/obj/'+[IO.Path]::GetFileNameWithoutExtension($_)+'.obj"'} | Set-Content -Encoding ASCII build/normal_flow/objects.rsp
     & cmd /d /c tools\build_normal_flow.cmd 2>&1 | Tee-Object logs/normal-flow-build.log
