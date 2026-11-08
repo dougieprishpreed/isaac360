@@ -20,7 +20,8 @@ import iced_x86 as ix
 import pefile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-# BOI360_IMAGE / BOI360_TAG select another game binary (the Lua DLL: game/Lua5.3.3r.dll, tag lua)
+# BOI360_IMAGE / BOI360_TAG select another game binary (the Lua DLL as rebase.py rebased it:
+# build/recomp/dlls/lua5.3.3r.dll, tag lua)
 TAG = os.environ.get('BOI360_TAG', '')
 EXE = os.path.join(ROOT, os.environ.get('BOI360_IMAGE', os.path.join('game', 'isaac-ng.exe')))
 OUT = os.path.join(ROOT, 'build', 'recomp', TAG) if TAG else os.path.join(ROOT, 'build', 'recomp')

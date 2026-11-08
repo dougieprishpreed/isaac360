@@ -1281,6 +1281,11 @@ class Translator:
         init_memsize()
         self.img = Img()
         p = json.load(open(PROG))
+        # the analysis must be of this very image: the DLLs are analysed rebased (build/recomp/dlls), and the original
+        # at its own base decodes silently as garbage (negative offsets read from the end of the image)
+        if int(str(p['image_base']), 0) != self.img.base:
+            raise SystemExit('%s is based at 0x%x, its analysis %s at 0x%x: translate the image analyze.py read'
+                             % (EXE, self.img.base, PROG, int(str(p['image_base']), 0)))
         self.p = p
         self.text_lo, self.text_hi = p['text']
         self.funcs = {int(k, 16) for k in p['functions']}
@@ -1313,14 +1318,20 @@ PRELUDE = '''#include "x86.h"
 
 # An XMM register's canonical form is its two 64-bit halves as native integers (RDX/WRX), so narrower lanes are
 # found through x86.h's X32/X16/X8, which flip the index within each half on a big-endian host (the console).
-LANES = [(re.compile(r'\.(u|i|f)\[(?!X32\()([^\[\]]+)\]'), r'.\1[X32(\2)]'),
-         (re.compile(r'\.(w|sw)\[(?!X16\()([^\[\]]+)\]'), r'.\1[X16(\2)]'),
-         (re.compile(r'\.(b|sb)\[(?!X8\()([^\[\]]+)\]'), r'.\1[X8(\2)]')]
+# Both member forms count: a movss/movd load writes through a pointer (d_->u[0]), and missing those left every such
+# load in lane 1 on the console (lane 0 read as zero) while the PC, where X32(i) is i, never showed it.
+LANES = [(re.compile(r'(\.|->)(u|i|f)\[(?!X32\()([^\[\]]+)\]'), r'\1\2[X32(\3)]'),
+         (re.compile(r'(\.|->)(w|sw)\[(?!X16\()([^\[\]]+)\]'), r'\1\2[X16(\3)]'),
+         (re.compile(r'(\.|->)(b|sb)\[(?!X8\()([^\[\]]+)\]'), r'\1\2[X8(\3)]')]
+UNMAPPED = re.compile(r'(\.|->)(u|i|f|w|sw|b|sb)\[(?!X(32|16|8)\()')
 
 
 def lanes(text):
     for pattern, repl in LANES:
         text = pattern.sub(repl, text)
+    left = UNMAPPED.search(text)
+    if left:
+        raise SystemExit('lane access without X32/X16/X8: ' + text[max(0, left.start() - 80):left.end() + 40])
     return text
 
 
