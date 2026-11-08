@@ -3,10 +3,15 @@
 // at 44.1 kHz stereo in real time; its output goes to the platform's audio device, or nowhere when muted (test
 // runs), so queued music still drains and the game's refill logic runs as on the PC.
 #include "runtime.h"
+#include "vfile.h"
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <deque>
+#include <list>
 #include <map>
+#include <memory>
+#include <set>
 #include <math.h>
 #include <mutex>
 #include <string.h>
@@ -27,11 +32,13 @@ enum {
 };
 const int kRate = 44100;
 
+typedef std::shared_ptr<const std::vector<int16_t> > Samples;
 struct Buffer {
-    std::vector<int16_t> data;   // interleaved
+    Samples pcm;                 // interleaved; shared with the effect cache (effect_samples)
     int channels, rate;
-    int scale;                   // the rate the game gave over the one stored ("B3AH" effects: 2)
-    Buffer() : channels(1), rate(44100), scale(1) {}
+    bool waiting;                // a "B3RF" effect whose samples the loader has not read yet: its sources wait
+    uint32_t effect;             // its offset in sfx.pcm
+    Buffer() : channels(1), rate(44100), waiting(false), effect(0) {}
 };
 struct Source {
     std::deque<uint32_t> queue;  // buffer ids; the first is playing
@@ -69,7 +76,8 @@ void mix(int16_t* out, int frames) {
                     break;
                 }
                 Buffer& b = g_buffers[s.queue.front()];
-                int n = b.channels ? (int)(b.data.size() / b.channels) : 0;
+                if (b.waiting) break;                   // starts when its samples arrive, a few ms late
+                int n = b.channels && b.pcm ? (int)(b.pcm->size() / b.channels) : 0;
                 if ((int)s.pos >= n) {
                     if (s.looping && s.queue.size() == 1 && n) {
                         s.pos -= n;
@@ -89,12 +97,13 @@ void mix(int16_t* out, int frames) {
                     continue;
                 }
                 int at = (int)s.pos;
+                const int16_t* d = &(*b.pcm)[0];
                 float l, r;
                 if (b.channels == 2) {
-                    l = b.data[at * 2];
-                    r = b.data[at * 2 + 1];
+                    l = d[at * 2];
+                    r = d[at * 2 + 1];
                 } else {
-                    l = r = b.data[at];
+                    l = r = d[at];
                 }
                 acc[i * 2] += l * gl;
                 acc[i * 2 + 1] += r * gr;
@@ -144,44 +153,92 @@ void a_alDeleteSources(X86* c) {
     for (uint32_t i = 0; i < ARG(c, 0); ++i) g_sources.erase(RD32(ARG(c, 1) + 4 * i));
     RET_CDECL(c, 0);
 }
-// The console's sound effects are IMA ADPCM behind a marker (tools/recomp/console_sfx.py): "B3AD", u32 frames,
-// u32 channels, then per channel s16 first sample, u8 step index, u8 0 and 4-bit codes, low nibble first.
-// "B3AH": the same at half the rate the game declares (effects of 32 kHz and up).
-const int kImaSteps[89] = {
-    7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 19, 21, 23, 25, 28, 31, 34, 37, 41, 45, 50, 55, 60, 66, 73, 80, 88, 97, 107,
-    118, 130, 143, 157, 173, 190, 209, 230, 253, 279, 307, 337, 371, 408, 449, 494, 544, 598, 658, 724, 796, 876, 963,
-    1060, 1166, 1282, 1411, 1552, 1707, 1878, 2066, 2272, 2499, 2749, 3024, 3327, 3660, 4026, 4428, 4871, 5358, 5894,
-    6484, 7132, 7845, 8630, 9493, 10442, 11487, 12635, 13899, 15289, 16818, 18500, 20350, 22385, 24623, 27086, 29794,
-    32767};
-const int kImaIndex[8] = {-1, -1, -1, -1, 2, 4, 6, 8};
+// ---- sound effects read when first played
+// The console's archives hold each effect's WAV with a "data" chunk that only says where its samples are:
+// "B3RF", u32 offset, u32 bytes into resources/packed/sfx.pcm, the original 16-bit samples as the game ships them
+// (tools/recomp/console_sfx.py). The game loads all 1,150 effects at start and keeps them; their samples (243 MB)
+// stay on the drive until a sound plays. A loader thread reads them; the recently played stay in memory up to
+// BOI360_SFX_CACHE MB (32). A source playing an effect still on its way waits for it rather than playing silence.
+std::mutex g_fxLock;
+std::condition_variable g_fxWake;
+std::map<uint32_t, Samples> g_fx;                   // by offset in sfx.pcm
+std::list<uint32_t> g_fxRecent;                     // most recently used first
+uint64_t g_fxBytes = 0;
+std::deque<std::pair<uint32_t, uint32_t> > g_fxQueue;   // (offset, bytes) to read
+std::set<uint32_t> g_fxQueued;
+uint64_t g_fxLimit = (uint64_t)(getenv("BOI360_SFX_CACHE") ? atoi(getenv("BOI360_SFX_CACHE")) : 32) << 20;
+bool g_fxLoader = false;
 
-bool decode_ima(uint32_t data, uint32_t size, Buffer& b) {
-    if (size < 12 || (RD32(data) != 0x44413342u && RD32(data) != 0x48413342u)) return false;   // "B3AD", "B3AH"
-    uint32_t frames = RD32(data + 4), channels = RD32(data + 8);
-    uint32_t perChannel = 4 + (frames > 1 ? (frames - 1 + 1) / 2 : 0);
-    if (!frames || channels < 1 || channels > 2 || 12 + perChannel * channels > size) return false;
-    b.channels = (int)channels;
-    b.scale = RD32(data) == 0x48413342u ? 2 : 1;
-    b.data.resize((size_t)frames * channels);
-    for (uint32_t ch = 0; ch < channels; ++ch) {
-        uint32_t s = data + 12 + ch * perChannel;
-        int pred = (int16_t)RD16(s), index = RD8(s + 2);
-        if (index > 88) index = 88;
-        b.data[ch] = (int16_t)pred;
-        for (uint32_t i = 0; i + 1 < frames; ++i) {
-            uint8_t byte = RD8(s + 4 + (i >> 1));
-            int code = (i & 1) ? byte >> 4 : byte & 15, step = kImaSteps[index], delta = step >> 3;
-            if (code & 4) delta += step;
-            if (code & 2) delta += step >> 1;
-            if (code & 1) delta += step >> 2;
-            pred += (code & 8) ? -delta : delta;
-            pred = pred < -32768 ? -32768 : pred > 32767 ? 32767 : pred;
-            index += kImaIndex[code & 7];
-            index = index < 0 ? 0 : index > 88 ? 88 : index;
-            b.data[(size_t)(i + 1) * channels + ch] = (int16_t)pred;
-        }
+void fx_loader(void*);
+
+// the effect's samples if they are in memory; otherwise its read is queued and null comes back
+Samples effect_samples(uint32_t offset, uint32_t bytes) {
+    std::lock_guard<std::mutex> l(g_fxLock);
+    std::map<uint32_t, Samples>::iterator it = g_fx.find(offset);
+    if (it != g_fx.end()) {
+        g_fxRecent.remove(offset);
+        g_fxRecent.push_front(offset);
+        return it->second;
     }
-    return true;
+    if (g_fxQueued.insert(offset).second) g_fxQueue.push_back(std::make_pair(offset, bytes));
+    if (!g_fxLoader) {
+        g_fxLoader = true;
+        host_thread_start(fx_loader, 0, 256u << 10);
+    }
+    g_fxWake.notify_one();
+    return Samples();
+}
+
+void fx_loader(void*) {
+    if (recomp_config().threadStarted) recomp_config().threadStarted("sound effects");
+    VFile* file = vf_open(recomp_host_path("resources/packed/sfx.pcm"), "rb", true);
+    if (!file) recomp_log("sfx: resources/packed/sfx.pcm is missing: converted effects stay silent");
+    uint32_t loads = 0;
+    double slowest = 0;
+    std::vector<uint8_t> raw;
+    for (;;) {
+        std::pair<uint32_t, uint32_t> job;
+        {
+            std::unique_lock<std::mutex> l(g_fxLock);
+            while (g_fxQueue.empty()) g_fxWake.wait(l);
+            job = g_fxQueue.front();
+            g_fxQueue.pop_front();
+        }
+        std::chrono::steady_clock::time_point t0 = std::chrono::steady_clock::now();
+        std::shared_ptr<std::vector<int16_t> > pcm(new std::vector<int16_t>(job.second / 2));
+        raw.resize(job.second);
+        if (file && job.second && vf_seek(file, job.first, SEEK_SET) == 0 && vf_read(file, &raw[0], 1, job.second) == job.second)
+            for (size_t i = 0; i < pcm->size(); ++i) (*pcm)[i] = (int16_t)(raw[2 * i] | raw[2 * i + 1] << 8);
+        double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+        if (ms > slowest) slowest = ms;
+        Samples ready(pcm);
+        {
+            std::lock_guard<std::mutex> l(g_fxLock);
+            g_fx[job.first] = ready;
+            g_fxRecent.push_front(job.first);
+            g_fxQueued.erase(job.first);
+            g_fxBytes += pcm->size() * 2;
+            // the least recently played go first; samples a buffer still holds stay until it lets them go
+            for (std::list<uint32_t>::iterator it = g_fxRecent.end(); g_fxBytes > g_fxLimit && it != g_fxRecent.begin();) {
+                --it;
+                std::map<uint32_t, Samples>::iterator e = g_fx.find(*it);
+                if (e != g_fx.end() && e->second.use_count() == 1 && *it != job.first) {
+                    g_fxBytes -= e->second->size() * 2;
+                    g_fx.erase(e);
+                    it = g_fxRecent.erase(it);
+                }
+            }
+            if (++loads % 200 == 0)
+                recomp_log("sfx: %u effects read, %u MB in memory, slowest read %.1f ms", loads,
+                           (unsigned)(g_fxBytes >> 20), slowest);
+        }
+        std::lock_guard<std::mutex> l(g_lock);
+        for (std::map<uint32_t, Buffer>::iterator it = g_buffers.begin(); it != g_buffers.end(); ++it)
+            if (it->second.waiting && it->second.effect == job.first) {
+                it->second.pcm = ready;
+                it->second.waiting = false;
+            }
+    }
 }
 
 // alBufferData(buffer, format, data, size, freq)
@@ -190,16 +247,28 @@ void a_alBufferData(X86* c) {
     Buffer b;
     b.rate = (int)freq;
     b.channels = (fmt == AL_FORMAT_STEREO8 || fmt == AL_FORMAT_STEREO16) ? 2 : 1;
-    if ((fmt == AL_FORMAT_MONO16 || fmt == AL_FORMAT_STEREO16) && decode_ima(data, size, b)) {
-        b.rate = (int)freq / b.scale;
-    } else if (fmt == AL_FORMAT_MONO16 || fmt == AL_FORMAT_STEREO16) {
-        b.data.resize(size / 2);
-        for (uint32_t i = 0; i < size / 2; ++i) b.data[i] = (int16_t)RD16(data + 2 * i);
+    bool sixteen = fmt == AL_FORMAT_MONO16 || fmt == AL_FORMAT_STEREO16;
+    if (sixteen && size >= 12 && RD32(data) == 0x46523342u) {          // "B3RF"
+        b.effect = RD32(data + 4);
+        b.pcm = effect_samples(b.effect, RD32(data + 8));
+        b.waiting = !b.pcm;
     } else {
-        b.data.resize(size);
-        for (uint32_t i = 0; i < size; ++i) b.data[i] = (int16_t)(((int)RD8(data + i) - 128) << 8);
+        std::shared_ptr<std::vector<int16_t> > pcm(new std::vector<int16_t>(sixteen ? size / 2 : size));
+        if (sixteen)
+            for (uint32_t i = 0; i < size / 2; ++i) (*pcm)[i] = (int16_t)RD16(data + 2 * i);
+        else
+            for (uint32_t i = 0; i < size; ++i) (*pcm)[i] = (int16_t)(((int)RD8(data + i) - 128) << 8);
+        b.pcm = pcm;
     }
     std::lock_guard<std::mutex> l(g_lock);
+    if (b.waiting) {                                // the loader may have finished meanwhile
+        std::lock_guard<std::mutex> f(g_fxLock);
+        std::map<uint32_t, Samples>::iterator it = g_fx.find(b.effect);
+        if (it != g_fx.end()) {
+            b.pcm = it->second;
+            b.waiting = false;
+        }
+    }
     g_buffers[id] = b;
     RET_CDECL(c, 0);
 }
@@ -244,8 +313,7 @@ void a_alGetSourcei(X86* c) {
     if (p == AL_SOURCE_STATE) v = (uint32_t)s.state;
     else if (p == AL_BUFFERS_PROCESSED) v = (uint32_t)s.done.size();
     else if (p == AL_BUFFERS_QUEUED) v = (uint32_t)(s.queue.size() + s.done.size());
-    else if (p == AL_SAMPLE_OFFSET)              // in frames at the rate the game gave
-        v = (uint32_t)(s.pos * (s.queue.empty() ? 1 : g_buffers[s.queue.front()].scale));
+    else if (p == AL_SAMPLE_OFFSET) v = (uint32_t)s.pos;
     else if (p == AL_LOOPING) v = s.looping;
     WR32(out, v);
     RET_CDECL(c, 0);

@@ -50,7 +50,7 @@ def main():
     # the game writes log.txt only when it exits cleanly: its lines (and the script's "cov:") come from the printf
     # trace in the host log
     env = dict(os.environ, BOI360_PAD=MENU_PAD, BOI360_SHADER_SAMPLES='1', BOI360_GL_STATS='1',
-               BOI360_TRACE_PRINTF='400000')
+               BOI360_TRACE_PRINTF='400000', BOI360_TRACE_PRINTF_ONLY='cov:,ERROR,Error,error,warn,Lua,ASSERT')
     if args.shots:
         env['BOI360_SHOTS'] = ','.join(str(f) for f in range(args.shots, 200000, args.shots))
     cmd = [EXE, '--hidden', '--vk', '--mem', str(args.mem), '--data-overlay', 'build/console_data',

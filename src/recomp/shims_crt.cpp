@@ -182,10 +182,25 @@ std::string format_guest(const std::string& fmt, uint32_t va) {
 void s_vsprintf(X86* c) {
     uint32_t buf = ARG(c, 2), count = ARG(c, 3);
     std::string s = format_guest(guest_str(ARG(c, 4)), ARG(c, 6));
-    // BOI360_TRACE_PRINTF=1 logs the first 3000 strings, =N the first N
+    // BOI360_TRACE_PRINTF=1 logs the first 3000 strings, =N the first N; BOI360_TRACE_PRINTF_ONLY="a,b" only those
+    // holding one of the words (a whole run's game log lines without its file lookups)
     static int trace = getenv("BOI360_TRACE_PRINTF") ? (atoi(getenv("BOI360_TRACE_PRINTF")) > 1 ? atoi(getenv("BOI360_TRACE_PRINTF")) : 3000) : 0;
     static int traced = 0;
-    if (traced < trace) {
+    static std::vector<std::string> only;
+    static bool onlyParsed = false;
+    if (!onlyParsed) {
+        onlyParsed = true;
+        std::string list = getenv("BOI360_TRACE_PRINTF_ONLY") ? getenv("BOI360_TRACE_PRINTF_ONLY") : "";
+        for (size_t at = 0; at < list.size();) {
+            size_t comma = list.find(',', at);
+            if (comma == std::string::npos) comma = list.size();
+            if (comma > at) only.push_back(list.substr(at, comma - at));
+            at = comma + 1;
+        }
+    }
+    bool wanted = only.empty();
+    for (size_t i = 0; i < only.size() && !wanted; ++i) wanted = s.find(only[i]) != std::string::npos;
+    if (traced < trace && wanted) {
         ++traced;
         recomp_log("printf> %s", s.substr(0, 200).c_str());
     }

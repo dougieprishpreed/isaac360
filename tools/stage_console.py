@@ -1,12 +1,12 @@
 """Stages the console build of the recompiled game (docs/RECOMP_PLAN.md) in one folder for the USB drive.
 
 The console runs the user's own isaac-ng.exe, recompiled: it needs the game's files beside the XEX as the PC
-version has them, with the archives that hold sound effects replaced by the console's copies (sound effects as
-ADPCM, tools/recomp/console_sfx.py; the console has 512 MB for everything), and the game's runtime DLLs rebased
-(tools/recomp/rebase.py). Layout:
+version has them, with the archives that hold sound effects replaced by the console's copies (each effect's
+samples moved to sfx.pcm and read when it plays, tools/recomp/console_sfx.py; the console has 512 MB for
+everything), and the game's runtime DLLs rebased (tools/recomp/rebase.py). Layout:
   default.xex            the game (tools/xsdk/build_recomp.sh)
   game/isaac-ng.exe      the game's image (its data sections are read at start-up)
-  game/resources/...     resources/packed/*.a (four converted) and resources/scripts/
+  game/resources/...     resources/packed/*.a (four converted), packed/sfx.pcm and resources/scripts/
   dlls/                  lua5.3.3r.dll and msvcp140.dll, rebased
   save/                  the game's saves and anything it writes beside itself
   boi360_args.txt        options (--mem MB: the guest address space)
@@ -45,6 +45,8 @@ def stage_game(out):
             path = os.path.join(folder, n)
             rel = os.path.relpath(path, GAME).replace('\\', '/')
             files.append((rel, path))
+    # the effects' samples, which the converted archives refer to (console_sfx.py)
+    files.append(('resources/packed/sfx.pcm', os.path.join(CONVERTED, 'resources', 'packed', 'sfx.pcm')))
     copied = total = 0
     for rel, path in files:
         if rel.startswith('resources/packed/') and os.path.basename(rel) in CONVERTED_ARCHIVES:

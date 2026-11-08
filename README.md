@@ -11,12 +11,13 @@ Because the game's own code runs, all of its content and behaviour comes along: 
 - **On a PC**, the same translated code runs as a Windows program (`boi360_recomp.exe`), drawing through the same Vulkan path the console uses:
   - It plays the intro, menus and runs, and is driven by test scripts.
   - An automated run went through all 31 floor variants and the special rooms. It played 8 cutscenes, wrote options and save files, and fought 19 bosses from Larry Jr. to Mom. Mom's death played the ending and credits as in the original. None of it crashed.
-- **The console build** compiles: `default.xex` is about 97 MB. Two hardware boots so far:
-  - The first was stuck at the first frame because of slow file lookups on the USB drive. That's fixed.
-  - The second got past the start-up checks but was still on its first frame after a minute. It is either still loading (on the PC this stretch takes 3 seconds) or stuck. The current build logs what the game is doing every 5 seconds to tell which.
-- **Memory** is the console's main limit: it has 512 MB, and about 290 MB is left for the game once the program is loaded. Two cuts bring Basement I from about 300 MB to about 180 MB:
+- **The console build** compiles: `default.xex` is about 97 MB. Three hardware boots so far, each a step further:
+  - The first sat on its first frame because of slow file lookups on the USB drive.
+  - The third loaded for 80 seconds, then returned to the dashboard. The game checks every archive's checksums at start, reading all 780 MB of them from the drive. Its render targets also share a depth buffer of another size, which the console's GPU driver refuses.
+  - Both are fixed in the current build: start-up now reads about 10 MB.
+- **Memory** is the console's main limit: it has 512 MB, and about 290 MB is left for the game once the program is loaded. Basement I went from about 300 MB to about 150 MB without changing how anything looks or sounds:
   - Textures reach the GPU only when first drawn. The rest wait compressed: the game loads far more than a screen shows.
-  - Sound effects are stored as ADPCM at half their sample rate.
+  - Sound effects stay on the drive at their original quality until they play. The recently played stay in memory.
 - **Shaders:** all 22 of the game's shader programs are compiled for the console's GPU. Each was checked against exact maths on the xenos toolchain's simulator.
 - Mods are not supported yet.
 
@@ -27,7 +28,8 @@ Because the game's own code runs, all of its content and behaviour comes along: 
 - The `src/recomp/shims_*.cpp` files stand in for the Windows, C runtime, OpenAL, XInput and Steam functions the game imports.
 - `src/recomp/gl_vk.cpp` is a small OpenGL state machine on Vulkan. The game's GLSL shaders are converted ahead of time by `tools/recomp/shaders.py` (to SPIR-V, then to Xenos microcode by xsdk's xost).
 - `src/recomp/host_win32.cpp` and `src/recomp/host_xsdk.cpp` are the PC and console hosts. The console host adds the display, controllers, the audio feed, a watchdog and Back + Start to quit.
-- Console data: `tools/recomp/console_sfx.py` rewrites the four archives that hold sound effects; every other file is used as the game ships it.
+- Console data: `tools/recomp/console_sfx.py` moves the sound effects' samples into one file, `sfx.pcm`, read as sounds play. It rewrites the four archives that hold them to point there; every other file is used as the game ships it.
+- `tools/recomp/translate.py` has one patch to the game's code: the start-up archive checksum pass, which takes 80 seconds on a USB drive, accepts each entry's stored checksum.
 
 The earlier hand-written port (`src/game/`, `src/app/`, `src/render/`, `src/platform/`, `src/simulation/`) stays in the repository; the console build no longer uses it.
 
@@ -35,7 +37,7 @@ The earlier hand-written port (`src/game/`, `src/app/`, `src/render/`, `src/plat
 
 - Your copy of the Windows Steam game in `game/` at the repository root (read-only; `isaac-ng.exe`, `Lua5.3.3r.dll`, `resources/`).
 - Windows with Visual Studio 2022 Build Tools, LLVM (clang-cl), CMake, Ninja and a Vulkan driver.
-- Python 3 with `numpy`, and a virtual environment `tools/.venv` with `iced-x86` and `pefile`.
+- Python 3, and a virtual environment `tools/.venv` with `iced-x86` and `pefile`.
 - For the console: WSL (or Linux) with xsdk, vulkan4xenon and glslang-xenon built (see xsdk's `docs/GETTING_STARTED.md`).
 
 ## Building
@@ -98,7 +100,7 @@ Copy the staged folder to the console's drive and start `default.xex` from the d
 
 The folder holds:
 - `default.xex`
-- `game\` (your game files, with the converted sound archives)
+- `game\` (your game files, with the converted sound archives and `sfx.pcm`)
 - `dlls\`
 - `save\` (saves and settings)
 - `boi360_args.txt`: `--mem MB` sets the game's address space

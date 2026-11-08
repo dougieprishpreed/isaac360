@@ -147,6 +147,9 @@ struct Texture {
 struct Renderbuffer {
     Image img;
     uint32_t format;
+    // GL lets a colour texture smaller than the depth buffer share it (its top left); vulkan4xenon, like the
+    // console's eDRAM, wants attachments of one size, so each other colour size gets a depth image of its own
+    std::map<std::pair<int, int>, Image> sized;
 };
 
 struct Fbo {
@@ -746,6 +749,15 @@ bool current_target(Target& t) {
         t.color = &ct->second.img;
         std::map<uint32_t, Renderbuffer>::iterator rt = g_renderbuffers.find(f.depth);
         t.depth = rt != g_renderbuffers.end() && rt->second.img.image ? &rt->second.img : 0;
+        if (t.depth && (t.depth->w != t.color->w || t.depth->h != t.color->h)) {
+            Image& d = rt->second.sized[std::make_pair(t.color->w, t.color->h)];
+            if (!d.image) {
+                log_once("a %dx%d colour target with a %dx%d depth buffer: a depth image of the colour's size",
+                         t.color->w, t.color->h, t.depth->w, t.depth->h);
+                if (make_image(d, t.color->w, t.color->h, g_depthFormat, true)) init_depth_layout(d);
+            }
+            t.depth = d.image ? &d : 0;
+        }
     }
     t.w = t.color->w;
     t.h = t.color->h;
@@ -1962,8 +1974,11 @@ void vk_glRenderbufferStorage(X86* c) {
     int w = (int)ARG(c, 2), h = (int)ARG(c, 3);
     RET_STD(c, 4, 0);
     Renderbuffer& rb = g_renderbuffers[g_rb];
-    if (g_inPass && rb.img.view == g_passKey.depth) end_pass();
+    if (g_inPass) end_pass();
     retire_image(rb.img);
+    for (std::map<std::pair<int, int>, Image>::iterator it = rb.sized.begin(); it != rb.sized.end(); ++it)
+        retire_image(it->second);
+    rb.sized.clear();
     rb.format = format;
     if (make_image(rb.img, w, h, g_depthFormat, true)) init_depth_layout(rb.img);
 }
@@ -1979,8 +1994,10 @@ void vk_glDeleteRenderbuffers(X86* c) {
     for (uint32_t i = 0; i < n; ++i) {
         std::map<uint32_t, Renderbuffer>::iterator it = g_renderbuffers.find(RD32(names + 4 * i));
         if (it == g_renderbuffers.end()) continue;
-        if (g_inPass && it->second.img.view == g_passKey.depth) end_pass();
+        if (g_inPass) end_pass();
         retire_image(it->second.img);
+        for (std::map<std::pair<int, int>, Image>::iterator d = it->second.sized.begin(); d != it->second.sized.end(); ++d)
+            retire_image(d->second);
         g_renderbuffers.erase(it);
     }
     RET_STD(c, 2, 0);

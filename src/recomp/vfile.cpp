@@ -27,10 +27,13 @@ struct Reader {
 #endif
     int64_t size;
     std::mutex lock;
+    std::string path;
+    uint64_t gameBytes, diskBytes, reads, bigReads;   // BOI360_TRACE_READS (vf_dump_readers)
     std::list<std::pair<int64_t, std::vector<uint8_t> > > blocks;   // most recent first
 
     size_t raw_read(int64_t off, void* buf, size_t n) {
         g_disk += n;
+        diskBytes += n;
 #if defined(_WIN32)
         if (_fseeki64(f, off, SEEK_SET) != 0) return 0;
         return fread(buf, 1, n, f);
@@ -64,6 +67,9 @@ struct Reader {
         if (off >= size) return 0;
         if ((int64_t)n > size - off) n = (size_t)(size - off);
         std::lock_guard<std::mutex> l(lock);
+        gameBytes += n;
+        ++reads;
+        if (n >= 65536) ++bigReads;
         if (n >= DIRECT) return raw_read(off, out, n);
         size_t done = 0;
         while (done < n) {
@@ -104,6 +110,8 @@ Reader* reader_for(const std::string& path) {
     }
     r->size = (int64_t)lseek(r->fd, 0, SEEK_END);
 #endif
+    r->path = path;
+    r->gameBytes = r->diskBytes = r->reads = r->bigReads = 0;
     g_readers[path] = r;
     return r;
 }
@@ -117,6 +125,19 @@ struct VFile {
     bool eof, err;
     int unget;
 };
+
+void vf_dump_readers(void (*line)(const char*)) {
+    std::lock_guard<std::mutex> l(g_readersLock);
+    for (std::map<std::string, Reader*>::iterator it = g_readers.begin(); it != g_readers.end(); ++it) {
+        Reader* r = it->second;
+        char buf[512];
+        snprintf(buf, sizeof(buf), "  %s: %llu reads (%llu of 64 KB+), game %llu KB, drive %llu KB, file %llu KB",
+                 r->path.c_str(), (unsigned long long)r->reads, (unsigned long long)r->bigReads,
+                 (unsigned long long)(r->gameBytes >> 10), (unsigned long long)(r->diskBytes >> 10),
+                 (unsigned long long)(r->size >> 10));
+        line(buf);
+    }
+}
 
 void vf_stats(uint64_t* opens, uint64_t* bytes, uint64_t* disk) {
     *opens = g_opens;

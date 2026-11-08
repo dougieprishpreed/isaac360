@@ -28,6 +28,16 @@ SUFFIX = ('_' + TAG) if TAG else ''
 # BOI360_TRACE_FUNCS=addr,addr: those functions log their entry (arguments) and returns (eax) at run time
 TRACE = set(int(x, 16) for x in os.environ.get('BOI360_TRACE_FUNCS', '').split(',') if x)
 
+# Instructions of isaac-ng.exe replaced by other C (the exe only, TAG ''): address -> code.
+PATCHES = {
+    # Mounting an archive (F_950420) reads every entry whole to check its stored checksum (a rotate-right-and-add
+    # over its 32-bit words) before taking it into the hash table: on the console's USB drive that is all 780 MB
+    # of the archives, 80 s, before the first screen. The entry's own checksum stands in for the computed one, so
+    # each entry takes the matching path at once; the console's archives are written with checked checksums
+    # (tools/recomp/console_sfx.py) and the game's own are as Steam installed them.
+    0x950730: 'esi=RD32((uint32_t)(RD32((uint32_t)(ebp+0xfffff1c8u))+0x14u));goto L_9507bf;',
+}
+
 M = ix.Mnemonic
 R = ix.Register
 OK = ix.OpKind
@@ -1207,7 +1217,10 @@ class Fn:
                 continue
             self.out = []
             try:
-                self.translate_insn(va, ins, va + ins.len)
+                if va in PATCHES and not TAG:
+                    self.out = [PATCHES[va]]
+                else:
+                    self.translate_insn(va, ins, va + ins.len)
             except Unhandled as e:
                 unhandled[str(e)] += 1
                 self.out = ['x86_unimpl(c,0x%xu,"%s");' % (va, str(e).replace('"', ''))]

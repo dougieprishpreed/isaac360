@@ -8,6 +8,7 @@ local STAGES = {"1", "1a", "1b", "1c", "1d", "2", "2c", "3", "3a", "3b", "3c", "
 local ROOMS = {"s.dice", "s.treasure", "s.shop", "s.secret", "s.curse", "s.devil", "s.angel", "s.sacrifice",
                "s.library", "s.arcade", "s.challenge", "s.miniboss", "s.supersecret", "s.planetarium"}
 local CUTSCENES = {1, 2, 3, 8, 13, 17, 20, 25}
+local END_FLOORS = {[6] = true, [8] = true, [10] = true, [11] = true, [12] = true, [13] = true}
 
 local steps = {}
 local function add(wait, what, arg) steps[#steps + 1] = {wait = wait, what = what, arg = arg} end
@@ -15,7 +16,6 @@ local function add(wait, what, arg) steps[#steps + 1] = {wait = wait, what = wha
 add(30, "cmd", "debug 3")      -- infinite health
 add(1, "cmd", "debug 4")       -- high damage
 add(1, "cmd", "debug 8")       -- infinite charges
-add(1, "cmd", "debug 10")      -- quick kill
 for i, stage in ipairs(STAGES) do
     add(60, "cmd", "stage " .. stage)
     add(90, "kill", 90)
@@ -49,8 +49,11 @@ mod:AddCallback(ModCallbacks.MC_POST_UPDATE, function()
     if not started then return end
     if killing > 0 then
         killing = killing - 1
+        -- the bosses whose death ends a run (Mom, Mom's Heart, the final floors) are visited, not killed, so the
+        -- walk goes on to the later floors (Mom's ending was run once: it plays the ending and the credits)
+        local endsRun = END_FLOORS[Game():GetLevel():GetStage()] and Game():GetRoom():GetType() == RoomType.ROOM_BOSS
         for _, e in ipairs(Isaac.GetRoomEntities()) do
-            if e:IsActiveEnemy(false) and e:IsVulnerableEnemy() then e:Kill() end
+            if not endsRun and e:IsActiveEnemy(false) and e:IsVulnerableEnemy() then e:Kill() end
         end
     end
     if wait > 0 then

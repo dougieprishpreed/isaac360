@@ -4,6 +4,7 @@
 // stop with their name the first time the game calls them, so the set grows with what the game really uses.
 #include "runtime.h"
 #include "gl_vk.h"
+#include "vfile.h"
 #include <chrono>
 #include <map>
 #include <set>
@@ -179,6 +180,7 @@ uint32_t gl_get_proc(const std::string& name) {
 
 uint32_t gl_frame_count() { return g_frames; }
 uint32_t (*g_hostFreeMemory)() = 0;                // the console's free memory in bytes (host_xsdk.cpp), for the log
+static void log_line(const char* s) { recomp_log("%s", s); }
 
 bool gl_create_context() {
     if (gl_vk_enabled()) return gl_vk_create_context();
@@ -266,6 +268,8 @@ void gl_present() {
         recomp_log("frame %u at %.1f s, heap %u MB, images %u MB (+%u MB packed)%s", g_frames, t,
                    guest_heap_used() >> 20, (unsigned)(gl_vk_image_bytes() >> 20), (unsigned)(gl_vk_packed_bytes() >> 20),
                    free);
+        static bool traceReads = getenv("BOI360_TRACE_READS") != 0;
+        if (traceReads && g_frames <= 3) vf_dump_readers(log_line);
         if (!g_glCounts.empty()) gl_write_counts();
         if (gl_vk_enabled()) gl_vk_write_stats();
     }
