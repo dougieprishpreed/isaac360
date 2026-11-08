@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <atomic>
+#include <chrono>
 #include <thread>
 #include <unordered_map>
 #include <vector>
@@ -541,11 +542,78 @@ void recomp_sample_threads(void (*line)(const char*)) {
     }
 }
 
-void x86_call(X86* c, uint32_t target) {
-    if (target >= kThunkBase && target < kThunkLimit) {
-        call_thunk(c, target);
-        return;
+// BOI360_PROFILE=1: a host thread samples the main guest thread every millisecond, as the watchdog does: the shim it
+// is in, or in game code the innermost return address on its stack (the call site of the function running, as of
+// its last call). recomp_profile_dump logs the most frequent and starts again; tools/recomp/profile_report.py names
+// the functions behind the addresses.
+static std::mutex g_profileLock;
+static std::map<uint64_t, uint32_t> g_profileCounts;    // shim name pointer | 1, or return address << 1
+static uint32_t g_profileSamples = 0;
+
+static void profile_thread() {
+    for (;;) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        X86* c = 0;
+        int slot = -1;
+        for (int i = 0; i < kSampledThreads; ++i)
+            if (g_sampleCpu[i] && g_sampleName[i] && !strcmp(g_sampleName[i], "main")) { c = g_sampleCpu[i]; slot = i; }
+        if (!c) continue;
+        const char* thunk = g_sampleThunk[slot];
+        uint64_t key = 0;
+        if (thunk && thunk[0]) {
+            key = ((uint64_t)(uintptr_t)thunk << 1) | 1;
+        } else {
+            uint32_t sp = c->r[4];
+            for (uint32_t a = sp; a < sp + 0x400 && a + 4 <= g_mem_size; a += 4) {
+                uint32_t v = RD32(a);
+                if (guest_code(v)) { key = (uint64_t)v << 1; break; }
+            }
+        }
+        std::lock_guard<std::mutex> lock(g_profileLock);
+        ++g_profileCounts[key];
+        ++g_profileSamples;
     }
+}
+
+void recomp_profile_start() {
+    if (!getenv("BOI360_PROFILE")) return;
+    std::thread(profile_thread).detach();
+}
+
+void recomp_profile_dump(void (*line)(const char*)) {
+    std::map<uint64_t, uint32_t> counts;
+    uint32_t total;
+    {
+        std::lock_guard<std::mutex> lock(g_profileLock);
+        counts.swap(g_profileCounts);
+        total = g_profileSamples;
+        g_profileSamples = 0;
+    }
+    if (!total) return;
+    std::vector<std::pair<uint32_t, uint64_t> > top;
+    uint32_t inGame = 0;
+    for (std::map<uint64_t, uint32_t>::iterator it = counts.begin(); it != counts.end(); ++it) {
+        top.push_back(std::make_pair(it->second, it->first));
+        if (!(it->first & 1)) inGame += it->second;
+    }
+    std::sort(top.begin(), top.end());
+    char buf[256];
+    snprintf(buf, sizeof(buf), "profile: %u samples, %.1f%% in game code", total, 100.0 * inGame / total);
+    line(buf);
+    for (size_t i = 0; i < top.size() && i < 30; ++i) {
+        const std::pair<uint32_t, uint64_t>& e = top[top.size() - 1 - i];
+        if (e.second & 1)
+            snprintf(buf, sizeof(buf), "profile: %5.1f%% in %s", 100.0 * e.first / total, (const char*)(uintptr_t)(e.second >> 1));
+        else if (e.second)
+            snprintf(buf, sizeof(buf), "profile: %5.1f%% at %08x", 100.0 * e.first / total, (uint32_t)(e.second >> 1));
+        else
+            snprintf(buf, sizeof(buf), "profile: %5.1f%% in game code, no return address found", 100.0 * e.first / total);
+        line(buf);
+    }
+}
+
+// the function at a guest address: a binary search of the three images' tables (~25,000 functions)
+static const X86FuncEntry* find_function(uint32_t target) {
     for (int t = 0; t < 3; ++t) {
         const X86FuncEntry* table = t == 0 ? x86_functions : t == 1 ? x86_functions_lua : x86_functions_msvcp;
         uint32_t count = t == 0 ? x86_function_count : t == 1 ? x86_function_count_lua : x86_function_count_msvcp;
@@ -555,12 +623,148 @@ void x86_call(X86* c, uint32_t target) {
             if (table[mid].addr < target) lo = mid + 1;
             else hi = mid;
         }
-        if (lo < count && table[lo].addr == target) {
-            table[lo].fn(c);
-            return;
-        }
+        if (lo < count && table[lo].addr == target) return &table[lo];
     }
-    recomp_fatal(c, "call to %08x, which is not a known function", target);
+    return 0;
+}
+
+// Indirect calls (virtual functions, function pointers) find their target in a direct-mapped cache first. An entry
+// is one pointer into the tables, so threads read and write it whole.
+static const uint32_t kCallCacheSize = 8192;
+static std::atomic<const X86FuncEntry*> g_callCache[kCallCacheSize];
+
+static inline uint32_t call_cache_slot(uint32_t target) { return ((target >> 2) ^ (target >> 15)) & (kCallCacheSize - 1); }
+
+void x86_call(X86* c, uint32_t target) {
+    if (target >= kThunkBase && target < kThunkLimit) {
+        call_thunk(c, target);
+        return;
+    }
+    std::atomic<const X86FuncEntry*>& slot = g_callCache[call_cache_slot(target)];
+    const X86FuncEntry* e = slot.load(std::memory_order_relaxed);
+    if (!e || e->addr != target) {
+        e = find_function(target);
+        if (!e) recomp_fatal(c, "call to %08x, which is not a known function", target);
+        slot.store(e, std::memory_order_relaxed);
+    }
+    e->fn(c);
+}
+
+// BOI360_BENCH=1: what the translated code's own forms cost on this host, timed before the game starts (the
+// console's in-order core stalls when a load reads what a store just wrote; the PC forwards it). Each case runs
+// the form as translate.py writes it.
+#if defined(_MSC_VER)
+#define BENCH_NOINLINE __declspec(noinline)
+#else
+#define BENCH_NOINLINE __attribute__((noinline))
+#endif
+#define BENCH_REGS() uint32_t eax=c->r[0],ecx=c->r[1],edx=c->r[2],ebx=c->r[3],esp=c->r[4],ebp=c->r[5],esi=c->r[6],edi=c->r[7];\
+    uint8_t cf=c->cf,pf=c->pf,af=c->af,zf=c->zf,sf=c->sf,of=c->of;(void)cf;(void)pf;(void)af;(void)zf;(void)sf;(void)of
+#define BENCH_SPILL() (c->r[0]=eax,c->r[1]=ecx,c->r[2]=edx,c->r[3]=ebx,c->r[4]=esp,c->r[5]=ebp,c->r[6]=esi,c->r[7]=edi,\
+    c->cf=cf,c->pf=pf,c->af=af,c->zf=zf,c->sf=sf,c->of=of)
+#define BENCH_FILL() (eax=c->r[0],ecx=c->r[1],edx=c->r[2],ebx=c->r[3],esp=c->r[4],ebp=c->r[5],esi=c->r[6],edi=c->r[7],\
+    cf=c->cf,pf=c->pf,af=c->af,zf=c->zf,sf=c->sf,of=c->of)
+
+// a callee as translated now: every register in, every register out
+static BENCH_NOINLINE void bench_callee_full(X86* c) {
+    BENCH_REGS();
+    eax = RD32(esp + 4) + ecx;
+    esp += 4;
+    BENCH_SPILL();
+}
+// the same callee taking only what it reads and giving back only what it writes
+static BENCH_NOINLINE void bench_callee_lean(X86* c) {
+    uint32_t esp = c->r[4], ecx = c->r[1];
+    uint32_t eax = RD32(esp + 4) + ecx;
+    esp += 4;
+    c->r[4] = esp;
+    c->r[0] = eax;
+}
+static BENCH_NOINLINE void bench_nothing(X86* c) { (void)c; }
+
+typedef std::chrono::steady_clock BenchClock;
+static double bench_ns(BenchClock::time_point t0, uint32_t n) {
+    return std::chrono::duration<double, std::nano>(BenchClock::now() - t0).count() / n;
+}
+
+void recomp_bench(X86* c) {
+    const uint32_t n = 1000000;
+    uint32_t sink = 0;
+    // the main thread's guest stack, below where the game will start (committed on the console, where the rest of
+    // guest memory is only as the heap grows)
+    const uint32_t top = c->r[4], base = top - 0x2000;
+    c->r[4] = base + 0x1000;
+    {   // a translated direct call: push the return address, spill, call, fill
+        BENCH_REGS();
+        BenchClock::time_point t0 = BenchClock::now();
+        for (uint32_t i = 0; i < n; ++i) {
+            esp -= 4; WR32(esp, 0x401000u + i); WR32(esp + 4, i);
+            BENCH_SPILL(); bench_callee_full(c); BENCH_FILL();
+            ecx += eax;
+        }
+        double full = bench_ns(t0, n);
+        sink += ecx;
+        t0 = BenchClock::now();
+        for (uint32_t i = 0; i < n; ++i) {
+            esp -= 4; WR32(esp, 0x401000u + i); WR32(esp + 4, i);
+            c->r[4] = esp; c->r[1] = ecx; bench_callee_lean(c); esp = c->r[4]; eax = c->r[0];
+            ecx += eax;
+        }
+        double lean = bench_ns(t0, n);
+        sink += ecx;
+        t0 = BenchClock::now();
+        for (uint32_t i = 0; i < n; ++i) bench_nothing(c);
+        double bare = bench_ns(t0, n);
+        recomp_log("bench: a translated call %.1f ns, spilling only what it uses %.1f ns, a bare host call %.1f ns",
+                   full, lean, bare);
+    }
+    {   // the guest stack: a push read back at once, and a store and a load of different words
+        uint32_t esp = base + 0x1000, v = 0;
+        BenchClock::time_point t0 = BenchClock::now();
+        for (uint32_t i = 0; i < n; ++i) { esp -= 4; WR32(esp, i); v += RD32(esp); esp += 4; }
+        double back = bench_ns(t0, n);
+        t0 = BenchClock::now();
+        for (uint32_t i = 0; i < n; ++i) { esp -= 4; WR32(esp, i); v += RD32(esp + 64); esp += 4; }
+        double apart = bench_ns(t0, n);
+        sink += v;
+        recomp_log("bench: a guest push read back at once %.1f ns, a store and an unrelated load %.1f ns", back, apart);
+    }
+    {   // finding a function: the tables' binary search, and the indirect-call cache
+        std::vector<uint32_t> targets;
+        for (uint32_t i = 0; i < x86_function_count; i += x86_function_count / 997 + 1) targets.push_back(x86_functions[i].addr);
+        uint32_t m = n / 10;
+        BenchClock::time_point t0 = BenchClock::now();
+        for (uint32_t i = 0; i < m; ++i) sink += (uint32_t)(uintptr_t)find_function(targets[i % targets.size()]);
+        double search = bench_ns(t0, m);
+        for (size_t i = 0; i < targets.size(); ++i) g_callCache[call_cache_slot(targets[i])].store(find_function(targets[i]));
+        t0 = BenchClock::now();
+        for (uint32_t i = 0; i < m; ++i) {
+            uint32_t tg = targets[i % targets.size()];
+            const X86FuncEntry* e = g_callCache[call_cache_slot(tg)].load(std::memory_order_relaxed);
+            if (!e || e->addr != tg) e = find_function(tg);
+            sink += (uint32_t)(uintptr_t)e;
+        }
+        double cached = bench_ns(t0, m);
+        recomp_log("bench: finding an indirect call's function %.1f ns by search, %.1f ns through the cache (%u targets)",
+                   search, cached, (unsigned)targets.size());
+    }
+    {   // the game's float loads: movss from memory into an XMM lane, then out again
+        X86Xmm x;
+        memset(&x, 0, sizeof(x));
+        const uint32_t at = base + 0x1800;
+        WR32(at, 0x3f800000u);
+        BenchClock::time_point t0 = BenchClock::now();
+        for (uint32_t i = 0; i < n; ++i) {
+            X86Xmm* d_ = &x; d_->u[X32(0)] = RD32(at); d_->u[X32(1)] = d_->u[X32(2)] = d_->u[X32(3)] = 0;
+            x.f[X32(0)] += 1.0f;
+            WR32(at, x.u[X32(0)]);
+        }
+        double fl = bench_ns(t0, n);
+        recomp_log("bench: a float loaded from guest memory, added to and stored back %.1f ns", fl);
+    }
+    memset(g_mem + base, 0, top - base);
+    c->r[4] = top;
+    recomp_log("bench: done (%u)", sink & 1);
 }
 
 void x86_import(X86* c, uint32_t slot) {
@@ -815,6 +1019,8 @@ int recomp_run(const RecompConfig& cfg) {
     X86* c = make_cpu(4u << 20);
     t_cpu = c;
     sample_register(c, "main");
+    recomp_profile_start();
+    if (getenv("BOI360_BENCH")) recomp_bench(c);
     for (size_t i = 1; i < g_images.size(); ++i) {           // DllMain(hinst, DLL_PROCESS_ATTACH, 0)
         uint32_t args[3] = {g_images[i].base, 1, 0};
         uint32_t ok = guest_call(c, g_images[i].entry, 3, args, true);

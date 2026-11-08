@@ -295,21 +295,15 @@ struct ShaderSample {
     std::vector<float> push, verts;     // verts: up to 6 packed vertices of the draw's first triangles
 };
 bool g_samples = false;
+uint32_t g_samplesFrom = 0;           // BOI360_SHADER_SAMPLES=N: from frame N (an effect a script starts later)
 std::map<int, std::vector<ShaderSample> > g_shaderSamples;
 enum { SAMPLE_DRAWS = 24, SAMPLE_VERTS = 6 };
 std::set<float> g_clearDepths;
-// What each frame did, for the frame lines (gl_vk_frame_counts): a pass that begins without clearing its depth loads
-// it, and on the console vulkan4xenon cannot bring back depth eDRAM has lost, so draws tested against it are counted.
+// What each frame did, for the frame lines (gl_vk_frame_counts)
 struct FrameCounts {
-    uint32_t passes, draws, depthClears, loadedDepthPasses, loadedDepthDraws;
+    uint32_t passes, draws, depthClears;
 };
 FrameCounts g_counts, g_lastCounts;
-bool g_passDepthLoaded = false, g_passLoadedCounted = false;
-// BOI360_NO_DEPTH_FROM=N: from frame N every draw ignores the depth test (a console check of depth's part in what
-// shows; transparent texels then draw too)
-uint32_t g_noDepthFrom = 0;
-// BOI360_PRESENT_TEST=from,to: those frames show magenta instead of the picture (a console check of the output path)
-uint32_t g_presentTestFrom = 0, g_presentTestTo = 0;
 // BOI360_TRACE_FRAME=N,M,...: each pass, clear and draw of those frames in the log (program, target, states,
 // textures, the first vertex and the push constants)
 std::set<uint32_t> g_traceFrames;
@@ -827,8 +821,6 @@ bool ensure_pass(bool clearsColor, bool clearsDepth) {
     if (tracing())
         recomp_log("trace: pass fbo %u, colour %dx%d (%s), depth %s (%s), area %dx%d", g_fbo, t.color->w, t.color->h,
                    clearsColor ? "cleared" : "loaded", t.depth ? "yes" : "none", clearsDepth ? "cleared" : "loaded", t.w, t.h);
-    g_passDepthLoaded = hasDepth && !clearsDepth;
-    g_passLoadedCounted = false;
     g_passW = t.w;
     g_passH = t.h;
     g_boundPipe = VK_NULL_HANDLE;
@@ -1154,7 +1146,9 @@ bool make_output() {
         extent.height = 720;
     }
     g_swapExtent = extent;
-    uint32_t count = caps.minImageCount + 1;
+    // as few images as the display takes (vulkan4xenon: 2), so at most one finished frame waits to show: a pad read
+    // reaches the screen a frame sooner than with a third
+    uint32_t count = caps.minImageCount < 2 ? 2 : caps.minImageCount;
     if (caps.maxImageCount && count > caps.maxImageCount) count = caps.maxImageCount;
     if (count > MAX_SWAP) count = MAX_SWAP;
     VkSwapchainCreateInfoKHR ci;
@@ -1513,7 +1507,7 @@ void draw(uint32_t mode, int count, uint32_t indexType, uint32_t indices, int fi
             }
         }
     }
-    if (g_samples) {
+    if (g_samples && gl_frame_count() >= g_samplesFrom) {
         std::vector<ShaderSample>& list = g_shaderSamples[(int)(p.desc - GLVK_PROGRAMS)];
         // the first draws, then one in 64 of the later ones, so the samples span the run
         static std::map<int, uint32_t> seen;
@@ -1560,7 +1554,7 @@ void draw(uint32_t mode, int count, uint32_t indexType, uint32_t indices, int fi
     k.cullFace = g_cull ? g_cullFace : 0;
     k.frontFace = g_frontFace;
     k.hasDepth = g_passKey.depth != VK_NULL_HANDLE;
-    k.depthTest = k.hasDepth && g_depthTest && !(g_noDepthFrom && gl_frame_count() >= g_noDepthFrom);
+    k.depthTest = k.hasDepth && g_depthTest;
     k.depthWrite = k.depthTest && g_depthMask;
     k.depthFunc = k.depthTest ? g_depthFunc : 0x0207;
     // the converted shaders drop a fragment by writing depth 0, which fails only a GREATER test (shaders.py)
@@ -1571,11 +1565,6 @@ void draw(uint32_t mode, int count, uint32_t indexType, uint32_t indices, int fi
     VkPipeline pipe = pipeline(k, p);
     if (!pipe) return;
     ++g_counts.draws;
-    if (k.depthTest && g_passDepthLoaded) {
-        ++g_counts.loadedDepthDraws;
-        if (!g_passLoadedCounted) ++g_counts.loadedDepthPasses;
-        g_passLoadedCounted = true;
-    }
     if (pipe != g_boundPipe) {
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipe);
         g_boundPipe = pipe;
@@ -1704,7 +1693,6 @@ void clear(uint32_t mask) {
     }
     if (depth && g_passKey.depth) {
         ++g_counts.depthClears;
-        g_passDepthLoaded = false;
         att[n].aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT | (g_depthFormat == VK_FORMAT_D32_SFLOAT ? 0 : VK_IMAGE_ASPECT_STENCIL_BIT);
         att[n].colorAttachment = 0;
         att[n].clearValue.depthStencil.depth = g_clearDepth;
@@ -2298,16 +2286,12 @@ void gl_vk_configure(const GlVkHooks& hooks) {
     // settings from the environment, read here: the console sets them from boi360_args.txt after static start-up
     const char* v;
     g_stats = getenv("BOI360_GL_STATS") != 0;
-    g_samples = getenv("BOI360_SHADER_SAMPLES") != 0;
-    g_noDepthFrom = (v = getenv("BOI360_NO_DEPTH_FROM")) ? (uint32_t)atoi(v) : 0;
+    g_samples = (v = getenv("BOI360_SHADER_SAMPLES")) != 0;
+    g_samplesFrom = v ? (uint32_t)atoi(v) : 0;
     for (const char* t = getenv("BOI360_TRACE_FRAME"); t && *t;) {
         g_traceFrames.insert((uint32_t)atoi(t));
         while (*t && *t != ',') ++t;
         if (*t == ',') ++t;
-    }
-    if ((v = getenv("BOI360_PRESENT_TEST")) && strchr(v, ',')) {
-        g_presentTestFrom = (uint32_t)atoi(v);
-        g_presentTestTo = (uint32_t)atoi(strchr(v, ',') + 1);
     }
     g_lazyTextures = !(v = getenv("BOI360_TEX_LAZY")) || atoi(v) != 0;
     g_textureBudget = (uint64_t)((v = getenv("BOI360_TEX_BUDGET")) ? atoi(v) : 96) << 20;
@@ -2424,9 +2408,8 @@ bool gl_vk_read_texture(uint32_t name, std::vector<uint8_t>& bgra, int& w, int& 
 }
 
 void gl_vk_frame_counts(char* buf, size_t size) {
-    snprintf(buf, size, "%u passes, %u draws, %u depth clears, %u draws in %u passes test loaded depth",
-             g_lastCounts.passes, g_lastCounts.draws, g_lastCounts.depthClears, g_lastCounts.loadedDepthDraws,
-             g_lastCounts.loadedDepthPasses);
+    snprintf(buf, size, "%u passes, %u draws, %u depth clears", g_lastCounts.passes, g_lastCounts.draws,
+             g_lastCounts.depthClears);
 }
 
 void gl_vk_present() {
@@ -2462,24 +2445,18 @@ void gl_vk_present() {
         VkClearAttachment att;
         memset(&att, 0, sizeof(att));
         att.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        bool test = gl_frame_count() >= g_presentTestFrom && gl_frame_count() < g_presentTestTo;
-        if (test) {
-            att.clearValue.color.float32[0] = att.clearValue.color.float32[2] = att.clearValue.color.float32[3] = 1.0f;
-        }
         VkClearRect cr;
         memset(&cr, 0, sizeof(cr));
         cr.rect = sc;
         cr.layerCount = 1;
         vkCmdClearAttachments(f.cmd, 1, &att, 1, &cr);
-        if (!test) {
-            vkCmdBindPipeline(f.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, g_presentPipe);
-            vkCmdBindDescriptorSets(f.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, g_presentLayout, 0, 1, &g_presentSet, 0, 0);
-            vkCmdSetViewport(f.cmd, 0, 1, &vp);
-            vkCmdSetScissor(f.cmd, 0, 1, &sc);
-            VkDeviceSize off = 0;
-            vkCmdBindVertexBuffers(f.cmd, 0, 1, &g_presentQuad.buf, &off);
-            vkCmdDraw(f.cmd, 6, 1, 0, 0);
-        }
+        vkCmdBindPipeline(f.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, g_presentPipe);
+        vkCmdBindDescriptorSets(f.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, g_presentLayout, 0, 1, &g_presentSet, 0, 0);
+        vkCmdSetViewport(f.cmd, 0, 1, &vp);
+        vkCmdSetScissor(f.cmd, 0, 1, &sc);
+        VkDeviceSize off = 0;
+        vkCmdBindVertexBuffers(f.cmd, 0, 1, &g_presentQuad.buf, &off);
+        vkCmdDraw(f.cmd, 6, 1, 0, 0);
         vkCmdEndRenderPass(f.cmd);
     }
     vkEndCommandBuffer(f.cmd);

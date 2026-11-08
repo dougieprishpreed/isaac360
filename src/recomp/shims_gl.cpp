@@ -252,7 +252,27 @@ void gl_vk_shot(uint32_t frame) {
 
 void heap_profile_dump();                           // shims_crt.cpp
 
+// Frame times for the log, each 600 frames: the game's part (from one present's end to the next one's start) and the
+// present's (recording the frame's end, submitting, waiting for a free frame and the display)
+struct FrameTimes {
+    double game, present, frame, gameMax, presentMax, frameMax;
+    uint32_t frames, over17, over34;
+};
+static FrameTimes g_times;
+typedef std::chrono::steady_clock Clock;
+
+static void log_times() {
+    FrameTimes& t = g_times;
+    if (!t.frames) return;
+    recomp_log("time: frame %.1f ms (max %.1f), game %.1f (max %.1f), present %.1f (max %.1f); %u of %u frames over "
+               "17 ms, %u over 34", t.frame / t.frames, t.frameMax, t.game / t.frames, t.gameMax, t.present / t.frames,
+               t.presentMax, t.over17, t.frames, t.over34);
+    memset(&t, 0, sizeof(t));
+}
+
 void gl_present() {
+    static Clock::time_point lastEnd = Clock::now();
+    Clock::time_point start = Clock::now();
     static uint32_t profileFrame = getenv("BOI360_HEAP_PROFILE") ? (uint32_t)atoi(getenv("BOI360_HEAP_PROFILE")) : 0;
     if (profileFrame && g_frames == profileFrame) heap_profile_dump();
     // BOI360_TEX_LIST="frame,frame,...": the live textures at those frames (build/recomp/textures_N.txt)
@@ -274,6 +294,22 @@ void gl_present() {
 #if defined(_WIN32)
     else gl_pt_present();
 #endif
+    Clock::time_point end = Clock::now();
+    {
+        double game = std::chrono::duration<double, std::milli>(start - lastEnd).count();
+        double present = std::chrono::duration<double, std::milli>(end - start).count();
+        FrameTimes& t = g_times;
+        t.game += game;
+        t.present += present;
+        t.frame += game + present;
+        if (game > t.gameMax) t.gameMax = game;
+        if (present > t.presentMax) t.presentMax = present;
+        if (game + present > t.frameMax) t.frameMax = game + present;
+        if (game + present > 17.5) ++t.over17;
+        if (game + present > 34.0) ++t.over34;
+        ++t.frames;
+        lastEnd = end;
+    }
     ++g_frames;
     if (g_frames <= 3 || g_frames % 600 == 0) {
         // seconds since the first frame: loading shows as the gap between frames 1 and 2
@@ -294,6 +330,10 @@ void gl_present() {
         if (traceReads && g_frames <= 3) vf_dump_readers(log_line);
         if (!g_glCounts.empty()) gl_write_counts();
         if (gl_vk_enabled()) gl_vk_write_stats();
+        if (g_frames % 600 == 0) {
+            log_times();
+            recomp_profile_dump(log_line);
+        }
     }
 }
 
