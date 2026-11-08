@@ -26,6 +26,7 @@ int vf_eof(VFile* f);
 int vf_error(VFile* f);
 void vf_clearerr(VFile* f);
 void vf_flush(VFile* f);
+const std::string& vf_path(VFile* f);     // the host path it was opened with
 // waits until the writer thread has done every queued open, write, flush and close (files only written go
 // through it): before anything looks at the files again
 void vf_drain();

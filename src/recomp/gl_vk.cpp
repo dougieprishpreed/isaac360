@@ -145,7 +145,11 @@ struct Texture {
 };
 
 struct Renderbuffer {
+    // The game's one depth renderbuffer is sized to the screen's next powers of two (2048x2048 at 1080p, 16 MB), but
+    // every target it backs is smaller and gets a depth image of its own size (sized): its image is made only when a
+    // target of its very size draws
     Image img;
+    int w = 0, h = 0;                   // as glRenderbufferStorage gave them
     uint32_t format;
     // GL lets a colour texture smaller than the depth buffer share it (its top left); vulkan4xenon, like the
     // console's eDRAM, wants attachments of one size, so each other colour size gets a depth image of its own
@@ -761,12 +765,16 @@ bool current_target(Target& t) {
         }
         t.color = &ct->second.img;
         std::map<uint32_t, Renderbuffer>::iterator rt = g_renderbuffers.find(f.depth);
-        t.depth = rt != g_renderbuffers.end() && rt->second.img.image ? &rt->second.img : 0;
-        if (t.depth && (t.depth->w != t.color->w || t.depth->h != t.color->h)) {
-            Image& d = rt->second.sized[std::make_pair(t.color->w, t.color->h)];
+        Renderbuffer* rb = rt != g_renderbuffers.end() && rt->second.w > 0 ? &rt->second : 0;
+        t.depth = 0;
+        if (rb && rb->w == t.color->w && rb->h == t.color->h) {
+            if (!rb->img.image && make_image(rb->img, rb->w, rb->h, g_depthFormat, true)) init_depth_layout(rb->img);
+            t.depth = rb->img.image ? &rb->img : 0;
+        } else if (rb) {
+            Image& d = rb->sized[std::make_pair(t.color->w, t.color->h)];
             if (!d.image) {
                 log_once("a %dx%d colour target with a %dx%d depth buffer: a depth image of the colour's size",
-                         t.color->w, t.color->h, t.depth->w, t.depth->h);
+                         t.color->w, t.color->h, rb->w, rb->h);
                 if (make_image(d, t.color->w, t.color->h, g_depthFormat, true)) init_depth_layout(d);
             }
             t.depth = d.image ? &d : 0;
@@ -2042,12 +2050,13 @@ void vk_glRenderbufferStorage(X86* c) {
         retire_image(it->second);
     rb.sized.clear();
     rb.format = format;
-    if (make_image(rb.img, w, h, g_depthFormat, true)) init_depth_layout(rb.img);
+    rb.w = w;
+    rb.h = h;
 }
 void vk_glGetRenderbufferParameteriv(X86* c) {
     uint32_t pname = ARG(c, 1), out = ARG(c, 2);
     Renderbuffer& rb = g_renderbuffers[g_rb];
-    WR32(out, pname == GL_RENDERBUFFER_WIDTH ? (uint32_t)rb.img.w : pname == GL_RENDERBUFFER_HEIGHT ? (uint32_t)rb.img.h
+    WR32(out, pname == GL_RENDERBUFFER_WIDTH ? (uint32_t)rb.w : pname == GL_RENDERBUFFER_HEIGHT ? (uint32_t)rb.h
               : pname == GL_RENDERBUFFER_INTERNAL_FORMAT ? rb.format : 0);
     RET_STD(c, 3, 0);
 }

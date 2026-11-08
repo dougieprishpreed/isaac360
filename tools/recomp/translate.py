@@ -38,6 +38,18 @@ PATCHES = {
     0x950730: 'esi=RD32((uint32_t)(RD32((uint32_t)(ebp+0xfffff1c8u))+0x14u));goto L_9507bf;',
 }
 
+# Functions of isaac-ng.exe whose work a host function can take (the exe only): address -> the host function,
+# which runs first and returns nonzero when it did the call (eax set, the return address popped), zero to let the
+# translated code run. The game's stb_vorbis decodes music on its sound thread holding the sound manager's lock;
+# translated, that decode is too slow on the console and the main thread waits on the lock
+# (src/recomp/hle_vorbis.cpp decodes ahead natively).
+HOST = {
+    0x9aa630: 'hle_vorbis_get_samples',       # stb_vorbis_get_samples_short_interleaved (f ecx, channels edx)
+    0x9a3e50: 'hle_vorbis_set_file_offset',   # set_file_offset (f ecx, loc edx): stb_vorbis_seek_start's start
+    0x9a7910: 'hle_vorbis_pump_first_frame',  # vorbis_pump_first_frame (f ecx): stb_vorbis_seek_start's restart
+    0x9a99c0: 'hle_vorbis_deinit',            # vorbis_deinit (f ecx), before the game frees the decoder
+}
+
 M = ix.Mnemonic
 R = ix.Register
 OK = ix.OpKind
@@ -1254,7 +1266,10 @@ class Fn:
         entry = '' if self.order and self.order[0] == self.start else 'goto L_%x;\n' % self.start
         if self.start in TRACE:
             entry = 'x86_trace_enter(c,0x%xu);\n' % self.start + entry
-        src = 'void %s(X86* c){REGS();\n%s%s\n}\n' % (name, entry, '\n'.join(lines))
+        host = HOST.get(self.start) if not TAG else None
+        pre = ('int %s(X86* c);\n' % host) if host else ''
+        hook = ('if(%s(c))return;\n' % host) if host else ''
+        src = pre + 'void %s(X86* c){%sREGS();\n%s%s\n}\n' % (name, hook, entry, '\n'.join(lines))
         return src, unhandled
 
 

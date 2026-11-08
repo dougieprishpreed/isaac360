@@ -174,9 +174,10 @@ void a_alDeleteSources(X86* c) {
 // ---- sound effects read when first played
 // The console's archives hold each effect's WAV with a "data" chunk that only says where its samples are:
 // "B3RF", u32 offset, u32 bytes into resources/packed/sfx.pcm, the original 16-bit samples as the game ships them
-// (tools/recomp/console_sfx.py). The game loads all 1,150 effects at start and keeps them; their samples (243 MB)
-// stay on the drive until a sound plays. A loader thread reads them; the recently played stay in memory up to
-// BOI360_SFX_CACHE MB (32). A source playing an effect still on its way waits for it rather than playing silence.
+// (tools/recomp/console_sfx.py). Their samples (243 MB) stay on the drive until a sound plays: a loader thread
+// reads an effect when the game first plays it, and the recently played stay in memory up to BOI360_SFX_CACHE MB
+// (8; one played again after it went is read again). A source playing an effect still on its way waits for it
+// rather than playing silence.
 std::mutex g_fxLock;
 std::condition_variable g_fxWake;
 std::map<uint32_t, Samples> g_fx;                   // by offset in sfx.pcm
@@ -184,7 +185,7 @@ std::list<uint32_t> g_fxRecent;                     // most recently used first
 uint64_t g_fxBytes = 0;
 std::deque<std::pair<uint32_t, uint32_t> > g_fxQueue;   // (offset, bytes) to read
 std::set<uint32_t> g_fxQueued;
-uint64_t g_fxLimit = (uint64_t)(getenv("BOI360_SFX_CACHE") ? atoi(getenv("BOI360_SFX_CACHE")) : 32) << 20;
+uint64_t g_fxLimit = (uint64_t)(getenv("BOI360_SFX_CACHE") ? atoi(getenv("BOI360_SFX_CACHE")) : 8) << 20;
 bool g_fxLoader = false;
 
 void fx_loader(void*);

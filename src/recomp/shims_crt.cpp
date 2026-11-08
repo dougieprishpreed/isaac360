@@ -16,6 +16,8 @@
 #include <string>
 #include <vector>
 
+void hle_vorbis_freed(uint32_t p);                  // hle_vorbis.cpp
+
 namespace {
 // ------------------------------------------------------------------------------------------------ files
 std::mutex g_fileLock;
@@ -302,7 +304,12 @@ uint32_t traced_alloc(X86* c, uint32_t p, uint32_t size) {
     return p;
 }
 void s_malloc(X86* c) { big_alloc_log(c, ARG(c, 0)); RET_CDECL(c, traced_alloc(c, guest_malloc(ARG(c, 0)), ARG(c, 0))); }
-void s_free(X86* c) { if (g_heapProfile) profile_free(ARG(c, 0)); guest_free(ARG(c, 0)); RET_CDECL(c, 0); }
+void s_free(X86* c) {
+    if (g_heapProfile) profile_free(ARG(c, 0));
+    hle_vorbis_freed(ARG(c, 0));                    // a music decoder the host serves goes with its object
+    guest_free(ARG(c, 0));
+    RET_CDECL(c, 0);
+}
 void s_realloc(X86* c) {
     big_alloc_log(c, ARG(c, 1));
     if (g_heapProfile) profile_free(ARG(c, 0));
@@ -741,6 +748,9 @@ void shims_crt_init() {
 }
 
 VFile* crt_host_file(uint32_t g) { return host_file(g); }
+
+// the host stream behind a guest FILE* (hle_vorbis.cpp: the game's decoder reads music through one)
+VFile* shims_guest_file(uint32_t guestFile) { return host_file(guestFile); }
 
 void shims_crt_register() { shim_register(kCrt, (int)(sizeof(kCrt) / sizeof(kCrt[0]))); }
 

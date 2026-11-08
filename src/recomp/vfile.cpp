@@ -1,5 +1,6 @@
 // Guest stdio streams on the host (vfile.h).
 #include "vfile.h"
+#include "runtime.h"
 
 #include <condition_variable>
 #include <deque>
@@ -7,7 +8,6 @@
 #include <map>
 #include <mutex>
 #include <string.h>
-#include <thread>
 #include <vector>
 #if !defined(_WIN32)
 #include <fcntl.h>
@@ -139,7 +139,7 @@ std::condition_variable g_writeWork, g_writeIdle;
 std::deque<WriteOp> g_writes;
 bool g_writerBusy = false, g_writerStarted = false;
 
-void writer_thread() {
+void writer_thread(void*) {
     std::unique_lock<std::mutex> l(g_writeLock);
     for (;;) {
         g_writeWork.wait(l, [] { return !g_writes.empty(); });
@@ -179,7 +179,8 @@ void writer_thread() {
 void push_write(WriteOp& op) {
     if (!g_writerStarted) {
         g_writerStarted = true;
-        std::thread(writer_thread).detach();
+        // a small stack, as the other host threads (a thread without a size takes the .xex's default)
+        host_thread_start(writer_thread, 0, 256u << 10);
     }
     g_writes.push_back(WriteOp());
     WriteOp& back = g_writes.back();
@@ -218,6 +219,7 @@ struct VFile {
     FILE* f;                            // a plain host file, or
     Reader* r;                          // a shared reader with this stream's position, or
     AsyncFile* a;                       // a file only written, through the writer thread
+    std::string path;                   // the host path it was opened with (empty for stdin/stdout/stderr)
     int64_t pos;
     bool eof, err;
     int unget;
@@ -253,6 +255,7 @@ VFile* vf_open(const std::string& hostPath, const std::string& mode, bool shared
     v->unget = -1;
     bool readOnlyBinary = mode.find('r') != std::string::npos && mode.find('b') != std::string::npos &&
                           mode.find('+') == std::string::npos;
+    v->path = hostPath;
     bool writeOnly = (mode.find('w') != std::string::npos || mode.find('a') != std::string::npos) &&
                      mode.find('+') == std::string::npos && mode.find('r') == std::string::npos;
     if (writeOnly) {
@@ -416,6 +419,8 @@ void vf_clearerr(VFile* v) {
     if (v->f) clearerr(v->f);
     v->eof = v->err = false;
 }
+const std::string& vf_path(VFile* v) { return v->path; }
+
 void vf_flush(VFile* v) {
     if (v->a) queue_write(WriteOp::FLUSH, v->a, 0, 0);
     else if (v->f) fflush(v->f);

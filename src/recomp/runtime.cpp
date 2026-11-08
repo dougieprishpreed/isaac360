@@ -582,7 +582,7 @@ static uint32_t innermost_return(X86* c) {
     return 0;
 }
 
-static void profile_thread() {
+static void profile_thread(void*) {
     if (g_cfg.threadStarted) g_cfg.threadStarted("profiler");
     for (;;) {
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
@@ -600,7 +600,7 @@ static void profile_thread() {
 
 void recomp_profile_start() {
     if (!getenv("BOI360_PROFILE")) return;
-    std::thread(profile_thread).detach();
+    host_thread_start(profile_thread, 0, 256u << 10);
 }
 
 void recomp_profile_dump(void (*line)(const char*)) {

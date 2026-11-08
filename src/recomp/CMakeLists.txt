@@ -20,7 +20,7 @@ target_include_directories(boi360_guest PRIVATE "${CMAKE_CURRENT_LIST_DIR}" "${G
 # the translated code is large and flat: -O1 keeps compile times reasonable; no warnings for generated code
 target_compile_options(boi360_guest PRIVATE /O1 /w /fp:precise -fno-strict-aliasing)
 
-add_executable(boi360_recomp host_win32.cpp runtime.cpp gl_vk.cpp vfile.cpp lz.cpp ${SHIM_SOURCES})
+add_executable(boi360_recomp host_win32.cpp runtime.cpp gl_vk.cpp vfile.cpp lz.cpp hle_vorbis.cpp ${SHIM_SOURCES})
 # gl_shaders.inc: the game's shaders converted by tools/recomp/shaders.py
 target_include_directories(boi360_recomp PRIVATE "${CMAKE_CURRENT_LIST_DIR}" "${ROOT}/build/recomp" "${ROOT}/src/third_party/vulkan-headers/include")
 target_compile_options(boi360_recomp PRIVATE /O2 /W3 /wd4996 /fp:precise -fno-strict-aliasing)
