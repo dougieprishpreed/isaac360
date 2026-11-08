@@ -196,7 +196,31 @@ void gl_make_current() {
 #endif
 }
 
-// BOI360_SHOTS="frame,frame,..." on the Vulkan path: the default framebuffer to build/recomp/shot_N.bmp
+static void write_bmp(const std::string& path, const std::vector<uint8_t>& px, int w, int h) {
+    FILE* f = fopen(path.c_str(), "wb");
+    if (!f) return;
+    uint8_t hdr[54];
+    memset(hdr, 0, sizeof(hdr));
+    uint32_t size = 54 + (uint32_t)px.size();
+    hdr[0] = 'B';
+    hdr[1] = 'M';
+    for (int i = 0; i < 4; ++i) {                    // little-endian fields on every host
+        hdr[2 + i] = (uint8_t)(size >> (8 * i));
+        hdr[18 + i] = (uint8_t)((uint32_t)w >> (8 * i));
+        hdr[22 + i] = (uint8_t)((uint32_t)h >> (8 * i));   // bottom-up rows, as GL keeps them
+    }
+    hdr[10] = 54;
+    hdr[14] = 40;
+    hdr[26] = 1;
+    hdr[28] = 32;
+    fwrite(hdr, 1, 54, f);
+    fwrite(&px[0], 1, px.size(), f);
+    fclose(f);
+    recomp_log("screenshot %s", path.c_str());
+}
+
+// BOI360_SHOTS="frame,frame,..." on the Vulkan path: the default framebuffer to <out>/shot_N.bmp, and with
+// BOI360_SHOT_TARGETS each texture the game renders to as shot_N_tex<name>.bmp (recomp_out_dir)
 void gl_vk_shot(uint32_t frame) {
     static std::set<uint32_t> shots;
     static bool parsed = false;
@@ -211,27 +235,19 @@ void gl_vk_shot(uint32_t frame) {
     if (!shots.count(frame)) return;
     std::vector<uint8_t> px;
     int w = 0, h = 0;
-    if (!gl_vk_read_frame(px, w, h)) return;
-    char path[256];
-    sprintf(path, "build/recomp/shot_%05u.bmp", frame);
-    FILE* f = fopen(path, "wb");
-    if (!f) return;
-    uint8_t hdr[54];
-    memset(hdr, 0, sizeof(hdr));
-    uint32_t size = 54 + (uint32_t)px.size();
-    hdr[0] = 'B';
-    hdr[1] = 'M';
-    memcpy(hdr + 2, &size, 4);
-    hdr[10] = 54;
-    hdr[14] = 40;
-    memcpy(hdr + 18, &w, 4);
-    memcpy(hdr + 22, &h, 4);                         // bottom-up rows, as GL keeps them
-    hdr[26] = 1;
-    hdr[28] = 32;
-    fwrite(hdr, 1, 54, f);
-    fwrite(&px[0], 1, px.size(), f);
-    fclose(f);
-    recomp_log("screenshot %s", path);
+    char name[64];
+    if (gl_vk_read_frame(px, w, h)) {
+        sprintf(name, "/shot_%05u.bmp", frame);
+        write_bmp(recomp_out_dir() + name, px, w, h);
+    }
+    static bool targets = getenv("BOI360_SHOT_TARGETS") != 0;
+    if (!targets) return;
+    std::vector<uint32_t> names = gl_vk_targets();
+    for (size_t i = 0; i < names.size(); ++i)
+        if (gl_vk_read_texture(names[i], px, w, h)) {
+            sprintf(name, "/shot_%05u_tex%u.bmp", frame, names[i]);
+            write_bmp(recomp_out_dir() + name, px, w, h);
+        }
 }
 
 void heap_profile_dump();                           // shims_crt.cpp
@@ -265,9 +281,15 @@ void gl_present() {
         double t = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
         char free[32] = "";
         if (g_hostFreeMemory) sprintf(free, ", free %u MB", g_hostFreeMemory() >> 20);
-        recomp_log("frame %u at %.1f s, heap %u MB, images %u MB (+%u MB packed)%s", g_frames, t,
+        char counts[160] = "";
+        if (gl_vk_enabled()) {
+            counts[0] = ';';
+            counts[1] = ' ';
+            gl_vk_frame_counts(counts + 2, sizeof(counts) - 2);
+        }
+        recomp_log("frame %u at %.1f s, heap %u MB, images %u MB (+%u MB packed)%s%s", g_frames, t,
                    guest_heap_used() >> 20, (unsigned)(gl_vk_image_bytes() >> 20), (unsigned)(gl_vk_packed_bytes() >> 20),
-                   free);
+                   free, counts);
         static bool traceReads = getenv("BOI360_TRACE_READS") != 0;
         if (traceReads && g_frames <= 3) vf_dump_readers(log_line);
         if (!g_glCounts.empty()) gl_write_counts();

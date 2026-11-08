@@ -91,5 +91,7 @@ std::string recomp_host_path(const std::string& guestPath, bool write);   // wri
 bool recomp_host_exists(const std::string& hostPath, bool* isDir);
 std::vector<std::string> recomp_host_dirs(const std::string& guestDir);   // host folders behind one guest folder
 void recomp_sample_threads(void (*line)(const char*));   // each guest thread's shim and stack (watchdog)
+// where diagnostics go (screenshots, texture lists): BOI360_OUT_DIR, the console sets it beside the XEX
+std::string recomp_out_dir();
 
 #endif

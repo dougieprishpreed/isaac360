@@ -9,7 +9,8 @@ everything), and the game's runtime DLLs rebased (tools/recomp/rebase.py). Layou
   game/resources/...     resources/packed/*.a (four converted), packed/sfx.pcm and resources/scripts/
   dlls/                  lua5.3.3r.dll and msvcp140.dll, rebased
   save/                  the game's saves and anything it writes beside itself
-  boi360_args.txt        options (--mem MB: the guest address space)
+  boi360_args.txt        options (--mem MB: the guest address space; NAME=value: a setting the PC takes from
+                         the environment, e.g. BOI360_SHOTS=600,1200 for screenshots beside the XEX)
 
     py -3 tools/stage_console.py [--xex build/console/recomp/default.xex] [--out build/console/boi360]
 

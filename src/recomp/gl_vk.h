@@ -42,5 +42,8 @@ bool gl_vk_create_context();
 void gl_vk_present();
 // the default framebuffer as BGRA rows, bottom row first (screenshots)
 bool gl_vk_read_frame(std::vector<uint8_t>& bgra, int& w, int& h);
+std::vector<uint32_t> gl_vk_targets();     // the textures the game renders to
+bool gl_vk_read_texture(uint32_t name, std::vector<uint8_t>& bgra, int& w, int& h);
+void gl_vk_frame_counts(char* buf, size_t size);   // the last frame's passes and draws (frame lines)
 
 #endif

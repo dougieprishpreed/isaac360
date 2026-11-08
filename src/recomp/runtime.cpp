@@ -99,6 +99,11 @@ std::string recomp_host_path(const std::string& p, bool write) {
 
 std::string recomp_host_path(const std::string& p) { return recomp_host_path(p, false); }
 
+std::string recomp_out_dir() {
+    const char* d = getenv("BOI360_OUT_DIR");
+    return d && *d ? d : "build/recomp";
+}
+
 // a folder as the game sees it is the overlay's, the converted data's and the game folder's together (listings
 // merge them, the first one holding a name wins)
 std::vector<std::string> recomp_host_dirs(const std::string& p) {

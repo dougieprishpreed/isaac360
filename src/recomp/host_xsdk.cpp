@@ -1,7 +1,8 @@
 // Console host of the recompiled game on the open xsdk (docs/RECOMP_PLAN.md). The title's folder is the current
 // directory, staged by tools/stage_console.py: game/ holds the user's game files (isaac-ng.exe, resources/ with the
 // converted sound archives), dlls/ the rebased runtime DLLs, save/ the game's saves and anything it writes beside
-// itself, boi360.log the log. Options from boi360_args.txt beside the XEX: --mem MB (guest address space).
+// itself, boi360.log the log. Options from boi360_args.txt beside the XEX: --mem MB (guest address space), and
+// NAME=value settings the PC takes from the environment (BOI360_SHOTS=600,1200 etc.; screenshots land beside it).
 //
 // * Guest memory is reserved whole and committed as the game's heap grows.
 // * The game draws through the GL-on-Vulkan layer (gl_vk.cpp) on vulkan4xenon's one 1280x720 display mode.
@@ -247,8 +248,12 @@ void* GameMain(void*) {
     cfg.threadStarted = ThreadStarted;
     std::vector<std::string> args;
     ReadArgs(args);
-    for (size_t i = 0; i < args.size(); ++i)
+    setenv("BOI360_OUT_DIR", ".", 1);
+    for (size_t i = 0; i < args.size(); ++i) {
+        size_t eq = args[i].find('=');
         if (args[i] == "--mem" && i + 1 < args.size()) cfg.memSize = (uint32_t)atoi(args[++i].c_str()) << 20;
+        else if (eq != std::string::npos && eq > 0) setenv(args[i].substr(0, eq).c_str(), args[i].c_str() + eq + 1, 1);
+    }
     mkdir("save", 0777);
     setenv("BOI360_WINDOW", "1280x720", 1);          // the game renders at the display's one mode
 

@@ -287,17 +287,29 @@ struct ProgramStats {
     std::set<std::string> modes;
     ProgramStats() : zmin(1e30f), zmax(-1e30f), draws(0) {}
 };
-bool g_stats = getenv("BOI360_GL_STATS") != 0;
+bool g_stats = false;
 std::map<std::string, ProgramStats> g_programStats;
 // BOI360_SHADER_SAMPLES: per program, the push constants and first vertices of a few draws, the inputs
 // tools/recomp/check_shaders.py runs the console's shaders on (build/recomp/shader_samples.txt)
 struct ShaderSample {
     std::vector<float> push, verts;     // verts: up to 6 packed vertices of the draw's first triangles
 };
-bool g_samples = getenv("BOI360_SHADER_SAMPLES") != 0;
+bool g_samples = false;
 std::map<int, std::vector<ShaderSample> > g_shaderSamples;
 enum { SAMPLE_DRAWS = 24, SAMPLE_VERTS = 6 };
 std::set<float> g_clearDepths;
+// What each frame did, for the frame lines (gl_vk_frame_counts): a pass that begins without clearing its depth loads
+// it, and on the console vulkan4xenon cannot bring back depth eDRAM has lost, so draws tested against it are counted.
+struct FrameCounts {
+    uint32_t passes, draws, depthClears, loadedDepthPasses, loadedDepthDraws;
+};
+FrameCounts g_counts, g_lastCounts;
+bool g_passDepthLoaded = false, g_passLoadedCounted = false;
+// BOI360_NO_DEPTH_FROM=N: from frame N every draw ignores the depth test (a console check of depth's part in what
+// shows; transparent texels then draw too)
+uint32_t g_noDepthFrom = 0;
+// BOI360_PRESENT_TEST=from,to: those frames show magenta instead of the picture (a console check of the output path)
+uint32_t g_presentTestFrom = 0, g_presentTestTo = 0;
 
 void log_once(const char* fmt, ...) {
     char buf[512];
@@ -807,6 +819,9 @@ bool ensure_pass(bool clearsColor, bool clearsDepth) {
     vkCmdBeginRenderPass(g_frames[g_frame].cmd, &rp, VK_SUBPASS_CONTENTS_INLINE);
     g_inPass = true;
     g_passKey = key;
+    ++g_counts.passes;
+    g_passDepthLoaded = hasDepth && !clearsDepth;
+    g_passLoadedCounted = false;
     g_passW = t.w;
     g_passH = t.h;
     g_boundPipe = VK_NULL_HANDLE;
@@ -1370,10 +1385,10 @@ int program_index(uint32_t name) {
 }
 
 // ---- packed textures -------------------------------------------------------------------------------------
-bool g_lazyTextures = !getenv("BOI360_TEX_LAZY") || atoi(getenv("BOI360_TEX_LAZY")) != 0;
+bool g_lazyTextures = true;
 uint64_t g_packedBytes = 0;                        // the compressed pixels held (frame log)
 // images above this total make the least recently drawn packed textures give their images back (BOI360_TEX_BUDGET MB)
-uint64_t g_textureBudget = (uint64_t)(getenv("BOI360_TEX_BUDGET") ? atoi(getenv("BOI360_TEX_BUDGET")) : 96) << 20;
+uint64_t g_textureBudget = 96ull << 20;
 
 void drop_packed(Texture& t) {
     g_packedBytes -= t.lz.size();
@@ -1538,7 +1553,7 @@ void draw(uint32_t mode, int count, uint32_t indexType, uint32_t indices, int fi
     k.cullFace = g_cull ? g_cullFace : 0;
     k.frontFace = g_frontFace;
     k.hasDepth = g_passKey.depth != VK_NULL_HANDLE;
-    k.depthTest = k.hasDepth && g_depthTest;
+    k.depthTest = k.hasDepth && g_depthTest && !(g_noDepthFrom && gl_frame_count() >= g_noDepthFrom);
     k.depthWrite = k.depthTest && g_depthMask;
     k.depthFunc = k.depthTest ? g_depthFunc : 0x0207;
     // the converted shaders drop a fragment by writing depth 0, which fails only a GREATER test (shaders.py)
@@ -1548,6 +1563,12 @@ void draw(uint32_t mode, int count, uint32_t indexType, uint32_t indices, int fi
     k.topology = (uint32_t)topo;
     VkPipeline pipe = pipeline(k, p);
     if (!pipe) return;
+    ++g_counts.draws;
+    if (k.depthTest && g_passDepthLoaded) {
+        ++g_counts.loadedDepthDraws;
+        if (!g_passLoadedCounted) ++g_counts.loadedDepthPasses;
+        g_passLoadedCounted = true;
+    }
     if (pipe != g_boundPipe) {
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipe);
         g_boundPipe = pipe;
@@ -1644,6 +1665,8 @@ void clear(uint32_t mask) {
         ++n;
     }
     if (depth && g_passKey.depth) {
+        ++g_counts.depthClears;
+        g_passDepthLoaded = false;
         att[n].aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT | (g_depthFormat == VK_FORMAT_D32_SFLOAT ? 0 : VK_IMAGE_ASPECT_STENCIL_BIT);
         att[n].colorAttachment = 0;
         att[n].clearValue.depthStencil.depth = g_clearDepth;
@@ -1659,11 +1682,18 @@ void clear(uint32_t mask) {
     vkCmdClearAttachments(g_frames[g_frame].cmd, n, att, 1, &r);
 }
 
+bool read_image(Image& im, int x, int y, int w, int h, std::vector<uint8_t>& out);
+
 // copies part of the bound framebuffer's colour into host memory (RGBA rows, GL order)
 bool read_color(int x, int y, int w, int h, std::vector<uint8_t>& out) {
     Target t;
     if (!current_target(t)) return false;
     if (x < 0 || y < 0 || x + w > t.color->w || y + h > t.color->h) return false;
+    return read_image(*t.color, x, y, w, h, out);
+}
+
+// part of a colour image (one not in the pass being recorded: it is ended) as RGBA rows
+bool read_image(Image& im, int x, int y, int w, int h, std::vector<uint8_t>& out) {
     if ((VkDeviceSize)w * h * 4 > g_readback.size) {
         flush_wait();                                   // the old buffer may be in recorded copies
         free_buffer(g_readback);
@@ -1672,7 +1702,7 @@ bool read_color(int x, int y, int w, int h, std::vector<uint8_t>& out) {
     }
     begin_recording();
     end_pass();
-    barrier(t.color->image, false, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, kAllAccess,
+    barrier(im.image, false, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, kAllAccess,
             VK_ACCESS_TRANSFER_READ_BIT, kAllGraphics, VK_PIPELINE_STAGE_TRANSFER_BIT);
     VkBufferImageCopy region;
     memset(&region, 0, sizeof(region));
@@ -1683,8 +1713,8 @@ bool read_color(int x, int y, int w, int h, std::vector<uint8_t>& out) {
     region.imageExtent.width = (uint32_t)w;
     region.imageExtent.height = (uint32_t)h;
     region.imageExtent.depth = 1;
-    vkCmdCopyImageToBuffer(g_frames[g_frame].cmd, t.color->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, g_readback.buf, 1, &region);
-    barrier(t.color->image, false, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+    vkCmdCopyImageToBuffer(g_frames[g_frame].cmd, im.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, g_readback.buf, 1, &region);
+    barrier(im.image, false, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
             VK_ACCESS_TRANSFER_READ_BIT, kAllAccess, VK_PIPELINE_STAGE_TRANSFER_BIT, kAllGraphics);
     flush_wait();
     out.assign(g_readback.map, g_readback.map + (size_t)w * h * 4);
@@ -2224,6 +2254,17 @@ void next_frame() {
 void gl_vk_configure(const GlVkHooks& hooks) {
     g_hooks = hooks;
     g_enabled = hooks.getInstanceProcAddr != 0;
+    // settings from the environment, read here: the console sets them from boi360_args.txt after static start-up
+    const char* v;
+    g_stats = getenv("BOI360_GL_STATS") != 0;
+    g_samples = getenv("BOI360_SHADER_SAMPLES") != 0;
+    g_noDepthFrom = (v = getenv("BOI360_NO_DEPTH_FROM")) ? (uint32_t)atoi(v) : 0;
+    if ((v = getenv("BOI360_PRESENT_TEST")) && strchr(v, ',')) {
+        g_presentTestFrom = (uint32_t)atoi(v);
+        g_presentTestTo = (uint32_t)atoi(strchr(v, ',') + 1);
+    }
+    g_lazyTextures = !(v = getenv("BOI360_TEX_LAZY")) || atoi(v) != 0;
+    g_textureBudget = (uint64_t)((v = getenv("BOI360_TEX_BUDGET")) ? atoi(v) : 96) << 20;
 }
 
 bool gl_vk_enabled() { return g_enabled; }
@@ -2252,7 +2293,7 @@ void write_shader_samples() {
 void gl_vk_write_stats() {
     if (g_samples) write_shader_samples();
     if (!g_stats) return;
-    FILE* f = fopen("build/recomp/gl_stats.txt", "w");
+    FILE* f = fopen((recomp_out_dir() + "/gl_stats.txt").c_str(), "w");
     if (!f) return;
     for (std::set<float>::iterator it = g_clearDepths.begin(); it != g_clearDepths.end(); ++it) fprintf(f, "clear depth %g\n", *it);
     for (std::map<std::string, ProgramStats>::iterator it = g_programStats.begin(); it != g_programStats.end(); ++it) {
@@ -2267,8 +2308,8 @@ void gl_vk_write_stats() {
 // BOI360_TEX_LIST: the live textures (name, size, format of the last upload) to build/recomp/textures.txt
 void gl_vk_write_texture_list() {
     char path[64];
-    sprintf(path, "build/recomp/textures_%05u.txt", gl_frame_count());
-    FILE* f = fopen(path, "w");
+    sprintf(path, "/textures_%05u.txt", gl_frame_count());
+    FILE* f = fopen((recomp_out_dir() + path).c_str(), "w");
     if (!f) return;
     for (std::map<uint32_t, Texture>::iterator it = g_textures.begin(); it != g_textures.end(); ++it)
         if (it->second.img.image || !it->second.lz.empty())
@@ -2303,16 +2344,11 @@ bool gl_vk_create_context() {
     return true;
 }
 
-bool gl_vk_read_frame(std::vector<uint8_t>& bgra, int& w, int& h) {
-    if (!g_ready || !g_defColor.image) return false;
-    uint32_t saved = g_fbo;
-    g_fbo = 0;
+static bool read_bgra(Image& im, std::vector<uint8_t>& bgra, int& w, int& h) {
     std::vector<uint8_t> rgba;
-    bool ok = read_color(0, 0, g_defColor.w, g_defColor.h, rgba);
-    g_fbo = saved;
-    if (!ok) return false;
-    w = g_defColor.w;
-    h = g_defColor.h;
+    if (!read_image(im, 0, 0, im.w, im.h, rgba)) return false;
+    w = im.w;
+    h = im.h;
     bgra.resize(rgba.size());
     for (size_t i = 0; i < rgba.size(); i += 4) {
         bgra[i] = rgba[i + 2];
@@ -2323,8 +2359,34 @@ bool gl_vk_read_frame(std::vector<uint8_t>& bgra, int& w, int& h) {
     return true;
 }
 
+bool gl_vk_read_frame(std::vector<uint8_t>& bgra, int& w, int& h) {
+    if (!g_ready) return false;
+    ensure_default_framebuffer();
+    return g_defColor.image && read_bgra(g_defColor, bgra, w, h);
+}
+
+std::vector<uint32_t> gl_vk_targets() {
+    std::vector<uint32_t> names;
+    for (std::map<uint32_t, Texture>::iterator it = g_textures.begin(); it != g_textures.end(); ++it)
+        if (it->second.target && it->second.img.image) names.push_back(it->first);
+    return names;
+}
+
+bool gl_vk_read_texture(uint32_t name, std::vector<uint8_t>& bgra, int& w, int& h) {
+    std::map<uint32_t, Texture>::iterator it = g_textures.find(name);
+    return g_ready && it != g_textures.end() && it->second.img.image && read_bgra(it->second.img, bgra, w, h);
+}
+
+void gl_vk_frame_counts(char* buf, size_t size) {
+    snprintf(buf, size, "%u passes, %u draws, %u depth clears, %u draws in %u passes test loaded depth",
+             g_lastCounts.passes, g_lastCounts.draws, g_lastCounts.depthClears, g_lastCounts.loadedDepthDraws,
+             g_lastCounts.loadedDepthPasses);
+}
+
 void gl_vk_present() {
     if (!g_ready) return;
+    g_lastCounts = g_counts;
+    memset(&g_counts, 0, sizeof(g_counts));
     begin_recording();
     end_pass();
     evict_textures();
@@ -2354,18 +2416,24 @@ void gl_vk_present() {
         VkClearAttachment att;
         memset(&att, 0, sizeof(att));
         att.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        bool test = gl_frame_count() >= g_presentTestFrom && gl_frame_count() < g_presentTestTo;
+        if (test) {
+            att.clearValue.color.float32[0] = att.clearValue.color.float32[2] = att.clearValue.color.float32[3] = 1.0f;
+        }
         VkClearRect cr;
         memset(&cr, 0, sizeof(cr));
         cr.rect = sc;
         cr.layerCount = 1;
         vkCmdClearAttachments(f.cmd, 1, &att, 1, &cr);
-        vkCmdBindPipeline(f.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, g_presentPipe);
-        vkCmdBindDescriptorSets(f.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, g_presentLayout, 0, 1, &g_presentSet, 0, 0);
-        vkCmdSetViewport(f.cmd, 0, 1, &vp);
-        vkCmdSetScissor(f.cmd, 0, 1, &sc);
-        VkDeviceSize off = 0;
-        vkCmdBindVertexBuffers(f.cmd, 0, 1, &g_presentQuad.buf, &off);
-        vkCmdDraw(f.cmd, 6, 1, 0, 0);
+        if (!test) {
+            vkCmdBindPipeline(f.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, g_presentPipe);
+            vkCmdBindDescriptorSets(f.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, g_presentLayout, 0, 1, &g_presentSet, 0, 0);
+            vkCmdSetViewport(f.cmd, 0, 1, &vp);
+            vkCmdSetScissor(f.cmd, 0, 1, &sc);
+            VkDeviceSize off = 0;
+            vkCmdBindVertexBuffers(f.cmd, 0, 1, &g_presentQuad.buf, &off);
+            vkCmdDraw(f.cmd, 6, 1, 0, 0);
+        }
         vkCmdEndRenderPass(f.cmd);
     }
     vkEndCommandBuffer(f.cmd);
