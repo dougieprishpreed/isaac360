@@ -58,58 +58,76 @@ float g_listener[3];
 float g_listenerGain = 1.0f;
 std::atomic<bool> g_running(false);
 
-void mix(int16_t* out, int frames) {
-    std::vector<float> acc((size_t)frames * 2, 0.0f);
-    {
-        std::lock_guard<std::mutex> l(g_lock);
-        for (std::map<uint32_t, Source>::iterator it = g_sources.begin(); it != g_sources.end(); ++it) {
-            Source& s = it->second;
-            if (s.state != AL_PLAYING) continue;
-            float pan = 0;
-            if (!s.relative) pan = s.x - g_listener[0];
-            else pan = s.x;
-            pan = pan < -1 ? -1 : pan > 1 ? 1 : pan;
-            float gl = s.gain * g_listenerGain * (pan > 0 ? 1 - pan : 1), gr = s.gain * g_listenerGain * (pan < 0 ? 1 + pan : 1);
-            for (int i = 0; i < frames && s.state == AL_PLAYING; ++i) {
-                if (s.queue.empty()) {
-                    s.state = AL_STOPPED;
-                    break;
-                }
-                Buffer& b = g_buffers[s.queue.front()];
-                if (b.waiting) break;                   // starts when its samples arrive, a few ms late
-                int n = b.channels && b.pcm ? (int)(b.pcm->size() / b.channels) : 0;
-                if ((int)s.pos >= n) {
-                    if (s.looping && s.queue.size() == 1 && n) {
-                        s.pos -= n;
-                    } else {
-                        s.pos = 0;
-                        if (s.queue.size() > 1 || !s.looping) {
-                            s.done.push_back(s.queue.front());
-                            s.queue.pop_front();
-                            // a finished queue keeps its buffers listed as processed until unqueued
-                            if (s.queue.empty()) {
-                                s.state = AL_STOPPED;
-                                break;
-                            }
-                        }
-                    }
-                    --i;
-                    continue;
-                }
-                int at = (int)s.pos;
-                const int16_t* d = &(*b.pcm)[0];
-                float l, r;
-                if (b.channels == 2) {
-                    l = d[at * 2];
-                    r = d[at * 2 + 1];
+// Mixes one block of every playing source into acc (stereo floats). Each source runs a buffer at a time: the buffer
+// is looked up when the source moves to it, not for each sample (the console mixes under g_lock, which every AL call
+// the game makes waits for).
+void mix_sources(std::map<uint32_t, Source>& sources, float* acc, int frames) {
+    for (std::map<uint32_t, Source>::iterator it = sources.begin(); it != sources.end(); ++it) {
+        Source& s = it->second;
+        if (s.state != AL_PLAYING) continue;
+        float pan = 0;
+        if (!s.relative) pan = s.x - g_listener[0];
+        else pan = s.x;
+        pan = pan < -1 ? -1 : pan > 1 ? 1 : pan;
+        float gl = s.gain * g_listenerGain * (pan > 0 ? 1 - pan : 1), gr = s.gain * g_listenerGain * (pan < 0 ? 1 + pan : 1);
+        int i = 0;
+        while (i < frames && s.state == AL_PLAYING) {
+            if (s.queue.empty()) {
+                s.state = AL_STOPPED;
+                break;
+            }
+            Buffer& b = g_buffers[s.queue.front()];
+            if (b.waiting) break;                       // starts when its samples arrive, a few ms late
+            int n = b.channels && b.pcm ? (int)(b.pcm->size() / b.channels) : 0;
+            if ((int)s.pos >= n) {
+                if (s.looping && s.queue.size() == 1 && n) {
+                    s.pos -= n;
                 } else {
-                    l = r = d[at];
+                    s.pos = 0;
+                    if (s.queue.size() > 1 || !s.looping) {
+                        s.done.push_back(s.queue.front());
+                        s.queue.pop_front();
+                        // a finished queue keeps its buffers listed as processed until unqueued
+                        if (s.queue.empty()) {
+                            s.state = AL_STOPPED;
+                            break;
+                        }
+                    } else {
+                        break;                          // a looping empty buffer: nothing to play
+                    }
                 }
-                acc[i * 2] += l * gl;
-                acc[i * 2 + 1] += r * gr;
-                s.pos += s.pitch * (double)b.rate / kRate;
+                continue;
+            }
+            const int16_t* d = &(*b.pcm)[0];
+            double step = s.pitch * (double)b.rate / kRate;
+            if (b.channels == 2) {
+                for (; i < frames; ++i) {
+                    int at = (int)s.pos;
+                    if (at >= n) break;
+                    acc[i * 2] += d[at * 2] * gl;
+                    acc[i * 2 + 1] += d[at * 2 + 1] * gr;
+                    s.pos += step;
+                }
+            } else {
+                for (; i < frames; ++i) {
+                    int at = (int)s.pos;
+                    if (at >= n) break;
+                    float v = d[at];
+                    acc[i * 2] += v * gl;
+                    acc[i * 2 + 1] += v * gr;
+                    s.pos += step;
+                }
             }
         }
+    }
+}
+
+void mix(int16_t* out, int frames) {
+    static std::vector<float> acc;                  // the mixer thread's alone
+    acc.assign((size_t)frames * 2, 0.0f);
+    {
+        std::lock_guard<std::mutex> l(g_lock);
+        mix_sources(g_sources, &acc[0], frames);
     }
     for (int i = 0; i < frames * 2; ++i) {
         float v = acc[i];

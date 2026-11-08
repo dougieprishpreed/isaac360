@@ -1,6 +1,7 @@
 // KERNEL32/WINMM/ADVAPI32/ole32/SHELL32/dbghelp imports (stdcall). Handles and synchronisation objects are host
 // objects keyed by guest values.
 #include "runtime.h"
+#include <algorithm>
 #include <chrono>
 #include <condition_variable>
 #if defined(_WIN32)
@@ -38,7 +39,55 @@ std::recursive_mutex* cs_of(uint32_t a) {
 void k_InitializeCriticalSection(X86* c) { cs_of(ARG(c, 0)); RET_STD(c, 1, 0); }
 void k_InitializeCriticalSectionAndSpinCount(X86* c) { cs_of(ARG(c, 0)); RET_STD(c, 2, 1); }
 void k_DeleteCriticalSection(X86* c) { RET_STD(c, 1, 0); }
-void k_EnterCriticalSection(X86* c) { cs_of(ARG(c, 0))->lock(); RET_STD(c, 1, 0); }
+// BOI360_PROFILE: each critical section another thread held when it was entered, with the time waited, the code
+// that waited and the code holding it (two return addresses each: the game enters through a wrapper)
+struct LockStats {
+    uint32_t waits;
+    double ms, maxMs;
+    uint32_t waiter[2], holder[2];
+};
+std::mutex g_lockStatsLock;
+std::unordered_map<uint32_t, LockStats> g_lockStats;
+std::unordered_map<uint32_t, std::pair<uint32_t, uint32_t> > g_lockHolder;
+int g_lockProfile = -1;                             // read at the first Enter, once the console's arguments are set
+
+void k_EnterCriticalSection(X86* c) {
+    std::recursive_mutex* m = cs_of(ARG(c, 0));
+    if (g_lockProfile < 0) g_lockProfile = getenv("BOI360_PROFILE") ? 1 : 0;
+    if (!g_lockProfile) {
+        m->lock();
+        RET_STD(c, 1, 0);
+        return;
+    }
+    uint32_t a = ARG(c, 0), site[2] = {0, 0};
+    recomp_guest_returns(c, site, 2);
+    if (!m->try_lock()) {
+        std::pair<uint32_t, uint32_t> holder;
+        {
+            std::lock_guard<std::mutex> l(g_lockStatsLock);
+            holder = g_lockHolder[a];
+        }
+        std::chrono::steady_clock::time_point t0 = std::chrono::steady_clock::now();
+        m->lock();
+        double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+        std::lock_guard<std::mutex> l(g_lockStatsLock);
+        LockStats& st = g_lockStats[a];
+        ++st.waits;
+        st.ms += ms;
+        if (ms >= st.maxMs) {
+            st.maxMs = ms;
+            st.waiter[0] = site[0];
+            st.waiter[1] = site[1];
+            st.holder[0] = holder.first;
+            st.holder[1] = holder.second;
+        }
+    }
+    {
+        std::lock_guard<std::mutex> l(g_lockStatsLock);
+        g_lockHolder[a] = std::make_pair(site[0], site[1]);
+    }
+    RET_STD(c, 1, 0);
+}
 void k_LeaveCriticalSection(X86* c) { cs_of(ARG(c, 0))->unlock(); RET_STD(c, 1, 0); }
 void k_TryEnterCriticalSection(X86* c) { RET_STD(c, 1, cs_of(ARG(c, 0))->try_lock() ? 1 : 0); }
 
@@ -451,6 +500,26 @@ const ShimDef kKernel[] = {
     {"dbghelp.dll!SymFromAddr", d_SymFromAddr},
     {"dbghelp.dll!SymGetLineFromAddr", d_SymGetLineFromAddr},
 };
+}
+
+void shims_lock_stats_dump(void (*line)(const char*)) {
+    std::vector<std::pair<double, uint32_t> > top;
+    std::unordered_map<uint32_t, LockStats> stats;
+    {
+        std::lock_guard<std::mutex> l(g_lockStatsLock);
+        stats.swap(g_lockStats);
+    }
+    for (std::unordered_map<uint32_t, LockStats>::iterator it = stats.begin(); it != stats.end(); ++it)
+        top.push_back(std::make_pair(it->second.ms, it->first));
+    std::sort(top.rbegin(), top.rend());
+    char buf[256];
+    for (size_t i = 0; i < top.size() && i < 8; ++i) {
+        const LockStats& st = stats[top[i].second];
+        snprintf(buf, sizeof(buf), "locks: %08x waited %u times, %.1f ms (longest %.1f ms: waiting from %08x %08x, held "
+                 "from %08x %08x)", top[i].second, st.waits, st.ms, st.maxMs, st.waiter[0], st.waiter[1], st.holder[0],
+                 st.holder[1]);
+        line(buf);
+    }
 }
 
 void shims_kernel32_register() { shim_register(kKernel, (int)(sizeof(kKernel) / sizeof(kKernel[0]))); }

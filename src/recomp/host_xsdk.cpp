@@ -23,6 +23,7 @@
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
+#include <atomic>
 #include <string>
 #include <vector>
 
@@ -38,6 +39,8 @@ struct HostPad {                                     // shims_input.cpp
 };
 extern bool (*g_hostPadSource)(int index, HostPad* out);
 extern uint32_t (*g_hostFreeMemory)();             // shims_gl.cpp
+extern std::atomic<bool> g_quitRequested;           // shims_gl.cpp: the game thread quits at its frame's end
+extern void (*g_hostQuit)();
 
 #ifndef BOI_GIT_COMMIT
 #define BOI_GIT_COMMIT "unknown"
@@ -112,13 +115,15 @@ bool ReadPad(int index, HostPad* out) {
 }
 
 // ------------------------------------------------------------------------------------------------ threads
-// hardware threads: the game on 0, its other threads on 1-3, the OpenAL mixer on 2, the audio feeder alone on 4
-// (where the kernel's audio callback runs), the watchdog on 5
+// hardware threads: the game alone on core 0 (thread 0; its twin, 1, holds nothing busy, as two threads on one core
+// share its pipeline), the game's other threads and the sound effects loader on core 1 (2 and 3), the OpenAL mixer
+// on 2, the audio feeder on 4 (where the kernel's audio callback runs), the watchdog and the profiler on 5
 void ThreadStarted(const char* role) {
     static volatile int next = 0;
     if (!strcmp(role, "main")) xsdk_thread_move(0);
     else if (!strcmp(role, "audio")) xsdk_thread_move(2);
-    else xsdk_thread_move(1 + (__sync_fetch_and_add(&next, 1) % 3));
+    else if (!strcmp(role, "profiler")) xsdk_thread_move(5);
+    else xsdk_thread_move(2 + (__sync_fetch_and_add(&next, 1) % 2));
 }
 
 // ------------------------------------------------------------------------------------------------ audio
@@ -184,10 +189,15 @@ uint32_t FreeMemory() {
 
 void LogLine(const char* line) { recomp_log("%s", line); }
 
+void Quit() {
+    vf_drain();                         // the files the game wrote reach the drive
+    _exit(0);
+}
+
 void* Watchdog(void*) {
     xsdk_thread_move(5);
     uint32_t last = gl_frame_count();
-    int still = 0, quitHeld = 0;
+    int still = 0, quitHeld = 0, quitWaited = 0;
     for (;;) {
         timespec ts = {0, 100000000};
         nanosleep(&ts, 0);
@@ -199,8 +209,13 @@ void* Watchdog(void*) {
             if (ReadPad(i, &p)) held |= p.buttons;
         }
         quitHeld = !xsdk_system_ui_open() && (held & 0x0020) && (held & 0x0010) ? quitHeld + 1 : 0;
-        if (quitHeld >= 20) {
+        if (quitHeld >= 20 && !g_quitRequested.load()) {
             recomp_log("Back + Start held, quitting");
+            g_quitRequested.store(true);
+        }
+        // a game that doesn't reach its frame's end (loading, stuck) goes anyway
+        if (g_quitRequested.load() && ++quitWaited > 30) {
+            recomp_log("no frame ended within 3 s of the quit: quitting from the watchdog");
             _exit(0);
         }
         uint32_t f = gl_frame_count();
@@ -255,7 +270,11 @@ void* GameMain(void*) {
         else if (eq != std::string::npos && eq > 0) setenv(args[i].substr(0, eq).c_str(), args[i].c_str() + eq + 1, 1);
     }
     mkdir("save", 0777);
-    setenv("BOI360_WINDOW", "1280x720", 1);          // the game renders at the display's one mode
+    // The game lays out for a 1080p screen, as on a PC at 1920x1080: at 720p it takes its small-screen HUD (larger
+    // outlined icons) and scales its 852x480 picture by 1.5 into uneven pixels. The present pass brings the 1080p
+    // frame to vulkan4xenon's one 1280x720 mode, filtered, and the console's output scales it to the screen.
+    // boi360_args.txt can say BOI360_WINDOW=1280x720.
+    setenv("BOI360_WINDOW", "1920x1080", 0);
 
     GlVkHooks hooks;
     memset(&hooks, 0, sizeof(hooks));
@@ -265,6 +284,7 @@ void* GameMain(void*) {
     gl_vk_configure(hooks);
     g_hostPadSource = ReadPad;
     g_hostFreeMemory = FreeMemory;
+    g_hostQuit = Quit;
 
     pthread_t watchdog;
     if (pthread_create(&watchdog, 0, Watchdog, 0) == 0) pthread_detach(watchdog);

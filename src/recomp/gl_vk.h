@@ -40,6 +40,7 @@ void gl_vk_write_stats();           // build/recomp/gl_stats.txt (BOI360_GL_STAT
 ShimFn gl_vk_shim(const std::string& name);
 bool gl_vk_create_context();
 void gl_vk_present();
+void gl_vk_wait_idle();              // the GPU done with everything submitted (before a quit)
 // the default framebuffer as BGRA rows, bottom row first (screenshots)
 bool gl_vk_read_frame(std::vector<uint8_t>& bgra, int& w, int& h);
 std::vector<uint32_t> gl_vk_targets();     // the textures the game renders to

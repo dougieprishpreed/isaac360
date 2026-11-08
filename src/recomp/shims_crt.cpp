@@ -493,6 +493,7 @@ void s_errno(X86* c) {
 void s_set_errno(X86* c) { RET_CDECL(c, 0); }
 void s_exit(X86* c) {
     recomp_log("game exit(%d)", (int)ARG(c, 0));
+    vf_drain();                         // the files the game wrote reach the drive
     fflush(stdout);
     _exit((int)ARG(c, 0));
 }
@@ -532,7 +533,10 @@ void s_access(X86* c) {
     if (getenv("BOI360_TRACE_FILES")) recomp_log("_access %s", p.c_str());
     RET_CDECL(c, recomp_host_exists(p, 0) ? 0 : (uint32_t)-1);
 }
-void s_remove(X86* c) { RET_CDECL(c, (uint32_t)remove(recomp_host_path(guest_str(ARG(c, 0)), true).c_str())); }
+void s_remove(X86* c) {
+    vf_drain();
+    RET_CDECL(c, (uint32_t)remove(recomp_host_path(guest_str(ARG(c, 0)), true).c_str()));
+}
 void s_qsort(X86* c) {
     uint32_t base = ARG(c, 0), n = ARG(c, 1), size = ARG(c, 2), cmp = ARG(c, 3);
     // insertion sort with the guest comparator (cdecl, (a, b)): stable enough and simple

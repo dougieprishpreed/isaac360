@@ -110,6 +110,7 @@ void s_fseeki64(X86* c) {
 void s_ftelli64(X86* c) { VFile* f = crt_host_file(ARG(c, 0)); RET_CDECL64(c, f ? (uint64_t)vf_tell(f) : (uint64_t)-1); }
 void s_refuse(X86* c) { recomp_log("CRT %s refused", current_thunk_name()); RET_CDECL(c, 0); }
 void s_rename(X86* c) {
+    vf_drain();
     RET_CDECL(c, (uint32_t)rename(recomp_host_path(guest_str(ARG(c, 0)), true).c_str(), recomp_host_path(guest_str(ARG(c, 1)), true).c_str()));
 }
 void s_execute_onexit(X86* c) { RET_CDECL(c, 0); }

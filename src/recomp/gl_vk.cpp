@@ -721,7 +721,10 @@ void ensure_default_framebuffer() {
     upload_rgba(g_defColor, 0, 0, w, h, &black[0], true);
     init_depth_layout(g_defDepth);
     if (g_presentSet) {
-        VkDescriptorImageInfo img = {sampler_for(GL_NEAREST, GL_NEAREST, GL_CLAMP_TO_EDGE, GL_CLAMP_TO_EDGE), g_defColor.view,
+        // a frame larger than the display (the console's 1080p frame in 720p) is filtered down; one its size is copied
+        bool scaled = g_swapchain && ((uint32_t)w != g_swapExtent.width || (uint32_t)h != g_swapExtent.height);
+        uint32_t filter = scaled ? GL_LINEAR : GL_NEAREST;
+        VkDescriptorImageInfo img = {sampler_for(filter, filter, GL_CLAMP_TO_EDGE, GL_CLAMP_TO_EDGE), g_defColor.view,
                                      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
         VkWriteDescriptorSet wr;
         memset(&wr, 0, sizeof(wr));
@@ -2066,6 +2069,9 @@ void vk_glDeleteRenderbuffers(X86* c) {
 void vk_glReadPixels(X86* c) {
     int x = (int)ARG(c, 0), y = (int)ARG(c, 1), w = (int)ARG(c, 2), h = (int)ARG(c, 3);
     uint32_t format = ARG(c, 4), type = ARG(c, 5), out = ARG(c, 6);
+    if (tracing())
+        recomp_log("trace: glReadPixels %d,%d %dx%d fbo %u format %x, called from %08x", x, y, w, h, g_fbo, format,
+                   RD32(c->r[4]));
     RET_STD(c, 7, 0);
     std::vector<uint8_t> px;
     if (type != GL_UNSIGNED_BYTE || (format != GL_RGBA && format != GL_RGB && format != GL_BGRA)) {
@@ -2387,6 +2393,10 @@ static bool read_bgra(Image& im, std::vector<uint8_t>& bgra, int& w, int& h) {
         bgra[i + 3] = rgba[i + 3];
     }
     return true;
+}
+
+void gl_vk_wait_idle() {
+    if (g_ready) vkQueueWaitIdle(g_queue);
 }
 
 bool gl_vk_read_frame(std::vector<uint8_t>& bgra, int& w, int& h) {

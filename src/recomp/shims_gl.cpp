@@ -5,6 +5,7 @@
 #include "runtime.h"
 #include "gl_vk.h"
 #include "vfile.h"
+#include <atomic>
 #include <chrono>
 #include <map>
 #include <set>
@@ -180,6 +181,10 @@ uint32_t gl_get_proc(const std::string& name) {
 
 uint32_t gl_frame_count() { return g_frames; }
 uint32_t (*g_hostFreeMemory)() = 0;                // the console's free memory in bytes (host_xsdk.cpp), for the log
+// A quit the platform asked for (the console's Back + Start) happens here, at a frame's end with the GPU idle: the
+// game thread never presents into a display that is closing (host_xsdk.cpp)
+std::atomic<bool> g_quitRequested(false);
+void (*g_hostQuit)() = 0;
 static void log_line(const char* s) { recomp_log("%s", s); }
 
 bool gl_create_context() {
@@ -311,6 +316,11 @@ void gl_present() {
         lastEnd = end;
     }
     ++g_frames;
+    if (g_quitRequested.load()) {
+        if (gl_vk_enabled()) gl_vk_wait_idle();
+        recomp_log("quitting at the end of frame %u", g_frames);
+        if (g_hostQuit) g_hostQuit();
+    }
     if (g_frames <= 3 || g_frames % 600 == 0) {
         // seconds since the first frame: loading shows as the gap between frames 1 and 2
         static std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
@@ -333,6 +343,8 @@ void gl_present() {
         if (g_frames % 600 == 0) {
             log_times();
             recomp_profile_dump(log_line);
+            static bool profiling = getenv("BOI360_PROFILE") != 0;
+            if (profiling) shims_lock_stats_dump(log_line);
         }
     }
 }

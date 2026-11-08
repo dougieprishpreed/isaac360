@@ -1,10 +1,13 @@
 // Guest stdio streams on the host (vfile.h).
 #include "vfile.h"
 
+#include <condition_variable>
+#include <deque>
 #include <list>
 #include <map>
 #include <mutex>
 #include <string.h>
+#include <thread>
 #include <vector>
 #if !defined(_WIN32)
 #include <fcntl.h>
@@ -116,11 +119,105 @@ Reader* reader_for(const std::string& path) {
     return r;
 }
 
+// Files the game only writes (log.txt, saves, options.ini) go through one writer thread: their opens, writes,
+// flushes and closes run there in order, so the game's thread never waits on the drive (a USB write on the console
+// takes milliseconds, and the game flushes its log every 100 ms holding the log's lock). Anything that looks at
+// the files again (an open, a stat, a listing, remove, rename, a seek) first waits for the queue to empty.
+struct AsyncFile {
+    FILE* f;
+};
+
+struct WriteOp {
+    enum Kind { OPEN, WRITE, FLUSH, CLOSE } kind;
+    AsyncFile* file;
+    std::string path, mode;
+    std::vector<uint8_t> data;
+};
+
+std::mutex g_writeLock;
+std::condition_variable g_writeWork, g_writeIdle;
+std::deque<WriteOp> g_writes;
+bool g_writerBusy = false, g_writerStarted = false;
+
+void writer_thread() {
+    std::unique_lock<std::mutex> l(g_writeLock);
+    for (;;) {
+        g_writeWork.wait(l, [] { return !g_writes.empty(); });
+        WriteOp op;
+        op.kind = g_writes.front().kind;
+        op.file = g_writes.front().file;
+        op.path.swap(g_writes.front().path);
+        op.mode.swap(g_writes.front().mode);
+        op.data.swap(g_writes.front().data);
+        g_writes.pop_front();
+        g_writerBusy = true;
+        l.unlock();
+        AsyncFile* a = op.file;
+        switch (op.kind) {
+        case WriteOp::OPEN:
+            a->f = fopen(op.path.c_str(), op.mode.c_str());
+            if (a->f) setvbuf(a->f, 0, _IOFBF, 64 << 10);   // the drive's requests in 64 KB, not newlib's 1 KB
+            break;
+        case WriteOp::WRITE:
+            if (a->f) fwrite(&op.data[0], 1, op.data.size(), a->f);
+            break;
+        case WriteOp::FLUSH:
+            if (a->f) fflush(a->f);
+            break;
+        case WriteOp::CLOSE:
+            if (a->f) fclose(a->f);
+            delete a;
+            break;
+        }
+        l.lock();
+        g_writerBusy = false;
+        if (g_writes.empty()) g_writeIdle.notify_all();
+    }
+}
+
+// queues an operation (the caller holds g_writeLock)
+void push_write(WriteOp& op) {
+    if (!g_writerStarted) {
+        g_writerStarted = true;
+        std::thread(writer_thread).detach();
+    }
+    g_writes.push_back(WriteOp());
+    WriteOp& back = g_writes.back();
+    back.kind = op.kind;
+    back.file = op.file;
+    back.path.swap(op.path);
+    back.mode.swap(op.mode);
+    back.data.swap(op.data);
+    g_writeWork.notify_one();
+}
+
+void queue_write(WriteOp::Kind kind, AsyncFile* a, const void* data, size_t bytes) {
+    std::lock_guard<std::mutex> l(g_writeLock);
+    // a write after a write to the same file joins it, and a flush after a flush is one flush
+    if (!g_writes.empty() && g_writes.back().file == a && g_writes.back().kind == kind &&
+        (kind == WriteOp::WRITE || kind == WriteOp::FLUSH)) {
+        if (kind == WriteOp::WRITE)
+            g_writes.back().data.insert(g_writes.back().data.end(), (const uint8_t*)data, (const uint8_t*)data + bytes);
+        return;
+    }
+    WriteOp op;
+    op.kind = kind;
+    op.file = a;
+    if (bytes) op.data.assign((const uint8_t*)data, (const uint8_t*)data + bytes);
+    push_write(op);
+}
+
 }  // namespace
+
+void vf_drain() {
+    std::unique_lock<std::mutex> l(g_writeLock);
+    g_writeIdle.wait(l, [] { return g_writes.empty() && !g_writerBusy; });
+}
 
 struct VFile {
     FILE* f;                            // a plain host file, or
-    Reader* r;                          // a shared reader with this stream's position
+    Reader* r;                          // a shared reader with this stream's position, or
+    AsyncFile* a;                       // a file only written, through the writer thread
     int64_t pos;
     bool eof, err;
     int unget;
@@ -150,11 +247,27 @@ VFile* vf_open(const std::string& hostPath, const std::string& mode, bool shared
     VFile* v = new VFile;
     v->f = 0;
     v->r = 0;
+    v->a = 0;
     v->pos = 0;
     v->eof = v->err = false;
     v->unget = -1;
     bool readOnlyBinary = mode.find('r') != std::string::npos && mode.find('b') != std::string::npos &&
                           mode.find('+') == std::string::npos;
+    bool writeOnly = (mode.find('w') != std::string::npos || mode.find('a') != std::string::npos) &&
+                     mode.find('+') == std::string::npos && mode.find('r') == std::string::npos;
+    if (writeOnly) {
+        // the open itself goes to the writer (on the console it costs ~110 ms); a failure shows as lost writes
+        WriteOp op;
+        op.kind = WriteOp::OPEN;
+        op.file = v->a = new AsyncFile;
+        v->a->f = 0;
+        op.path = hostPath;
+        op.mode = mode;
+        std::lock_guard<std::mutex> l(g_writeLock);
+        push_write(op);
+        return v;
+    }
+    vf_drain();                         // it may read what the writer still holds
     if (shared && readOnlyBinary) v->r = reader_for(hostPath);
     else v->f = fopen(hostPath.c_str(), mode.c_str());
     if (!v->f && !v->r) {
@@ -168,6 +281,7 @@ VFile* vf_wrap(FILE* f) {
     VFile* v = new VFile;
     v->f = f;
     v->r = 0;
+    v->a = 0;
     v->pos = 0;
     v->eof = v->err = false;
     v->unget = -1;
@@ -175,14 +289,28 @@ VFile* vf_wrap(FILE* f) {
 }
 
 void vf_close(VFile* v) {
-    if (v->f && v->f != stdin && v->f != stdout && v->f != stderr) fclose(v->f);
+    if (v->a) queue_write(WriteOp::CLOSE, v->a, 0, 0);
+    else if (v->f && v->f != stdin && v->f != stdout && v->f != stderr) fclose(v->f);
     delete v;
+}
+
+// a file only written becomes a plain one (a seek): its queue done, the writer's FILE is the stream's
+static void make_direct(VFile* v) {
+    if (!v->a) return;
+    vf_drain();
+    v->f = v->a->f;
+    delete v->a;
+    v->a = 0;
 }
 
 size_t vf_read(VFile* v, void* buf, size_t size, size_t n) {
     if (!size || !n) return 0;
     g_bytes += (uint64_t)size * n;
     if (v->f) return fread(buf, size, n, v->f);
+    if (!v->r) {                        // a file only written
+        v->err = true;
+        return 0;
+    }
     size_t want = size * n, got = 0;
     uint8_t* out = (uint8_t*)buf;
     if (v->unget >= 0) {                // the byte put back sits at the position
@@ -198,12 +326,18 @@ size_t vf_read(VFile* v, void* buf, size_t size, size_t n) {
 }
 
 size_t vf_write(VFile* v, const void* buf, size_t size, size_t n) {
+    if (v->a) {
+        if (size && n) queue_write(WriteOp::WRITE, v->a, buf, size * n);
+        v->pos += (int64_t)(size * n);
+        return n;
+    }
     if (v->f) return fwrite(buf, size, n, v->f);
     v->err = true;
     return 0;
 }
 
 int vf_seek(VFile* v, int64_t off, int whence) {
+    make_direct(v);
     if (v->f) {
 #if defined(_WIN32)
         return _fseeki64(v->f, off, whence);
@@ -220,6 +354,7 @@ int vf_seek(VFile* v, int64_t off, int whence) {
 }
 
 int64_t vf_tell(VFile* v) {
+    if (v->a) return v->pos;
     if (v->f) {
 #if defined(_WIN32)
         return _ftelli64(v->f);
@@ -260,8 +395,21 @@ char* vf_gets(char* buf, int n, VFile* v) {
     return buf;
 }
 
-int vf_putc(int ch, VFile* v) { return v->f ? fputc(ch, v->f) : EOF; }
-int vf_puts(const char* s, VFile* v) { return v->f ? fputs(s, v->f) : EOF; }
+int vf_putc(int ch, VFile* v) {
+    if (v->a) {
+        uint8_t b = (uint8_t)ch;
+        vf_write(v, &b, 1, 1);
+        return ch & 0xff;
+    }
+    return v->f ? fputc(ch, v->f) : EOF;
+}
+int vf_puts(const char* s, VFile* v) {
+    if (v->a) {
+        if (*s) vf_write(v, s, strlen(s), 1);
+        return 0;
+    }
+    return v->f ? fputs(s, v->f) : EOF;
+}
 int vf_eof(VFile* v) { return v->f ? feof(v->f) : v->eof ? 1 : 0; }
 int vf_error(VFile* v) { return v->f ? ferror(v->f) : v->err ? 1 : 0; }
 void vf_clearerr(VFile* v) {
@@ -269,5 +417,6 @@ void vf_clearerr(VFile* v) {
     v->eof = v->err = false;
 }
 void vf_flush(VFile* v) {
-    if (v->f) fflush(v->f);
+    if (v->a) queue_write(WriteOp::FLUSH, v->a, 0, 0);
+    else if (v->f) fflush(v->f);
 }

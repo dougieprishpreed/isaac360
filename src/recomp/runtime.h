@@ -93,6 +93,8 @@ std::vector<std::string> recomp_host_dirs(const std::string& guestDir);   // hos
 void recomp_sample_threads(void (*line)(const char*));   // each guest thread's shim and stack (watchdog)
 void recomp_profile_start();             // BOI360_PROFILE: sample the main guest thread (runtime.cpp)
 void recomp_profile_dump(void (*line)(const char*));   // the samples since the last dump, most frequent first
+int recomp_guest_returns(X86* c, uint32_t* out, int n);    // the innermost guest return addresses on c's stack
+void shims_lock_stats_dump(void (*line)(const char*));    // BOI360_PROFILE: contended critical sections (kernel32)
 // where diagnostics go (screenshots, texture lists): BOI360_OUT_DIR, the console sets it beside the XEX
 std::string recomp_out_dir();
 

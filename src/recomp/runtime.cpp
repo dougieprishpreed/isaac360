@@ -1,5 +1,6 @@
 // Host runtime of the recompiled game (runtime.h, docs/RECOMP_PLAN.md).
 #include "runtime.h"
+#include "vfile.h"
 #include <algorithm>
 #include <map>
 #include <mutex>
@@ -54,6 +55,7 @@ static void make_dirs(const std::string& path) {
 
 // a file or a folder (the game checks its save folders with GetFileAttributes and _access)
 bool recomp_host_exists(const std::string& path, bool* isDir) {
+    vf_drain();                         // a file the writer thread has yet to open is still to come
     std::string p = path;
     while (p.size() > 1 && p[p.size() - 1] == '/') p.erase(p.size() - 1);
     struct stat st;
@@ -108,6 +110,7 @@ std::string recomp_out_dir() {
 // a folder as the game sees it is the overlay's, the converted data's and the game folder's together (listings
 // merge them, the first one holding a name wins)
 std::vector<std::string> recomp_host_dirs(const std::string& p) {
+    vf_drain();
     std::string s = p;
     for (size_t i = 0; i < s.size(); ++i)
         if (s[i] == '\\') s[i] = '/';
@@ -542,36 +545,56 @@ void recomp_sample_threads(void (*line)(const char*)) {
     }
 }
 
-// BOI360_PROFILE=1: a host thread samples the main guest thread every millisecond, as the watchdog does: the shim it
-// is in, or in game code the innermost return address on its stack (the call site of the function running, as of
-// its last call). recomp_profile_dump logs the most frequent and starts again; tools/recomp/profile_report.py names
-// the functions behind the addresses.
+// BOI360_PROFILE=1: a host thread samples every guest thread each millisecond, as the watchdog does: the shim it is
+// in and the guest code that called it, or in game code the innermost return address on its stack (the call site
+// of the function running, as of its last call). recomp_profile_dump logs each thread's most frequent and starts
+// again; tools/recomp/profile_report.py names the functions behind the addresses.
+struct ProfileKey {
+    int slot;
+    const char* thunk;      // 0 in game code
+    uint32_t at;            // the innermost guest return address (0: none found)
+    bool operator<(const ProfileKey& o) const {
+        if (slot != o.slot) return slot < o.slot;
+        if (thunk != o.thunk) return thunk < o.thunk;
+        return at < o.at;
+    }
+};
 static std::mutex g_profileLock;
-static std::map<uint64_t, uint32_t> g_profileCounts;    // shim name pointer | 1, or return address << 1
-static uint32_t g_profileSamples = 0;
+static std::map<ProfileKey, uint32_t> g_profileCounts;
+static uint32_t g_profileSamples[kSampledThreads];
+
+int recomp_guest_returns(X86* c, uint32_t* out, int n) {
+    int found = 0;
+    uint32_t sp = c->r[4];
+    for (uint32_t a = sp; a < sp + 0x800 && a + 4 <= g_mem_size && found < n; a += 4) {
+        uint32_t v = RD32(a);
+        if (guest_code(v)) out[found++] = v;
+    }
+    return found;
+}
+
+static uint32_t innermost_return(X86* c) {
+    uint32_t sp = c->r[4];
+    for (uint32_t a = sp; a < sp + 0x400 && a + 4 <= g_mem_size; a += 4) {
+        uint32_t v = RD32(a);
+        if (guest_code(v)) return v;
+    }
+    return 0;
+}
 
 static void profile_thread() {
+    if (g_cfg.threadStarted) g_cfg.threadStarted("profiler");
     for (;;) {
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
-        X86* c = 0;
-        int slot = -1;
-        for (int i = 0; i < kSampledThreads; ++i)
-            if (g_sampleCpu[i] && g_sampleName[i] && !strcmp(g_sampleName[i], "main")) { c = g_sampleCpu[i]; slot = i; }
-        if (!c) continue;
-        const char* thunk = g_sampleThunk[slot];
-        uint64_t key = 0;
-        if (thunk && thunk[0]) {
-            key = ((uint64_t)(uintptr_t)thunk << 1) | 1;
-        } else {
-            uint32_t sp = c->r[4];
-            for (uint32_t a = sp; a < sp + 0x400 && a + 4 <= g_mem_size; a += 4) {
-                uint32_t v = RD32(a);
-                if (guest_code(v)) { key = (uint64_t)v << 1; break; }
-            }
-        }
         std::lock_guard<std::mutex> lock(g_profileLock);
-        ++g_profileCounts[key];
-        ++g_profileSamples;
+        for (int i = 0; i < kSampledThreads; ++i) {
+            X86* c = g_sampleCpu[i];
+            if (!c) continue;
+            const char* thunk = g_sampleThunk[i];
+            ProfileKey k = {i, thunk && thunk[0] ? thunk : 0, innermost_return(c)};
+            ++g_profileCounts[k];
+            ++g_profileSamples[i];
+        }
     }
 }
 
@@ -581,34 +604,39 @@ void recomp_profile_start() {
 }
 
 void recomp_profile_dump(void (*line)(const char*)) {
-    std::map<uint64_t, uint32_t> counts;
-    uint32_t total;
+    std::map<ProfileKey, uint32_t> counts;
+    uint32_t totals[kSampledThreads];
     {
         std::lock_guard<std::mutex> lock(g_profileLock);
         counts.swap(g_profileCounts);
-        total = g_profileSamples;
-        g_profileSamples = 0;
+        memcpy(totals, g_profileSamples, sizeof(totals));
+        memset(g_profileSamples, 0, sizeof(g_profileSamples));
     }
-    if (!total) return;
-    std::vector<std::pair<uint32_t, uint64_t> > top;
-    uint32_t inGame = 0;
-    for (std::map<uint64_t, uint32_t>::iterator it = counts.begin(); it != counts.end(); ++it) {
-        top.push_back(std::make_pair(it->second, it->first));
-        if (!(it->first & 1)) inGame += it->second;
-    }
-    std::sort(top.begin(), top.end());
     char buf[256];
-    snprintf(buf, sizeof(buf), "profile: %u samples, %.1f%% in game code", total, 100.0 * inGame / total);
-    line(buf);
-    for (size_t i = 0; i < top.size() && i < 30; ++i) {
-        const std::pair<uint32_t, uint64_t>& e = top[top.size() - 1 - i];
-        if (e.second & 1)
-            snprintf(buf, sizeof(buf), "profile: %5.1f%% in %s", 100.0 * e.first / total, (const char*)(uintptr_t)(e.second >> 1));
-        else if (e.second)
-            snprintf(buf, sizeof(buf), "profile: %5.1f%% at %08x", 100.0 * e.first / total, (uint32_t)(e.second >> 1));
-        else
-            snprintf(buf, sizeof(buf), "profile: %5.1f%% in game code, no return address found", 100.0 * e.first / total);
+    for (int t = 0; t < kSampledThreads; ++t) {
+        if (!totals[t]) continue;
+        std::vector<std::pair<uint32_t, ProfileKey> > top;
+        uint32_t inGame = 0;
+        for (std::map<ProfileKey, uint32_t>::iterator it = counts.begin(); it != counts.end(); ++it)
+            if (it->first.slot == t) {
+                top.push_back(std::make_pair(it->second, it->first));
+                if (!it->first.thunk) inGame += it->second;
+            }
+        std::sort(top.begin(), top.end(), [](const std::pair<uint32_t, ProfileKey>& a, const std::pair<uint32_t, ProfileKey>& b) {
+            return a.first > b.first;
+        });
+        snprintf(buf, sizeof(buf), "profile %s: %u samples, %.1f%% in game code", g_sampleName[t], totals[t],
+                 100.0 * inGame / totals[t]);
         line(buf);
+        for (size_t i = 0; i < top.size() && i < (t == 0 ? 30u : 10u); ++i) {
+            const ProfileKey& k = top[i].second;
+            double share = 100.0 * top[i].first / totals[t];
+            if (k.thunk)
+                snprintf(buf, sizeof(buf), "profile %s: %5.1f%% in %s from %08x", g_sampleName[t], share, k.thunk, k.at);
+            else
+                snprintf(buf, sizeof(buf), "profile %s: %5.1f%% at %08x", g_sampleName[t], share, k.at);
+            line(buf);
+        }
     }
 }
 
@@ -916,8 +944,10 @@ static void thread_main(void* arg) {
     ThreadStart* s = (ThreadStart*)arg;
     if (g_cfg.threadStarted) g_cfg.threadStarted("guest");
     t_cpu = s->cpu;
-    char name[32];
-    snprintf(name, sizeof(name), "guest thread %08x", s->entry);
+    // numbered: the game starts two threads at one address
+    static std::atomic<int> started(0);
+    char name[40];
+    snprintf(name, sizeof(name), "guest thread %d (%08x)", ++started, s->entry);
     sample_register(s->cpu, strdup(name));
     uint32_t args[1] = {s->arg};
     guest_call(s->cpu, s->entry, 1, args, true);

@@ -26,6 +26,9 @@ int vf_eof(VFile* f);
 int vf_error(VFile* f);
 void vf_clearerr(VFile* f);
 void vf_flush(VFile* f);
+// waits until the writer thread has done every queued open, write, flush and close (files only written go
+// through it): before anything looks at the files again
+void vf_drain();
 // totals since start (the console's watchdog): opens, bytes the game read, bytes read from the drive
 void vf_stats(uint64_t* opens, uint64_t* bytes, uint64_t* disk);
 // per shared reader: reads, bytes the game read, bytes read from the drive (BOI360_TRACE_READS)
