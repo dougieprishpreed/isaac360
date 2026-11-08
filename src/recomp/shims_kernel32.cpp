@@ -2,6 +2,7 @@
 // objects keyed by guest values.
 #include "runtime.h"
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #if defined(_WIN32)
@@ -28,19 +29,55 @@ uint32_t shim_proc_address(const std::string& module, const std::string& name); 
 
 namespace {
 // ------------------------------------------------------------------------------------------------ sync
+// A critical section is a host mutex found by the guest structure's address. The game enters and leaves them
+// thousands of times a frame (its sound, resource and log locks), so the lookup takes no lock: an open-addressed
+// table whose slots are written once (the key last, after the mutex) and never removed, as Windows' are never
+// moved. A full table (it holds far more than the game makes) falls back to a map under a lock.
+struct CsSlot {
+    std::atomic<uint32_t> key;
+    std::recursive_mutex* m;
+    std::atomic<uint32_t> holder0, holder1;      // BOI360_PROFILE: the code that last entered it
+};
+const uint32_t kCsSlots = 8192;                    // a power of two
+CsSlot g_csSlots[kCsSlots];
+uint32_t g_csUsed = 0;
 std::mutex g_csLock;
-std::unordered_map<uint32_t, std::recursive_mutex*> g_cs;
-std::recursive_mutex* cs_of(uint32_t a) {
+std::unordered_map<uint32_t, CsSlot*> g_csMore;
+
+CsSlot* cs_slot(uint32_t a) {
+    uint32_t i = (a >> 3) * 2654435761u & (kCsSlots - 1);
+    for (uint32_t n = 0; n < 64; ++n, i = (i + 1) & (kCsSlots - 1)) {
+        uint32_t k = g_csSlots[i].key.load(std::memory_order_acquire);
+        if (k == a) return &g_csSlots[i];
+        if (!k) break;
+    }
     std::lock_guard<std::mutex> l(g_csLock);
-    std::recursive_mutex*& m = g_cs[a];
-    if (!m) m = new std::recursive_mutex;
-    return m;
+    i = (a >> 3) * 2654435761u & (kCsSlots - 1);
+    for (uint32_t n = 0; n < 64 && g_csUsed < kCsSlots * 3 / 4; ++n, i = (i + 1) & (kCsSlots - 1)) {
+        uint32_t k = g_csSlots[i].key.load(std::memory_order_relaxed);
+        if (k == a) return &g_csSlots[i];
+        if (!k) {
+            g_csSlots[i].m = new std::recursive_mutex;
+            g_csSlots[i].key.store(a, std::memory_order_release);
+            ++g_csUsed;
+            return &g_csSlots[i];
+        }
+    }
+    CsSlot*& more = g_csMore[a];
+    if (!more) {
+        more = new CsSlot;
+        more->key.store(a);
+        more->m = new std::recursive_mutex;
+    }
+    return more;
 }
+std::recursive_mutex* cs_of(uint32_t a) { return cs_slot(a)->m; }
 void k_InitializeCriticalSection(X86* c) { cs_of(ARG(c, 0)); RET_STD(c, 1, 0); }
 void k_InitializeCriticalSectionAndSpinCount(X86* c) { cs_of(ARG(c, 0)); RET_STD(c, 2, 1); }
 void k_DeleteCriticalSection(X86* c) { RET_STD(c, 1, 0); }
 // BOI360_PROFILE: each critical section another thread held when it was entered, with the time waited, the code
-// that waited and the code holding it (two return addresses each: the game enters through a wrapper)
+// that waited and the code holding it (two return addresses each: the game enters through a wrapper, whose frame
+// pointer gives its caller)
 struct LockStats {
     uint32_t waits;
     double ms, maxMs;
@@ -48,29 +85,29 @@ struct LockStats {
 };
 std::mutex g_lockStatsLock;
 std::unordered_map<uint32_t, LockStats> g_lockStats;
-std::unordered_map<uint32_t, std::pair<uint32_t, uint32_t> > g_lockHolder;
+double g_lockWaitMs = 0;                            // all waits so far (the slow frame lines)
 int g_lockProfile = -1;                             // read at the first Enter, once the console's arguments are set
 
 void k_EnterCriticalSection(X86* c) {
-    std::recursive_mutex* m = cs_of(ARG(c, 0));
+    uint32_t a = ARG(c, 0);
+    CsSlot* slot = cs_slot(a);
     if (g_lockProfile < 0) g_lockProfile = getenv("BOI360_PROFILE") ? 1 : 0;
     if (!g_lockProfile) {
-        m->lock();
+        slot->m->lock();
         RET_STD(c, 1, 0);
         return;
     }
-    uint32_t a = ARG(c, 0), site[2] = {0, 0};
-    recomp_guest_returns(c, site, 2);
-    if (!m->try_lock()) {
-        std::pair<uint32_t, uint32_t> holder;
-        {
-            std::lock_guard<std::mutex> l(g_lockStatsLock);
-            holder = g_lockHolder[a];
-        }
+    // the return into the game's wrapper, and the wrapper's own (its ebp frame) where that is on the stack
+    uint32_t esp = c->r[4], ebp = c->r[5], site[2] = {RD32(esp), 0};
+    if (ebp > esp && ebp - esp < 0x10000 && ebp + 8 <= g_mem_size) site[1] = RD32(ebp + 4);
+    else recomp_guest_returns(c, site, 2);
+    if (!slot->m->try_lock()) {
+        uint32_t holder0 = slot->holder0.load(std::memory_order_relaxed), holder1 = slot->holder1.load(std::memory_order_relaxed);
         std::chrono::steady_clock::time_point t0 = std::chrono::steady_clock::now();
-        m->lock();
+        slot->m->lock();
         double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
         std::lock_guard<std::mutex> l(g_lockStatsLock);
+        g_lockWaitMs += ms;
         LockStats& st = g_lockStats[a];
         ++st.waits;
         st.ms += ms;
@@ -78,14 +115,12 @@ void k_EnterCriticalSection(X86* c) {
             st.maxMs = ms;
             st.waiter[0] = site[0];
             st.waiter[1] = site[1];
-            st.holder[0] = holder.first;
-            st.holder[1] = holder.second;
+            st.holder[0] = holder0;
+            st.holder[1] = holder1;
         }
     }
-    {
-        std::lock_guard<std::mutex> l(g_lockStatsLock);
-        g_lockHolder[a] = std::make_pair(site[0], site[1]);
-    }
+    slot->holder0.store(site[0], std::memory_order_relaxed);
+    slot->holder1.store(site[1], std::memory_order_relaxed);
     RET_STD(c, 1, 0);
 }
 void k_LeaveCriticalSection(X86* c) { cs_of(ARG(c, 0))->unlock(); RET_STD(c, 1, 0); }
@@ -500,6 +535,11 @@ const ShimDef kKernel[] = {
     {"dbghelp.dll!SymFromAddr", d_SymFromAddr},
     {"dbghelp.dll!SymGetLineFromAddr", d_SymGetLineFromAddr},
 };
+}
+
+double shims_lock_wait_ms() {
+    std::lock_guard<std::mutex> l(g_lockStatsLock);
+    return g_lockWaitMs;
 }
 
 void shims_lock_stats_dump(void (*line)(const char*)) {

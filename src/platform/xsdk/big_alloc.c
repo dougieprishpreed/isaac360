@@ -1,5 +1,6 @@
 /* (From Cuphead360's console/xsdk/big_alloc.c, written for Spire360.)
- * Big blocks (1 MB and up: a texture's levels, a background's pack read)
+ * Big blocks (256 KB and up: the archive readers' cached blocks, which come
+ * and go, a texture's pixels, a sound effect's samples)
  * from the kernel's pages instead of newlib's heap, each given back whole
  * when freed. xsdk's sbrk returns only the heap's top, so a 10 MB block
  * freed between smaller live ones stayed the heap's: a console session's
@@ -21,17 +22,22 @@ void __real_free(void* p);
 void* __real_realloc(void* p, size_t n);
 void* __real_calloc(size_t n, size_t size);
 
-enum { BIG = 1024 * 1024, MAX_BIG = 256 };
+/* the live big blocks by address: open addressing with linear probing, the
+   kernel's regions starting on 64 KB boundaries */
+enum { BIG = 256 * 1024, SLOTS = 2048, MAX_BIG = SLOTS * 3 / 4 };
 
 static struct {
     void* p;
     size_t n;
-} g_big[MAX_BIG];
+} g_big[SLOTS];
+static int g_count;
 static volatile int g_lock;
 /* the span of every big block made so far (never shrinks): a pointer out of
  * it is newlib's, without the lock */
 static volatile uintptr_t g_lo = UINTPTR_MAX, g_hi = 0;
 static volatile size_t g_bytes;
+
+static unsigned slot_of(const void* p) { return (unsigned)(((uintptr_t)p >> 16) * 2654435761u) & (SLOTS - 1); }
 
 static void lock(void) {
     while (__sync_lock_test_and_set(&g_lock, 1))
@@ -47,17 +53,17 @@ static void* pages(size_t n) {
     if (n > 0x7FFFFFFFu || !NT_SUCCESS(NtAllocateVirtualMemory(&p, &size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE, 0)))
         return NULL;
     lock();
-    int i;
-    for (i = 0; i < MAX_BIG && g_big[i].p; ++i) {
-    }
-    if (i == MAX_BIG) {
+    if (g_count == MAX_BIG) {
         unlock();
         uint32_t none = 0;
         NtFreeVirtualMemory(&p, &none, MEM_RELEASE, 0);
         return NULL;
     }
+    unsigned i = slot_of(p);
+    while (g_big[i].p) i = (i + 1) & (SLOTS - 1);
     g_big[i].p = p;
     g_big[i].n = n;
+    ++g_count;
     g_bytes += n;
     if ((uintptr_t)p < g_lo) g_lo = (uintptr_t)p;
     if ((uintptr_t)p + n > g_hi) g_hi = (uintptr_t)p + n;
@@ -70,16 +76,28 @@ static int big_block(void* p, size_t* n, int take) {
     if (!p || (uintptr_t)p < g_lo || (uintptr_t)p >= g_hi) return 0;
     int found = 0;
     lock();
-    for (int i = 0; i < MAX_BIG; ++i)
-        if (g_big[i].p == p) {
-            *n = g_big[i].n;
-            if (take) {
-                g_big[i].p = NULL;
-                g_bytes -= g_big[i].n;
+    unsigned i = slot_of(p);
+    while (g_big[i].p && g_big[i].p != p) i = (i + 1) & (SLOTS - 1);
+    if (g_big[i].p) {
+        *n = g_big[i].n;
+        found = 1;
+        if (take) {
+            g_bytes -= g_big[i].n;
+            --g_count;
+            /* backward shift: the blocks after it in its run move up if their home allows */
+            unsigned hole = i, j = i;
+            for (;;) {
+                j = (j + 1) & (SLOTS - 1);
+                if (!g_big[j].p) break;
+                unsigned home = slot_of(g_big[j].p);
+                if (((j - home) & (SLOTS - 1)) >= ((j - hole) & (SLOTS - 1))) {
+                    g_big[hole] = g_big[j];
+                    hole = j;
+                }
             }
-            found = 1;
-            break;
+            g_big[hole].p = NULL;
         }
+    }
     unlock();
     return found;
 }

@@ -45,6 +45,7 @@ uint32_t guest_realloc(uint32_t p, uint32_t size);
 uint32_t guest_calloc(uint32_t n, uint32_t size);
 uint32_t guest_block_size(uint32_t p);
 uint32_t guest_heap_used();
+uint32_t guest_heap_top();                  // the heap's high mark: the console commits up to it
 
 // call a guest function from host code (window procedures, thread entries, callbacks): pushes the arguments
 // right to left and a host return marker; stdcall callees pop their own arguments, cdecl ones are popped here.
@@ -95,6 +96,7 @@ void recomp_profile_start();             // BOI360_PROFILE: sample the main gues
 void recomp_profile_dump(void (*line)(const char*));   // the samples since the last dump, most frequent first
 int recomp_guest_returns(X86* c, uint32_t* out, int n);    // the innermost guest return addresses on c's stack
 void shims_lock_stats_dump(void (*line)(const char*));    // BOI360_PROFILE: contended critical sections (kernel32)
+double shims_lock_wait_ms();               // BOI360_PROFILE: ms all threads waited for critical sections so far
 // where diagnostics go (screenshots, texture lists): BOI360_OUT_DIR, the console sets it beside the XEX
 std::string recomp_out_dir();
 

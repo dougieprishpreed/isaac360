@@ -32,6 +32,10 @@ const std::string& vf_path(VFile* f);     // the host path it was opened with
 void vf_drain();
 // totals since start (the console's watchdog): opens, bytes the game read, bytes read from the drive
 void vf_stats(uint64_t* opens, uint64_t* bytes, uint64_t* disk);
+// the shared readers' cached blocks, in bytes
+uint32_t vf_cached_bytes();
+// called now and then (the end of every 60th frame): blocks no read touched in the last idleCalls calls go
+void vf_trim(uint32_t idleCalls);
 // per shared reader: reads, bytes the game read, bytes read from the drive (BOI360_TRACE_READS)
 void vf_dump_readers(void (*line)(const char*));
 

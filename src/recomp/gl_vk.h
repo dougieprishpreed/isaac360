@@ -34,6 +34,15 @@ struct GlVkProgramDesc {
 void gl_vk_configure(const GlVkHooks& hooks);   // the platform, before recomp_run; turns the layer on
 bool gl_vk_enabled();
 uint64_t gl_vk_image_bytes();       // device memory held by images
+uint64_t gl_vk_buffer_bytes();      // and by buffers (vertex, index, upload rings, read-backs)
+// what the frames did so far, summed: images made, bytes uploaded, ms waited for the display (acquiring an image),
+// for a frame's GPU work (its fence, two frames on) and for the GPU to finish (read-backs, full rings)
+struct GlVkWork {
+    uint32_t imagesMade;
+    uint64_t uploaded;
+    double waitAcquire, waitFence, waitIdle;
+};
+void gl_vk_work(GlVkWork* w);
 uint64_t gl_vk_packed_bytes();      // host memory held by packed texture pixels (gl_vk.cpp, lazy textures)
 void gl_vk_write_texture_list();    // build/recomp/textures.txt
 void gl_vk_write_stats();           // build/recomp/gl_stats.txt (BOI360_GL_STATS)

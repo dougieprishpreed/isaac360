@@ -2,11 +2,13 @@
 #include "vfile.h"
 #include "runtime.h"
 
+#include <atomic>
 #include <condition_variable>
 #include <deque>
 #include <list>
 #include <map>
 #include <mutex>
+#include <stdlib.h>
 #include <string.h>
 #include <vector>
 #if !defined(_WIN32)
@@ -19,7 +21,19 @@ namespace {
 // plain counters: a lost increment between threads only blurs a diagnostic (64-bit atomics need libatomic on PPC32)
 volatile uint64_t g_opens = 0, g_bytes = 0, g_disk = 0;
 
-enum { BLOCK = 256 << 10, CACHE_BLOCKS = 16, DIRECT = 1 << 20 };
+enum { BLOCK = 256 << 10, DIRECT = 1 << 20 };
+
+// blocks each reader keeps (BOI360_READ_CACHE): enough for a burst of loading; vf_trim gives back the blocks
+// nobody read for a while, since kept for the run the dozen archives' blocks held ~30 MB of the console's memory
+int g_cacheBlocks = -1;
+std::atomic<uint32_t> g_cachedBlocks(0);             // all readers' (the frame log's memory line)
+std::atomic<uint32_t> g_readTick(0);                 // vf_trim's clock: one tick a call
+
+struct Block {
+    int64_t index;
+    uint32_t used;                                   // g_readTick when last read
+    std::vector<uint8_t> data;
+};
 
 // one per game data file, kept open for the run; blocks of BLOCK bytes, least recently used dropped
 struct Reader {
@@ -32,7 +46,7 @@ struct Reader {
     std::mutex lock;
     std::string path;
     uint64_t gameBytes, diskBytes, reads, bigReads;   // BOI360_TRACE_READS (vf_dump_readers)
-    std::list<std::pair<int64_t, std::vector<uint8_t> > > blocks;   // most recent first
+    std::list<Block> blocks;                         // most recent first
 
     size_t raw_read(int64_t off, void* buf, size_t n) {
         g_disk += n;
@@ -47,18 +61,22 @@ struct Reader {
     }
 
     const std::vector<uint8_t>& block(int64_t index) {
-        for (std::list<std::pair<int64_t, std::vector<uint8_t> > >::iterator it = blocks.begin(); it != blocks.end(); ++it)
-            if (it->first == index) {
+        for (std::list<Block>::iterator it = blocks.begin(); it != blocks.end(); ++it)
+            if (it->index == index) {
                 if (it != blocks.begin()) blocks.splice(blocks.begin(), blocks, it);
-                return blocks.front().second;
+                blocks.front().used = g_readTick;
+                return blocks.front().data;
             }
-        if (blocks.size() >= CACHE_BLOCKS) {
+        if (g_cacheBlocks < 0) g_cacheBlocks = getenv("BOI360_READ_CACHE") ? atoi(getenv("BOI360_READ_CACHE")) : 16;
+        if (blocks.size() >= (size_t)(g_cacheBlocks < 1 ? 1 : g_cacheBlocks)) {
             blocks.splice(blocks.begin(), blocks, --blocks.end());    // reuse the oldest block's storage
-            blocks.front().first = index;
         } else {
-            blocks.push_front(std::make_pair(index, std::vector<uint8_t>()));
+            blocks.push_front(Block());
+            ++g_cachedBlocks;
         }
-        std::vector<uint8_t>& data = blocks.front().second;
+        blocks.front().index = index;
+        blocks.front().used = g_readTick;
+        std::vector<uint8_t>& data = blocks.front().data;
         int64_t off = index * BLOCK;
         size_t want = (size_t)(size - off < BLOCK ? size - off : BLOCK);
         data.resize(want);
@@ -235,6 +253,21 @@ void vf_dump_readers(void (*line)(const char*)) {
                  (unsigned long long)(r->gameBytes >> 10), (unsigned long long)(r->diskBytes >> 10),
                  (unsigned long long)(r->size >> 10));
         line(buf);
+    }
+}
+
+uint32_t vf_cached_bytes() { return g_cachedBlocks * (uint32_t)BLOCK; }
+
+void vf_trim(uint32_t idleCalls) {
+    uint32_t now = ++g_readTick;
+    std::lock_guard<std::mutex> l(g_readersLock);
+    for (std::map<std::string, Reader*>::iterator it = g_readers.begin(); it != g_readers.end(); ++it) {
+        Reader* r = it->second;
+        std::lock_guard<std::mutex> rl(r->lock);
+        while (!r->blocks.empty() && now - r->blocks.back().used > idleCalls) {
+            r->blocks.pop_back();
+            --g_cachedBlocks;
+        }
     }
 }
 

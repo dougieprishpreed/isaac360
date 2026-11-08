@@ -181,6 +181,7 @@ uint32_t gl_get_proc(const std::string& name) {
 
 uint32_t gl_frame_count() { return g_frames; }
 uint32_t (*g_hostFreeMemory)() = 0;                // the console's free memory in bytes (host_xsdk.cpp), for the log
+uint32_t (*g_hostHeapBytes)() = 0;                 // the console's C heap and big blocks (host_xsdk.cpp)
 // A quit the platform asked for (the console's Back + Start) happens here, at a frame's end with the GPU idle: the
 // game thread never presents into a display that is closing (host_xsdk.cpp)
 std::atomic<bool> g_quitRequested(false);
@@ -258,10 +259,12 @@ void gl_vk_shot(uint32_t frame) {
 void heap_profile_dump();                           // shims_crt.cpp
 
 // Frame times for the log, each 600 frames: the game's part (from one present's end to the next one's start) and the
-// present's (recording the frame's end, submitting, waiting for a free frame and the display)
+// present's (recording the frame's end, submitting, waiting for a free frame and the display), with what the GL layer
+// waited for in them (the display, a frame's GPU work, read-backs)
 struct FrameTimes {
     double game, present, frame, gameMax, presentMax, frameMax;
-    uint32_t frames, over17, over34;
+    uint32_t frames, over17, over34, slowLogged;
+    GlVkWork work;                                  // at the block's start
 };
 static FrameTimes g_times;
 typedef std::chrono::steady_clock Clock;
@@ -269,10 +272,42 @@ typedef std::chrono::steady_clock Clock;
 static void log_times() {
     FrameTimes& t = g_times;
     if (!t.frames) return;
+    GlVkWork w;
+    memset(&w, 0, sizeof(w));
+    if (gl_vk_enabled()) gl_vk_work(&w);
     recomp_log("time: frame %.1f ms (max %.1f), game %.1f (max %.1f), present %.1f (max %.1f); %u of %u frames over "
-               "17 ms, %u over 34", t.frame / t.frames, t.frameMax, t.game / t.frames, t.gameMax, t.present / t.frames,
-               t.presentMax, t.over17, t.frames, t.over34);
+               "17 ms, %u over 34; waited for the display %.1f, the GPU %.1f, read-backs %.1f ms a frame",
+               t.frame / t.frames, t.frameMax, t.game / t.frames, t.gameMax, t.present / t.frames, t.presentMax, t.over17,
+               t.frames, t.over34, (w.waitAcquire - t.work.waitAcquire) / t.frames, (w.waitFence - t.work.waitFence) / t.frames,
+               (w.waitIdle - t.work.waitIdle) / t.frames);
     memset(&t, 0, sizeof(t));
+    t.work = w;
+}
+
+// a frame over 50 ms (up to 12 each 600 frames): what it did, to tell loading from waiting
+static void log_slow_frame(double game, double present) {
+    static uint64_t lastBytes = 0, lastDisk = 0;
+    static GlVkWork last;
+    static double lastLocks = 0;
+    static bool profiling = getenv("BOI360_PROFILE") != 0;
+    uint64_t opens, bytes, disk;
+    vf_stats(&opens, &bytes, &disk);
+    GlVkWork w;
+    memset(&w, 0, sizeof(w));
+    if (gl_vk_enabled()) gl_vk_work(&w);
+    double locks = profiling ? shims_lock_wait_ms() : 0;
+    if (game + present > 50.0 && g_frames > 3 && g_times.slowLogged < 12) {
+        ++g_times.slowLogged;
+        recomp_log("slow frame %u: game %.1f ms, present %.1f; read %llu KB (%llu KB from the drive), %u images made, "
+                   "%llu KB uploaded; waited for the GPU %.1f, read-backs %.1f, locks %.1f ms", g_frames, game, present,
+                   (unsigned long long)((bytes - lastBytes) >> 10), (unsigned long long)((disk - lastDisk) >> 10),
+                   w.imagesMade - last.imagesMade, (unsigned long long)((w.uploaded - last.uploaded) >> 10),
+                   w.waitFence - last.waitFence, w.waitIdle - last.waitIdle, locks - lastLocks);
+    }
+    lastBytes = bytes;
+    lastDisk = disk;
+    last = w;
+    lastLocks = locks;
 }
 
 void gl_present() {
@@ -314,6 +349,7 @@ void gl_present() {
         if (game + present > 34.0) ++t.over34;
         ++t.frames;
         lastEnd = end;
+        log_slow_frame(game, present);
     }
     ++g_frames;
     if (g_quitRequested.load()) {
@@ -321,23 +357,30 @@ void gl_present() {
         recomp_log("quitting at the end of frame %u", g_frames);
         if (g_hostQuit) g_hostQuit();
     }
+    if (g_frames % 60 == 0) vf_trim(4);                 // archive blocks unread for ~4 s give their memory back
     if (g_frames <= 3 || g_frames % 600 == 0) {
         // seconds since the first frame: loading shows as the gap between frames 1 and 2
         static std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
         double t = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
         char free[32] = "";
         if (g_hostFreeMemory) sprintf(free, ", free %u MB", g_hostFreeMemory() >> 20);
+        // where memory goes: the guest heap's high mark (committed on the console), the host's C heap, the archive
+        // readers' cached blocks, the GL layer's buffers
+        char mem[128];
+        snprintf(mem, sizeof(mem), "; heap top %u MB, host heap %u MB, read cache %u MB, GL buffers %u MB",
+                 (guest_heap_top() - kGuestHeapLow) >> 20, g_hostHeapBytes ? g_hostHeapBytes() >> 20 : 0,
+                 vf_cached_bytes() >> 20, (unsigned)(gl_vk_buffer_bytes() >> 20));
         char counts[160] = "";
         if (gl_vk_enabled()) {
             counts[0] = ';';
             counts[1] = ' ';
             gl_vk_frame_counts(counts + 2, sizeof(counts) - 2);
         }
-        recomp_log("frame %u at %.1f s, heap %u MB, images %u MB (+%u MB packed)%s%s", g_frames, t,
+        recomp_log("frame %u at %.1f s, heap %u MB, images %u MB (+%u MB packed)%s%s%s", g_frames, t,
                    guest_heap_used() >> 20, (unsigned)(gl_vk_image_bytes() >> 20), (unsigned)(gl_vk_packed_bytes() >> 20),
-                   free, counts);
+                   free, counts, mem);
         static bool traceReads = getenv("BOI360_TRACE_READS") != 0;
-        if (traceReads && g_frames <= 3) vf_dump_readers(log_line);
+        if (traceReads) vf_dump_readers(log_line);
         if (!g_glCounts.empty()) gl_write_counts();
         if (gl_vk_enabled()) gl_vk_write_stats();
         if (g_frames % 600 == 0) {

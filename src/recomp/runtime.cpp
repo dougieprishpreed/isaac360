@@ -295,6 +295,7 @@ uint32_t guest_malloc(uint32_t size) {
 
 uint32_t guest_block_size(uint32_t p) { return p ? RD32(p - 16) : 0; }
 uint32_t guest_heap_used() { return g_used; }
+uint32_t guest_heap_top() { return g_heapTop; }
 
 void guest_free(uint32_t p) {
     if (!p) return;

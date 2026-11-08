@@ -59,6 +59,8 @@ cp "$XSDK/THIRD_PARTY_NOTICES.md" "$DST/licenses/xsdk-third-party.md" 2>/dev/nul
 cp "$VULKAN4XENON/LICENSE" "$DST/licenses/vulkan4xenon.txt"
 cp "$VULKAN4XENON/THIRD_PARTY_NOTICES.md" "$DST/licenses/vulkan4xenon-third-party.md" 2>/dev/null || true
 cp "$ROOT/src/third_party/vulkan-headers/LICENSE.md" "$DST/licenses/vulkan-headers.md"
+cp "$ROOT/src/third_party/miniz/LICENSE" "$DST/licenses/miniz.txt"
+sed -n '/^This software is available under 2 licenses/,$p' "$ROOT/src/third_party/stb/stb_vorbis.c" > "$DST/licenses/stb_vorbis.txt"
 cp "$XSDK_TOOLCHAIN"/share/*-licenses/* "$DST/licenses/" 2>/dev/null || true
 size="$(stat -c %s "$OUT/default.xex")"
 echo "Built $DST/default.xex ($size bytes, source $COMMIT)"

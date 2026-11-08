@@ -14,6 +14,7 @@
 #include "gl_vk.h"
 #include "lz.h"
 #include <algorithm>
+#include <chrono>
 #include <map>
 #include <set>
 #include <stdarg.h>
@@ -26,6 +27,7 @@
 
 void gl_window_size(int& w, int& h);                // shims_user32.cpp: the game's window
 uint32_t gl_frame_count();                          // shims_gl.cpp
+extern uint32_t (*g_hostFreeMemory)();               // shims_gl.cpp (the console's free memory)
 
 namespace {
 
@@ -60,8 +62,8 @@ GLVK_DEVICE(GLVK_DECLARE)
 
 enum {
     FRAMES = 2,
-    VERTEX_RING = 4 << 20,
-    INDEX_RING = 1 << 20,
+    VERTEX_RING = 512 << 10,            // a frame of play uses ~22 KB of vertices and 1 KB of indices (the frame log's
+    INDEX_RING = 128 << 10,             // "rings at most"); a full ring waits for the GPU and starts again
     UPLOAD_RING = 4 << 20,              // larger uploads get a buffer of their own
     MAX_SETS = 2048,
     SAMPLER_SLOTS = 4,                  // set 0 bindings 0..3 (the game's programs use at most two)
@@ -113,7 +115,7 @@ struct Buffer {
     VkBuffer buf;
     VkDeviceMemory mem;
     uint8_t* map;
-    VkDeviceSize size;
+    VkDeviceSize size, bytes;           // asked, and the memory it took
 };
 
 struct Image {
@@ -284,6 +286,19 @@ uint32_t g_alphaFunc = 0x0207;
 float g_alphaRef = 0.0f;
 std::map<std::string, int> g_onceLogged;
 uint64_t g_imageBytes = 0;                         // live images (frame log)
+uint64_t g_bufferBytes = 0;                        // live buffers (frame log)
+VkDeviceSize g_ringHigh[3] = {0, 0, 0};            // the most of the vertex, index and upload rings a frame used
+// what frames did, summed (shims_gl.cpp's slow frame lines and time lines): images made, bytes uploaded, waits
+uint32_t g_imagesMade = 0;
+uint64_t g_uploaded = 0;
+double g_waitAcquire = 0, g_waitFence = 0, g_waitIdle = 0;   // ms: for the display, a frame's GPU work, read-backs
+typedef std::chrono::steady_clock WaitClock;
+double since(WaitClock::time_point t0) { return std::chrono::duration<double, std::milli>(WaitClock::now() - t0).count(); }
+void ring_high(VkDeviceSize v, VkDeviceSize i, VkDeviceSize u) {
+    if (v > g_ringHigh[0]) g_ringHigh[0] = v;
+    if (i > g_ringHigh[1]) g_ringHigh[1] = i;
+    if (u > g_ringHigh[2]) g_ringHigh[2] = u;
+}
 // BOI360_GL_STATS: per program, the z its vertices span and the states it draws with (build/recomp/gl_stats.txt)
 struct ProgramStats {
     float zmin, zmax;
@@ -360,6 +375,8 @@ bool make_buffer(Buffer& b, VkDeviceSize size, VkBufferUsageFlags usage, VkMemor
         return false;
     }
     vkBindBufferMemory(g_dev, b.buf, b.mem, 0);
+    g_bufferBytes += req.size;
+    b.bytes = req.size;
     void* p = 0;
     vkMapMemory(g_dev, b.mem, 0, VK_WHOLE_SIZE, 0, &p);
     b.map = (uint8_t*)p;
@@ -368,10 +385,13 @@ bool make_buffer(Buffer& b, VkDeviceSize size, VkBufferUsageFlags usage, VkMemor
 }
 
 void free_buffer(Buffer& b) {
+    if (b.mem) g_bufferBytes -= b.bytes;
     if (b.buf) vkDestroyBuffer(g_dev, b.buf, 0);
     if (b.mem) vkFreeMemory(g_dev, b.mem, 0);
     memset(&b, 0, sizeof(b));
 }
+
+bool reclaim_images();
 
 bool make_image(Image& im, int w, int h, VkFormat format, bool depth) {
     memset(&im, 0, sizeof(im));
@@ -404,13 +424,16 @@ bool make_image(Image& im, int w, int h, VkFormat format, bool depth) {
     ai.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
     ai.allocationSize = req.size;
     ai.memoryTypeIndex = (uint32_t)type;
-    if (type < 0 || vkAllocateMemory(g_dev, &ai, 0, &im.mem) != VK_SUCCESS) {
+    bool got = type >= 0 && vkAllocateMemory(g_dev, &ai, 0, &im.mem) == VK_SUCCESS;
+    if (!got && type >= 0 && reclaim_images()) got = vkAllocateMemory(g_dev, &ai, 0, &im.mem) == VK_SUCCESS;
+    if (!got) {
         recomp_log("gl_vk: no memory for a %dx%d image", w, h);
         vkDestroyImage(g_dev, im.image, 0);
         im.image = VK_NULL_HANDLE;
         return false;
     }
     vkBindImageMemory(g_dev, im.image, im.mem, 0);
+    ++g_imagesMade;
     g_imageBytes += req.size;
     im.bytes = req.size;
     VkImageViewCreateInfo vi;
@@ -519,9 +542,12 @@ void flush_wait() {
     si.commandBufferCount = 1;
     si.pCommandBuffers = &f.cmd;
     vkQueueSubmit(g_queue, 1, &si, VK_NULL_HANDLE);
+    WaitClock::time_point t0 = WaitClock::now();
     vkQueueWaitIdle(g_queue);
+    g_waitIdle += since(t0);
     vkResetCommandBuffer(f.cmd, 0);
     g_recording = false;
+    ring_high(f.vOff, f.iOff, f.uOff);
     f.vOff = f.iOff = f.uOff = 0;
     begin_recording();
 }
@@ -660,6 +686,7 @@ void upload_rgba(Image& im, int x, int y, int w, int h, const uint8_t* rgba, boo
     end_pass();
     Frame& f = g_frames[g_frame];
     VkDeviceSize bytes = (VkDeviceSize)w * h * 4;
+    g_uploaded += bytes;
     Buffer* src = &f.upload;
     VkDeviceSize off = (f.uOff + 15) & ~(VkDeviceSize)15;
     Buffer big;
@@ -1102,7 +1129,8 @@ bool make_frames() {
     pli.pPushConstantRanges = &pc;
     if (vkCreatePipelineLayout(g_dev, &pli, 0, &g_layout) != VK_SUCCESS) return false;
     pli.pSetLayouts = &g_presentSetLayout;
-    pli.pushConstantRangeCount = 0;
+    VkPushConstantRange presentPc = {VK_SHADER_STAGE_FRAGMENT_BIT, 0, 32};   // shaders.py PRESENT_FS
+    pli.pPushConstantRanges = &presentPc;
     if (vkCreatePipelineLayout(g_dev, &pli, 0, &g_presentLayout) != VK_SUCCESS) return false;
     VkDescriptorPoolSize ps = {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, MAX_SETS * SAMPLER_SLOTS};
     VkDescriptorPoolCreateInfo dpi;
@@ -1420,9 +1448,50 @@ bool materialize(Texture& t) {
     return true;
 }
 
+// No memory for an image: the packed textures no draw used this frame or the last give their images back (their
+// pixels stay packed; a later draw makes the image again), the GPU finishes what is recorded, and their memory goes
+// at once rather than when the frame retires. True if any went. A target without an image would draw nothing and
+// read as the 1x1 white placeholder (the white playfield of console boot 10).
+bool reclaim_images() {
+    uint64_t freed = 0;
+    for (std::map<uint32_t, Texture>::iterator it = g_textures.begin(); it != g_textures.end(); ++it) {
+        Texture& t = it->second;
+        if (!t.img.image || t.lz.empty() || t.target || t.drawFrame + 1 >= gl_frame_count()) continue;
+        if (g_inPass && t.img.view == g_passKey.color) end_pass();
+        freed += t.img.bytes;
+        retire_image(t.img);
+    }
+    if (!freed) return false;
+    g_lastSet = VK_NULL_HANDLE;                           // a new image may reuse a freed view's handle
+    if (g_recording) flush_wait();
+    else vkQueueWaitIdle(g_queue);
+    for (int i = 0; i < FRAMES; ++i) free_garbage(g_frames[i]);
+    log_once("out of memory for images: idle textures give theirs back (%u MB)", (unsigned)(freed >> 20));
+    return true;
+}
+
 // at the end of a frame: the least recently drawn packed textures not drawn this frame give their images back
-// until the total is under the budget (their pixels stay packed; a later draw makes the image again)
+// until the total is under the budget (their pixels stay packed; a later draw makes the image again). On the
+// console, also while free memory is short: those not drawn for a second, up to 16 MB a time (checked every 30
+// frames; retired images free two frames later).
 void evict_textures() {
+    if (g_hostFreeMemory && gl_frame_count() % 30 == 0 && g_hostFreeMemory() < (32u << 20)) {
+        std::vector<std::pair<uint32_t, uint32_t> > idle;     // (last drawn frame, name)
+        for (std::map<uint32_t, Texture>::iterator it = g_textures.begin(); it != g_textures.end(); ++it)
+            if (it->second.img.image && !it->second.lz.empty() && !it->second.target &&
+                it->second.drawFrame + 60 < gl_frame_count())
+                idle.push_back(std::make_pair(it->second.drawFrame, it->first));
+        std::sort(idle.begin(), idle.end());
+        uint64_t freed = 0;
+        for (size_t i = 0; i < idle.size() && freed < (16u << 20); ++i) {
+            Texture& t = g_textures[idle[i].second];
+            if (g_inPass && t.img.view == g_passKey.color) end_pass();
+            freed += t.img.bytes;
+            retire_image(t.img);
+            g_lastSet = VK_NULL_HANDLE;
+        }
+        if (freed) log_once("free memory short: idle textures give their images back");
+    }
     if (g_imageBytes <= g_textureBudget) return;
     std::vector<std::pair<uint32_t, uint32_t> > idle;     // (last drawn frame, name)
     for (std::map<uint32_t, Texture>::iterator it = g_textures.begin(); it != g_textures.end(); ++it)
@@ -2078,9 +2147,12 @@ void vk_glDeleteRenderbuffers(X86* c) {
 void vk_glReadPixels(X86* c) {
     int x = (int)ARG(c, 0), y = (int)ARG(c, 1), w = (int)ARG(c, 2), h = (int)ARG(c, 3);
     uint32_t format = ARG(c, 4), type = ARG(c, 5), out = ARG(c, 6);
-    if (tracing())
-        recomp_log("trace: glReadPixels %d,%d %dx%d fbo %u format %x, called from %08x", x, y, w, h, g_fbo, format,
-                   RD32(c->r[4]));
+    if (tracing()) {
+        uint32_t ret[6] = {0, 0, 0, 0, 0, 0};
+        recomp_guest_returns(c, ret, 6);
+        recomp_log("trace: glReadPixels %d,%d %dx%d fbo %u format %x, called from %08x %08x %08x %08x %08x %08x", x, y, w, h,
+                   g_fbo, format, ret[0], ret[1], ret[2], ret[3], ret[4], ret[5]);
+    }
     RET_STD(c, 7, 0);
     std::vector<uint8_t> px;
     if (type != GL_UNSIGNED_BYTE || (format != GL_RGBA && format != GL_RGB && format != GL_BGRA)) {
@@ -2283,11 +2355,14 @@ const Entry kEntries[] = {
 void next_frame() {
     g_frame = (g_frame + 1) % FRAMES;
     Frame& f = g_frames[g_frame];
+    WaitClock::time_point t0 = WaitClock::now();
     vkWaitForFences(g_dev, 1, &f.fence, VK_TRUE, ~0ull);
+    g_waitFence += since(t0);
     vkResetFences(g_dev, 1, &f.fence);
     free_garbage(f);
     vkResetCommandBuffer(f.cmd, 0);
     vkResetDescriptorPool(g_dev, f.pool, 0);
+    ring_high(f.vOff, f.iOff, f.uOff);
     f.vOff = f.iOff = f.uOff = 0;
     g_recording = false;
     begin_recording();
@@ -2315,6 +2390,15 @@ void gl_vk_configure(const GlVkHooks& hooks) {
 bool gl_vk_enabled() { return g_enabled; }
 
 uint64_t gl_vk_image_bytes() { return g_imageBytes; }
+uint64_t gl_vk_buffer_bytes() { return g_bufferBytes; }
+
+void gl_vk_work(GlVkWork* w) {
+    w->imagesMade = g_imagesMade;
+    w->uploaded = g_uploaded;
+    w->waitAcquire = g_waitAcquire;
+    w->waitFence = g_waitFence;
+    w->waitIdle = g_waitIdle;
+}
 uint64_t gl_vk_packed_bytes() { return g_packedBytes; }
 
 void write_shader_samples() {
@@ -2427,8 +2511,9 @@ bool gl_vk_read_texture(uint32_t name, std::vector<uint8_t>& bgra, int& w, int& 
 }
 
 void gl_vk_frame_counts(char* buf, size_t size) {
-    snprintf(buf, size, "%u passes, %u draws, %u depth clears", g_lastCounts.passes, g_lastCounts.draws,
-             g_lastCounts.depthClears);
+    snprintf(buf, size, "%u passes, %u draws, %u depth clears; rings at most %u/%u/%u KB", g_lastCounts.passes,
+             g_lastCounts.draws, g_lastCounts.depthClears, (unsigned)(g_ringHigh[0] >> 10), (unsigned)(g_ringHigh[1] >> 10),
+             (unsigned)(g_ringHigh[2] >> 10));
 }
 
 void gl_vk_present() {
@@ -2440,8 +2525,10 @@ void gl_vk_present() {
     evict_textures();
     Frame& f = g_frames[g_frame];
     uint32_t image = 0;
+    WaitClock::time_point t0 = WaitClock::now();
     bool show = g_swapchain && g_defColor.image &&
                 vkAcquireNextImageKHR(g_dev, g_swapchain, ~0ull, f.acquired, VK_NULL_HANDLE, &image) == VK_SUCCESS;
+    g_waitAcquire += since(t0);
     if (show) {
         VkRenderPassBeginInfo rp;
         memset(&rp, 0, sizeof(rp));
@@ -2471,6 +2558,14 @@ void gl_vk_present() {
         vkCmdClearAttachments(f.cmd, 1, &att, 1, &cr);
         vkCmdBindPipeline(f.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, g_presentPipe);
         vkCmdBindDescriptorSets(f.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, g_presentLayout, 0, 1, &g_presentSet, 0, 0);
+        // a frame smaller than the output is enlarged k times with nearest pixels first (shaders.py PRESENT_FS): the
+        // 960x540 frame shows as the game's own 1920x1080 picture would, filtered to 1280x720
+        int k = (int)(vp.height / g_defColor.h + 0.999f);
+        if (k < 1) k = 1;
+        if (k > 4) k = 4;
+        const float pc[8] = {(float)(g_defColor.w * k), (float)(g_defColor.h * k), 1.0f / g_defColor.w, 1.0f / g_defColor.h,
+                             1.0f / k, 0.0f, 0.0f, 0.0f};
+        vkCmdPushConstants(f.cmd, g_presentLayout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(pc), pc);
         vkCmdSetViewport(f.cmd, 0, 1, &vp);
         vkCmdSetScissor(f.cmd, 0, 1, &sc);
         VkDeviceSize off = 0;

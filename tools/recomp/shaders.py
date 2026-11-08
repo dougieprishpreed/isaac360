@@ -228,7 +228,11 @@ def convert_fragment(src, vs_vary, uniforms, samplers):
     return g
 
 
-# the layer's own present pass: the default framebuffer (GL row order) to the display, flipped
+# the layer's own present pass: the default framebuffer (GL row order) to the display, flipped. It samples the
+# frame as if it were first enlarged by a whole factor k with nearest pixels and then filtered to the output: with
+# the console's 960x540 window, k = 2, the picture the game would draw at 1920x1080 (each pixel doubled) brought
+# to 1280x720 bilinearly. Pixel p of the enlarged frame is texel floor(p / k): a pair of enlarged pixels blends
+# only where it straddles two texels. size: the enlarged frame's width and height, 1 / the frame's; step.x: 1 / k
 PRESENT_VS = '''#version 450
 layout(location = 0) in vec2 a_pos;
 layout(location = 1) in vec2 a_uv;
@@ -237,9 +241,17 @@ void main() { gl_Position = vec4(a_pos, 0.0, 1.0); v_uv = a_uv; }
 '''
 PRESENT_FS = '''#version 450
 layout(set = 0, binding = 0) uniform sampler2D image;
+layout(push_constant) uniform Present { vec4 size; vec4 step; } pc;
 layout(location = 0) in vec2 v_uv;
 layout(location = 0) out vec4 color;
-void main() { color = vec4(texture(image, v_uv).rgb, 1.0); }
+void main() {
+    vec2 p = v_uv * pc.size.xy - 0.5;
+    vec2 i0 = floor(p);
+    vec2 t0 = floor(i0 * pc.step.x);
+    vec2 t1 = floor((i0 + 1.0) * pc.step.x);
+    vec2 u = t0 + 0.5 + (t1 - t0) * (p - i0);
+    color = vec4(texture(image, u * pc.size.zw).rgb, 1.0);
+}
 '''
 
 

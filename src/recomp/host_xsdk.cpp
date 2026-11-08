@@ -16,6 +16,7 @@
 #include <xsdk/kernel.h>
 #include <xsdk/thread.h>
 #include <xsdk/xam.h>
+#include <malloc.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -39,6 +40,8 @@ struct HostPad {                                     // shims_input.cpp
 };
 extern bool (*g_hostPadSource)(int index, HostPad* out);
 extern uint32_t (*g_hostFreeMemory)();             // shims_gl.cpp
+extern uint32_t (*g_hostHeapBytes)();
+extern "C" size_t spire_big_bytes(void);            // src/platform/xsdk/big_alloc.c
 extern std::atomic<bool> g_quitRequested;           // shims_gl.cpp: the game thread quits at its frame's end
 extern void (*g_hostQuit)();
 
@@ -187,6 +190,9 @@ uint32_t FreeMemory() {
     return NT_SUCCESS(MmQueryStatistics(&st)) ? st.title.available_pages * 4096u : 0;
 }
 
+// the C heap newlib took from the kernel (it never gives back below its top) and the big blocks beside it
+uint32_t HostHeapBytes() { return (uint32_t)mallinfo().arena + (uint32_t)spire_big_bytes(); }
+
 void LogLine(const char* line) { recomp_log("%s", line); }
 
 void Quit() {
@@ -270,11 +276,14 @@ void* GameMain(void*) {
         else if (eq != std::string::npos && eq > 0) setenv(args[i].substr(0, eq).c_str(), args[i].c_str() + eq + 1, 1);
     }
     mkdir("save", 0777);
-    // The game lays out for a 1080p screen, as on a PC at 1920x1080: at 720p it takes its small-screen HUD (larger
-    // outlined icons) and scales its 852x480 picture by 1.5 into uneven pixels. The present pass brings the 1080p
-    // frame to vulkan4xenon's one 1280x720 mode, filtered, and the console's output scales it to the screen.
-    // boi360_args.txt can say BOI360_WINDOW=1280x720.
-    setenv("BOI360_WINDOW", "1920x1080", 0);
+    // The game lays out for a 960x540 picture, as on a PC at 1920x1080, which it draws there with each pixel doubled:
+    // at 1280x720 it takes its small-screen HUD (larger outlined icons) and scales an 852x480 picture by 1.5 into
+    // uneven pixels. A 960x540 window gets the 1080p layout without the 1080p frame: the present pass (shaders.py
+    // PRESENT_FS) shows it as the doubled picture filtered to vulkan4xenon's one 1280x720 mode, the same pixels as a
+    // 1920x1080 window gave in play, without its 8 MB frame and the targets past eDRAM that vulkan4xenon draws in
+    // bands (cutscenes draw at the window's size: there 960x540 shows them doubled too). boi360_args.txt can say
+    // BOI360_WINDOW=1920x1080 or 1280x720.
+    setenv("BOI360_WINDOW", "960x540", 0);
 
     GlVkHooks hooks;
     memset(&hooks, 0, sizeof(hooks));
@@ -284,6 +293,7 @@ void* GameMain(void*) {
     gl_vk_configure(hooks);
     g_hostPadSource = ReadPad;
     g_hostFreeMemory = FreeMemory;
+    g_hostHeapBytes = HostHeapBytes;
     g_hostQuit = Quit;
 
     pthread_t watchdog;
