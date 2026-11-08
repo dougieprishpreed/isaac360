@@ -310,6 +310,10 @@ bool g_passDepthLoaded = false, g_passLoadedCounted = false;
 uint32_t g_noDepthFrom = 0;
 // BOI360_PRESENT_TEST=from,to: those frames show magenta instead of the picture (a console check of the output path)
 uint32_t g_presentTestFrom = 0, g_presentTestTo = 0;
+// BOI360_TRACE_FRAME=N,M,...: each pass, clear and draw of those frames in the log (program, target, states,
+// textures, the first vertex and the push constants)
+std::set<uint32_t> g_traceFrames;
+bool tracing() { return !g_traceFrames.empty() && g_traceFrames.count(gl_frame_count()); }
 
 void log_once(const char* fmt, ...) {
     char buf[512];
@@ -820,6 +824,9 @@ bool ensure_pass(bool clearsColor, bool clearsDepth) {
     g_inPass = true;
     g_passKey = key;
     ++g_counts.passes;
+    if (tracing())
+        recomp_log("trace: pass fbo %u, colour %dx%d (%s), depth %s (%s), area %dx%d", g_fbo, t.color->w, t.color->h,
+                   clearsColor ? "cleared" : "loaded", t.depth ? "yes" : "none", clearsDepth ? "cleared" : "loaded", t.w, t.h);
     g_passDepthLoaded = hasDepth && !clearsDepth;
     g_passLoadedCounted = false;
     g_passW = t.w;
@@ -1574,6 +1581,7 @@ void draw(uint32_t mode, int count, uint32_t indexType, uint32_t indices, int fi
         g_boundPipe = pipe;
     }
     // textures
+    std::string texInfo;
     VkImageView views[SAMPLER_SLOTS];
     VkSampler samplers[SAMPLER_SLOTS];
     for (int i = 0; i < SAMPLER_SLOTS; ++i) {
@@ -1592,6 +1600,12 @@ void draw(uint32_t mode, int count, uint32_t indexType, uint32_t indices, int fi
         it->second.drawFrame = gl_frame_count();
         ++it->second.draws;
         samplers[binding] = sampler_for(it->second.minFilter, it->second.magFilter, it->second.wrapS, it->second.wrapT);
+        if (tracing()) {
+            char b[64];
+            snprintf(b, sizeof(b), " %d:tex%u %dx%d%s", binding, tex, it->second.img.w, it->second.img.h,
+                     it->second.target ? " target" : "");
+            texInfo += b;
+        }
     }
     if (!g_lastSet || memcmp(views, g_lastViews, sizeof(views)) || memcmp(samplers, g_lastSamplers, sizeof(samplers))) {
         VkDescriptorSetAllocateInfo ai;
@@ -1646,6 +1660,30 @@ void draw(uint32_t mode, int count, uint32_t indexType, uint32_t indices, int fi
     VkDeviceSize voff = f->vOff;
     vkCmdBindVertexBuffers(cmd, 0, 1, &vb, &voff);
     vkCmdBindIndexBuffer(cmd, f->indices.buf, f->iOff, wide ? VK_INDEX_TYPE_UINT32 : VK_INDEX_TYPE_UINT16);
+    if (tracing()) {
+        recomp_log("trace: draw %s, fbo %u, %d indices of %u vertices, viewport %d,%d %dx%d, blend %s %x,%x,%x,%x, "
+                   "depth test %d write %d func %x, cull %d,%x front %x, textures%s", p.desc ? p.desc->label : "?", g_fbo,
+                   count, nverts, g_viewport[0], g_viewport[1], g_viewport[2], g_viewport[3], k.blend ? "on" : "off", k.src,
+                   k.dst, k.srcA, k.dstA, k.depthTest ? 1 : 0, k.depthWrite ? 1 : 0, k.depthFunc, k.cull ? 1 : 0,
+                   k.cullFace, k.frontFace, texInfo.empty() ? " none" : texInfo.c_str());
+        std::string vals;
+        const float* v0 = (const float*)(f->vertices.map + f->vOff);
+        for (int i = 0; i < (int)(p.stride / 4) && i < 16; ++i) {
+            char b[24];
+            snprintf(b, sizeof(b), " %g", v0[i]);
+            vals += b;
+        }
+        recomp_log("trace:   first vertex%s", vals.c_str());
+        vals.clear();
+        for (int i = 0; i < (int)(p.pushBytes / 4) && i < 24; ++i) {
+            char b[24];
+            float x;
+            memcpy(&x, p.push + 4 * i, 4);
+            snprintf(b, sizeof(b), " %g", x);
+            vals += b;
+        }
+        recomp_log("trace:   push%s", vals.c_str());
+    }
     vkCmdDrawIndexed(cmd, (uint32_t)count, 1, 0, 0, 0);
     f->vOff = (f->vOff + vbytes + 15) & ~(VkDeviceSize)15;
     f->iOff = (f->iOff + (wide ? 4 : 2) * (VkDeviceSize)count + 15) & ~(VkDeviceSize)15;
@@ -1674,6 +1712,9 @@ void clear(uint32_t mask) {
         ++n;
     }
     if (!n) return;
+    if (tracing())
+        recomp_log("trace: clear fbo %u colour %d (%g %g %g %g) depth %d (%g)", g_fbo, color ? 1 : 0, g_clearColor[0],
+                   g_clearColor[1], g_clearColor[2], g_clearColor[3], depth && g_passKey.depth ? 1 : 0, g_clearDepth);
     VkClearRect r;
     memset(&r, 0, sizeof(r));
     r.rect.extent.width = (uint32_t)g_passW;
@@ -2259,6 +2300,11 @@ void gl_vk_configure(const GlVkHooks& hooks) {
     g_stats = getenv("BOI360_GL_STATS") != 0;
     g_samples = getenv("BOI360_SHADER_SAMPLES") != 0;
     g_noDepthFrom = (v = getenv("BOI360_NO_DEPTH_FROM")) ? (uint32_t)atoi(v) : 0;
+    for (const char* t = getenv("BOI360_TRACE_FRAME"); t && *t;) {
+        g_traceFrames.insert((uint32_t)atoi(t));
+        while (*t && *t != ',') ++t;
+        if (*t == ',') ++t;
+    }
     if ((v = getenv("BOI360_PRESENT_TEST")) && strchr(v, ',')) {
         g_presentTestFrom = (uint32_t)atoi(v);
         g_presentTestTo = (uint32_t)atoi(strchr(v, ',') + 1);
