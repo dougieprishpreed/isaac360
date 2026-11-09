@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <map>
 #include <mutex>
+#include <set>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -137,7 +138,8 @@ std::vector<std::string> recomp_host_dirs(const std::string& p) {
 // ------------------------------------------------------------------------------------------------ log
 // Lines go to a writer thread, which writes and flushes them at once: on the console each flush is a USB write of
 // milliseconds, and the 600-frame summary (sixty lines) held the game's thread ~600 ms. recomp_log_drain waits for
-// the queue (before an exit or a fatal stop).
+// the queue (before an exit or a fatal stop), five seconds at most: a writer stuck in a frozen heap kept Back + Start
+// from quitting (boot 13). The writer holds the lock only to take the queue, never while it frees the lines.
 static FILE* g_log = 0;
 static std::mutex g_logLock;
 static std::condition_variable g_logWake, g_logIdle;
@@ -148,16 +150,18 @@ static void log_writer(void*) {
     std::unique_lock<std::mutex> l(g_logLock);
     for (;;) {
         while (g_logQueue.empty()) g_logWake.wait(l);
-        std::deque<std::string> lines;
-        lines.swap(g_logQueue);
-        g_logWriting = true;
-        l.unlock();
-        for (size_t i = 0; i < lines.size(); ++i) {
-            fputs(lines[i].c_str(), stdout);
-            if (g_log) fputs(lines[i].c_str(), g_log);
+        {
+            std::deque<std::string> lines;
+            lines.swap(g_logQueue);
+            g_logWriting = true;
+            l.unlock();
+            for (size_t i = 0; i < lines.size(); ++i) {
+                fputs(lines[i].c_str(), stdout);
+                if (g_log) fputs(lines[i].c_str(), g_log);
+            }
+            fflush(stdout);
+            if (g_log) fflush(g_log);
         }
-        fflush(stdout);
-        if (g_log) fflush(g_log);
         l.lock();
         g_logWriting = false;
         g_logIdle.notify_all();
@@ -172,18 +176,22 @@ void recomp_log(const char* fmt, ...) {
     va_end(a);
     size_t n = strlen(line);
     if (!n || line[n - 1] != '\n') strcat(line, "\n");
+    std::string text(line);
     std::lock_guard<std::mutex> g(g_logLock);
     if (!g_logWriter) {
         g_logWriter = true;
         host_thread_start(log_writer, 0, 128u << 10);
     }
-    g_logQueue.push_back(line);
+    g_logQueue.push_back(std::string());
+    g_logQueue.back().swap(text);
     g_logWake.notify_one();
 }
 
 void recomp_log_drain() {
     std::unique_lock<std::mutex> l(g_logLock);
-    while (!g_logQueue.empty() || g_logWriting) g_logIdle.wait(l);
+    std::chrono::steady_clock::time_point until = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (!g_logQueue.empty() || g_logWriting)
+        if (g_logIdle.wait_until(l, until) == std::cv_status::timeout) break;
 }
 
 // guest call stack: return addresses on the guest stack that follow a call into translated code
@@ -218,6 +226,23 @@ void recomp_fatal(X86* c, const char* fmt, ...) {
 void x86_unimpl(X86* c, uint32_t eip, const char* what) { recomp_fatal(c, "unimplemented %s at %08x", what, eip); }
 void x86_bad_jump(X86* c, uint32_t eip, uint32_t target) { recomp_fatal(c, "switch at %08x to unknown %08x", eip, target); }
 void x86_unreachable(X86* c, uint32_t eip) { recomp_fatal(c, "reached unreachable code at %08x", eip); }
+
+void x86_espcheck(X86* c, uint32_t esp, uint32_t eip) {
+    uint32_t base = RD32(c->fs_base + 4), limit = RD32(c->fs_base + 8);
+    if (esp >= limit && esp <= base) return;
+    recomp_fatal(c, "regcheck: the call at %08x returned esp %08x, outside the stack %08x-%08x", eip, esp, limit, base);
+}
+
+void x86_regcheck(X86* c, uint32_t fn, uint32_t eip, int reg, uint32_t entry, uint32_t now) {
+    static std::mutex lock;
+    static std::set<uint64_t> seen;
+    static const char* const names[8] = {"eax", "ecx", "edx", "ebx", "esp", "ebp", "esi", "edi"};
+    std::lock_guard<std::mutex> l(lock);
+    if (!seen.insert((uint64_t)fn << 8 | (uint32_t)reg).second) return;
+    recomp_log("regcheck: F_%x left by %08x changed %s (%08x -> %08x), which it is taken to preserve", fn, eip,
+               names[reg & 7], entry, now);
+    (void)c;
+}
 
 // ------------------------------------------------------------------------------------------------ strings
 std::string guest_str(uint32_t a, size_t max) {
@@ -892,8 +917,10 @@ static X86* thread_cpu() { return t_cpu; }
 // a TIB, a stack and the static TLS blocks of every image, all in guest memory
 static X86* make_cpu(uint32_t stackSize) {
     HostCpu* hc = (HostCpu*)calloc(1, sizeof(HostCpu));
+    static std::atomic<uint32_t> ids(0);
     hc->thread.thunkName = "";
     hc->thread.sampleSlot = -1;
+    hc->thread.id = ++ids;
     X86* c = &hc->cpu;
     c->fcw = 0x27f;
     c->mxcsr = 0x1f80;

@@ -31,7 +31,10 @@ foreach(SET out out_lua out_msvcp)
     file(GLOB GEN_${SET} "${ROOT}/build/recomp/${SET}/f*.c")
     add_library(guest_${SET} STATIC ${GEN_${SET}} "${ROOT}/build/recomp/${SET}/functions.c")
     target_include_directories(guest_${SET} PRIVATE "${RECOMP}" "${ROOT}/build/recomp/${SET}")
-    target_compile_options(guest_${SET} PRIVATE ${BOI_GEN_OPT} ${COMMON_FLAGS} -std=gnu99 -w)
+    # no unwind tables: nothing unwinds through translated frames (a guest throw or longjmp stops the game), and
+    # .eh_frame held 1.8 MB of the console's memory for them
+    target_compile_options(guest_${SET} PRIVATE ${BOI_GEN_OPT} ${COMMON_FLAGS} -std=gnu99 -w
+                           -fno-asynchronous-unwind-tables -fno-unwind-tables)
 endforeach()
 
 file(GLOB SHIM_SOURCES "${RECOMP}/shims_*.cpp")
@@ -55,5 +58,5 @@ target_link_libraries(boi360 PRIVATE guest_out guest_out_lua guest_out_msvcp "${
 set_property(TARGET boi360 APPEND PROPERTY LINK_DEPENDS "${VULKAN4XENON}/build/libvulkan4xenon.a")
 target_link_options(boi360 PRIVATE "-Wl,--gc-sections,--no-warn-execstack,-Map,${CMAKE_CURRENT_BINARY_DIR}/boi360.map")
 # big blocks from the kernel's pages, given back whole (src/platform/xsdk/big_alloc.c)
-target_link_options(boi360 PRIVATE "-Wl,--wrap=malloc,--wrap=free,--wrap=realloc,--wrap=calloc")
+target_link_options(boi360 PRIVATE "-Wl,--wrap=malloc,--wrap=free,--wrap=realloc,--wrap=calloc,--wrap=_free_r,--wrap=_realloc_r")
 xsdk_add_xex(boi360 TITLE_ID ${BOI_TITLE_ID} NAME "boi360")

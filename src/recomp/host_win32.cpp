@@ -58,7 +58,21 @@ void audio_out_submit(const int16_t* stereo, int frames) {
     if (g_audioFrames % (g_audioRate / 2) < (uint32_t)frames) audio_dump_header();   // twice a second
 }
 
+static void log_line(const char* line) { recomp_log("%s", line); }
+
+// a host fault nothing handled (a guest pointer gone wrong in translated code): where each guest thread was
+static LONG WINAPI host_fault(EXCEPTION_POINTERS* e) {
+    recomp_log("host fault %08lx at %p (exe +%llx; address %p)", e->ExceptionRecord->ExceptionCode,
+               e->ExceptionRecord->ExceptionAddress,
+               (unsigned long long)((char*)e->ExceptionRecord->ExceptionAddress - (char*)GetModuleHandleA(0)),
+               e->ExceptionRecord->NumberParameters > 1 ? (void*)e->ExceptionRecord->ExceptionInformation[1] : 0);
+    recomp_sample_threads(log_line);
+    recomp_log_drain();
+    return EXCEPTION_CONTINUE_SEARCH;
+}
+
 int main(int argc, char** argv) {
+    SetUnhandledExceptionFilter(host_fault);
     RecompConfig cfg;
     cfg.gameDir = "game";
     cfg.saveDir = "build/recomp/save";

@@ -76,15 +76,34 @@ class Image:
         return None
 
 
+def imported_names(images, dll):
+    """The names (and ordinals) these images import from dll."""
+    names = set()
+    for path in images:
+        pe = pefile.PE(os.path.join(ROOT, path))
+        for e in getattr(pe, 'DIRECTORY_ENTRY_IMPORT', []):
+            if e.dll.decode('latin1').lower() == dll.lower():
+                for i in e.imports:
+                    names.add(i.name.decode('latin1') if i.name else i.ordinal)
+    return names
+
+
 def seeds(img):
     pe = img.pe
     out = {img.base + pe.OPTIONAL_HEADER.AddressOfEntryPoint: 'entry'}
+    # BOI360_EXPORTS_FROM=image,image...: only the exports those images import are roots (msvcp140.dll: the game
+    # takes 34 of its 1,124, and the console holds every function translated)
+    used = None
+    if os.environ.get('BOI360_EXPORTS_FROM'):
+        used = imported_names(os.environ['BOI360_EXPORTS_FROM'].split(','), os.path.basename(EXE))
     if hasattr(pe, 'DIRECTORY_ENTRY_EXPORT'):
         for e in pe.DIRECTORY_ENTRY_EXPORT.symbols:
             va = img.base + e.address
             name = (e.name or b'').decode('latin1')
             # decorated data exports: globals (@@3), static members (@@2), vtables (@@6B), vbtables (@@7B), RTTI (@@8)
             if any(t in name for t in ('@@3', '@@2', '@@6B', '@@7B', '@@8')):
+                continue
+            if used is not None and (name or e.ordinal) not in used:
                 continue
             if img.in_text(va):
                 out[va] = 'export'

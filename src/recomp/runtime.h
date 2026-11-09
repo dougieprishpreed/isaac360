@@ -61,6 +61,7 @@ X86* current_cpu();
 struct GuestThread {
     const char* thunkName;                  // the import or thunk it is in
     int sampleSlot;                         // its slot in the profiler and watchdog samples, or -1
+    uint32_t id;                            // from 1: the owner its critical sections record (guest_lock.h)
     uint32_t tls[128];                      // TlsGetValue / TlsSetValue slots (more go to a map)
 };
 GuestThread* guest_thread(X86* c);

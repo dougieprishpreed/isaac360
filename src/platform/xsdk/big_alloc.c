@@ -6,11 +6,15 @@
  * freed between smaller live ones stayed the heap's: a console session's
  * heap held 139 MB with 97 in use (each shop's 10 MB backdrop took more),
  * and the GPU's memory ran out (a texture made again and again after a
- * save and quit). The link wraps malloc, free, realloc and calloc
- * (CMakeLists.txt); newlib's own _malloc_r / _free_r pairs never see a big
- * block (its buffers are small), and a block this file did not make goes
- * to newlib's free. Without the kernel's pages (address space gone) a big
- * block comes from the heap as before. */
+ * save and quit). The link wraps malloc, free, realloc and calloc, and
+ * newlib's _free_r and _realloc_r (CMakeLists.txt): newlib frees some
+ * blocks the caller's malloc made through those (setvbuf's buffer, freed by
+ * fclose), and a 64 KB setvbuf buffer from the kernel's pages given to
+ * newlib's free read the heap's bookkeeping before the region and froze the
+ * console (boot 13). A block this file did not make goes to newlib's free.
+ * Without the kernel's pages (address space gone) a big block comes from the
+ * heap as before. */
+#include <reent.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
@@ -19,6 +23,8 @@
 
 void* __real_malloc(size_t n);
 void __real_free(void* p);
+void __real__free_r(struct _reent* r, void* p);
+void* __real__realloc_r(struct _reent* r, void* p, size_t n);
 void* __real_realloc(void* p, size_t n);
 void* __real_calloc(size_t n, size_t size);
 
@@ -74,9 +80,10 @@ static void* pages(size_t n) {
     return p;
 }
 
-/* the big block at p (its size in *n), taken out of the table if take */
+/* the big block at p (its size in *n), taken out of the table if take; a
+   pointer off a 64 KB boundary is newlib's without the lock */
 static int big_block(void* p, size_t* n, int take) {
-    if (!p || (uintptr_t)p < g_lo || (uintptr_t)p >= g_hi) return 0;
+    if (!p || ((uintptr_t)p & 0xFFFF) || (uintptr_t)p < g_lo || (uintptr_t)p >= g_hi) return 0;
     int found = 0;
     lock();
     unsigned i = slot_of(p);
@@ -136,16 +143,34 @@ void* __wrap_calloc(size_t count, size_t size) {
     return __real_calloc(count, size);
 }
 
-void* __wrap_realloc(void* p, size_t n) {
-    size_t had;
-    if (!big_block(p, &had, 0)) {
-        /* newlib's block: grown or shrunk where it is */
-        return __real_realloc(p, n);
-    }
+/* a big block moved into a new one of n bytes (had: its size) */
+static void* big_realloc(void* p, size_t had, size_t n) {
     if (n <= had && n >= BIG) return p;
     void* q = __wrap_malloc(n);
     if (!q) return NULL;
     memcpy(q, p, n < had ? n : had);
     __wrap_free(p);
     return q;
+}
+
+void* __wrap_realloc(void* p, size_t n) {
+    size_t had;
+    if (!big_block(p, &had, 0)) {
+        /* newlib's block: grown or shrunk where it is */
+        return __real_realloc(p, n);
+    }
+    return big_realloc(p, had, n);
+}
+
+/* newlib's own frees and reallocs, of blocks a caller's malloc may have made */
+void __wrap__free_r(struct _reent* r, void* p) {
+    size_t n;
+    if (big_block(p, &n, 1)) release(p);
+    else __real__free_r(r, p);
+}
+
+void* __wrap__realloc_r(struct _reent* r, void* p, size_t n) {
+    size_t had;
+    if (!big_block(p, &had, 0)) return __real__realloc_r(r, p, n);
+    return big_realloc(p, had, n);
 }

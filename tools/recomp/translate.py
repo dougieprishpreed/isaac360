@@ -19,6 +19,8 @@ from collections import defaultdict, Counter
 import iced_x86 as ix
 import pefile
 
+import regflow
+
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 TAG = os.environ.get('BOI360_TAG', '')
 EXE = os.path.join(ROOT, os.environ.get('BOI360_IMAGE', os.path.join('game', 'isaac-ng.exe')))
@@ -26,6 +28,13 @@ PROG = os.path.join(ROOT, 'build', 'recomp', TAG, 'program.json') if TAG else os
 OUT = os.path.join(ROOT, 'build', 'recomp', 'out_' + TAG) if TAG else os.path.join(ROOT, 'build', 'recomp', 'out')
 SUFFIX = ('_' + TAG) if TAG else ''
 # BOI360_TRACE_FUNCS=addr,addr: those functions log their entry (arguments) and returns (eax) at run time
+# Check builds for the register flow (regflow.py). BOI360_REGCHECK=1: each call gives what it does not save a poison
+# value (0xdead000n, the flags 0x5a), so a callee that reads one fails at once. BOI360_REGCHECK=2: every call and
+# return saves and reloads everything, and each function reports (x86_regcheck) a register it is taken to preserve
+# that its return or tail call left changed (under lean calls a function's copy of a register nobody reads after a
+# call is stale, so only full saves show what the register really holds).
+REGCHECK = os.environ.get('BOI360_REGCHECK', '')
+POISON, PRESERVE = REGCHECK == '1', REGCHECK == '2'
 TRACE = set(int(x, 16) for x in os.environ.get('BOI360_TRACE_FUNCS', '').split(',') if x)
 
 # Instructions of isaac-ng.exe replaced by other C (the exe only, TAG ''): address -> code.
@@ -43,13 +52,16 @@ PATCHES = {
 # translated code run. The game's stb_vorbis decodes music on its sound thread holding the sound manager's lock;
 # translated, that decode is too slow on the console and the main thread waits on the lock
 # (src/recomp/hle_vorbis.cpp decodes ahead natively). libpng's row unfiltering runs per byte over every texture a
-# room loads (src/recomp/hle_png.cpp).
+# room loads (src/recomp/hle_png.cpp). The engine's reference counting locks a lock object ~2,300 times a frame,
+# each a translated wrapper around a critical section's import (src/recomp/shims_kernel32.cpp).
 HOST = {
     0x9b2b60: 'hle_png_filter_row',           # png_read_filter_row (row_info edx; row, prev_row, filter on the stack)
     0x9aa630: 'hle_vorbis_get_samples',       # stb_vorbis_get_samples_short_interleaved (f ecx, channels edx)
     0x9a3e50: 'hle_vorbis_set_file_offset',   # set_file_offset (f ecx, loc edx): stb_vorbis_seek_start's start
     0x9a7910: 'hle_vorbis_pump_first_frame',  # vorbis_pump_first_frame (f ecx): stb_vorbis_seek_start's restart
     0x9a99c0: 'hle_vorbis_deinit',            # vorbis_deinit (f ecx), before the game frees the decoder
+    0x94f870: 'hle_lockobj_lock',             # the engine lock object's lock (this ecx, timeout on the stack)
+    0x94f930: 'hle_lockobj_unlock',           # and unlock (this ecx): shims_kernel32.cpp
 }
 
 M = ix.Mnemonic
@@ -129,6 +141,8 @@ class Fn:
 
     # ------------------------------------------------------------------ discovery (instruction graph)
     def discover(self):
+        if hasattr(self, 'order'):
+            return
         tr = self.tr
         work = [self.start]
         while work:
@@ -334,15 +348,31 @@ class Fn:
     def emit(self, s):
         self.out.append(s)
 
-    def spill(self):
-        return 'SPILL();'
+    def site(self, va):
+        """What the call or exit at va saves and reloads (regflow.py); None: everything."""
+        return self.tr.rf.site(self.start, va) if self.tr.rf and not PRESERVE else None
+
+    def checked(self):
+        """The registers a BOI360_REGCHECK translation checks at this function's exits (0: none)."""
+        rf = self.tr.rf
+        if not PRESERVE or not rf or self.start not in rf.flows or rf.flows[self.start].opaque:
+            return 0
+        return 0xff & ~regflow.regs_of(rf.cl[self.start]) & ~regflow.ESP
+
+    def regcheck(self, va):
+        m = self.checked()
+        return ''.join('if(%s!=e_[%d])x86_regcheck(c,0x%xu,0x%xu,%d,e_[%d],%s);' % (NAMES8[i], i, self.start, va, i, i,
+                                                                                    NAMES8[i])
+                       for i in range(8) if m >> i & 1)
 
     def call_direct(self, va, ins, target):
         ret = va + ins.len
         name = self.tr.func_name(target)
+        site = self.site(va)
         if name is None:
-            return 'esp-=4;WR32(esp,0x%xu);SPILL();x86_call(c,0x%xu);FILL();' % (ret, target)
-        return 'esp-=4;WR32(esp,0x%xu);SPILL();%s(c);FILL();' % (ret, name)
+            return 'esp-=4;WR32(esp,0x%xu);%sx86_call(c,0x%xu);%s' % (ret, spill_of(site, True), target,
+                                                                      fill_of(site, va))
+        return 'esp-=4;WR32(esp,0x%xu);%s%s(c);%s' % (ret, spill_of(site, True), name, fill_of(site, va))
 
     def translate_insn(self, va, ins, nxt_va):
         tr = self.tr
@@ -361,7 +391,7 @@ class Fn:
         if mn == M.RET:
             pop = ins.immediate16 if ins.op_count else 0
             trace = 'x86_trace_leave(c,0x%xu,eax);' % self.start if self.start in TRACE else ''
-            E('esp+=%d;SPILL();%sreturn;' % (4 + pop, trace))
+            E('%sesp+=%d;%s%sreturn;' % (self.regcheck(va), 4 + pop, spill_of(self.site(va)), trace))
             return
         if mn == M.CALL:
             if ins.op0_kind in (OK.NEAR_BRANCH32, OK.NEAR_BRANCH16):
@@ -371,10 +401,14 @@ class Fn:
             if ins.op0_kind == OK.MEMORY and ins.memory_base == R.NONE and ins.memory_index == R.NONE:
                 slot = ins.memory_displacement & 0xffffffff
                 if slot in tr.imports:
-                    E('esp-=4;WR32(esp,0x%xu);SPILL();x86_import(c,0x%xu);FILL(); /* %s */' % (ret, slot, tr.imports[slot]))
+                    site = self.site(va)
+                    E('esp-=4;WR32(esp,0x%xu);%sx86_import(c,0x%xu);%s /* %s */' % (
+                        ret, spill_of(site, True), slot, fill_of(site, va), tr.imports[slot]))
                     return
             tgt = self.get(ins, 0, 4)
-            E('{uint32_t t_=%s;esp-=4;WR32(esp,0x%xu);SPILL();x86_call(c,t_);FILL();}' % (tgt, ret))
+            site = self.site(va)
+            E('{uint32_t t_=%s;esp-=4;WR32(esp,0x%xu);%sx86_call(c,t_);%s}' % (tgt, ret, spill_of(site, True),
+                                                                              fill_of(site, va)))
             return
         if ins.flow_control == FC.CONDITIONAL_BRANCH:
             t = ins.near_branch_target
@@ -394,7 +428,8 @@ class Fn:
                 s = self.succ[va][0]
                 if isinstance(s, tuple):
                     n = tr.func_name(t)
-                    E('SPILL();%s(c);return;' % n if n else 'SPILL();x86_call(c,0x%xu);return;' % t)
+                    sp = self.regcheck(va) + spill_of(self.site(va), True)
+                    E('%s%s(c);return;' % (sp, n) if n else '%sx86_call(c,0x%xu);return;' % (sp, t))
                 else:
                     E(jump_to(t))
                 return
@@ -402,14 +437,15 @@ class Fn:
             if ins.op0_kind == OK.MEMORY and ins.memory_base == R.NONE and ins.memory_index == R.NONE:
                 slot = ins.memory_displacement & 0xffffffff
                 if slot in tr.imports:
-                    E('SPILL();x86_import(c,0x%xu);return; /* %s */' % (slot, tr.imports[slot]))
+                    E('%s%sx86_import(c,0x%xu);return; /* %s */' % (self.regcheck(va), spill_of(self.site(va), True),
+                                                                     slot, tr.imports[slot]))
                     return
             tgt = self.get(ins, 0, 4)
             if tbl:
                 cases = ''.join('case 0x%xu:%s' % (t, jump_to(t)) for t in sorted(set(tbl)))
                 E('switch(%s){%sdefault:x86_bad_jump(c,0x%xu,%s);}' % (tgt, cases, va, tgt))
             else:
-                E('{uint32_t t_=%s;SPILL();x86_call(c,t_);return;}' % tgt)
+                E('{uint32_t t_=%s;%s%sx86_call(c,t_);return;}' % (tgt, self.regcheck(va), spill_of(self.site(va), True)))
             return
         if mn == M.INT3:
             E('x86_unreachable(c,0x%xu);' % va)
@@ -1250,7 +1286,7 @@ class Fn:
                 prev_falls = va + ins.len
             elif succ and isinstance(succ[0], tuple) and fc == FC.NEXT:
                 n = self.tr.func_name(succ[0][1])
-                body.append('SPILL();%s(c);return;' % n)
+                body.append('%s%s%s(c);return;' % (self.regcheck(va), spill_of(self.site(va), True), n))
         if prev_falls is not None:
             body.append('goto L_%x;' % prev_falls if prev_falls in self.insns and self.insns[prev_falls] is not None
                         else 'x86_unreachable(c,0x%xu);' % prev_falls)
@@ -1271,11 +1307,36 @@ class Fn:
         host = HOST.get(self.start) if not TAG else None
         pre = ('int %s(X86* c);\n' % host) if host else ''
         hook = ('if(%s(c))return;\n' % host) if host else ''
-        src = pre + 'void %s(X86* c){%sREGS();\n%s%s\n}\n' % (name, hook, entry, '\n'.join(lines))
+        keep = 'uint32_t e_[8]={eax,ecx,edx,ebx,esp,ebp,esi,edi};\n' if self.checked() else ''
+        src = pre + 'void %s(X86* c){%sREGS();\n%s%s%s\n}\n' % (name, hook, keep, entry, '\n'.join(lines))
         return src, unhandled
 
 
 MEMSIZE = {}
+
+
+NAMES8 = ['eax', 'ecx', 'edx', 'ebx', 'esp', 'ebp', 'esi', 'edi']
+
+
+def spill_of(site, call=False):
+    """The CPU state a call or exit writes from the locals: the registers and flags its site names, or all."""
+    if site is None or (site[0] == 0xff and site[1] == ALLF):
+        return 'SPILL();'
+    regs, flags = site[0], site[1]
+    text = (''.join('c->r[%d]=%s;' % (i, NAMES8[i]) for i in range(8) if regs >> i & 1) +
+            ''.join('c->%s=%s;' % (FLAGNAME[b], FLAGNAME[b]) for b in (CF, PF, AF, ZF, SF, OF) if flags & b))
+    if POISON and call:
+        text += (''.join('c->r[%d]=0xdead000%du;' % (i, i) for i in range(8) if not regs >> i & 1) +
+                 ''.join('c->%s=0x5a;' % FLAGNAME[b] for b in (CF, PF, AF, ZF, SF, OF) if not flags & b))
+    return text
+
+
+def fill_of(site, va=None):
+    """The locals a call reloads from the CPU state after it: the registers its site names, or all and the flags."""
+    text = 'FILL();' if site is None else ''.join('%s=c->r[%d];' % (NAMES8[i], i) for i in range(8) if site[2] >> i & 1)
+    if POISON and va is not None:
+        text += 'x86_espcheck(c,esp,0x%xu);' % va
+    return text
 
 
 def init_memsize():
@@ -1312,6 +1373,8 @@ class Translator:
         self.noreturn_funcs = set()
         self.table_bytes = set(p.get('table_bytes', []))
         self.code = self.img.data[self.text_lo - self.img.base:self.text_hi - self.img.base]
+        self.rf = None
+        self.fns = {}
 
     def in_text(self, va):
         return self.text_lo <= va < self.text_hi
@@ -1359,6 +1422,24 @@ def main():
     args = ap.parse_args()
     tr = Translator()
     starts = sorted(tr.funcs)
+    # every function's graph and register flow first (tools/recomp/regflow.py): a call saves and reloads only what
+    # its callee reads or changes
+    rf = regflow.RegFlow()
+    for i, st in enumerate(starts):
+        fn = Fn(tr, st)
+        fn.discover()
+        tr.fns[st] = fn
+        opaque = not TAG and any(va in PATCHES for va in fn.insns)
+        rf.add(regflow.Flow(fn, tr, lambda ins: (rf_to_mask(ins.rflags_read), rf_to_mask(ins.rflags_modified)), opaque,
+                            not TAG and st in HOST))
+        if i % 4000 == 0:
+            print('flow %d/%d' % (i, len(starts)), file=sys.stderr)
+    steps = rf.run()
+    tr.rf = rf
+    kinds = {int(k, 16): v.get('kind') for k, v in tr.p['functions'].items()}
+    odd = rf.report(kinds)
+    print('register flow: %d steps; %d address-taken functions read or change past eax/ecx/edx or read flags'
+          % (steps, len(odd)), file=sys.stderr)
     if args.only:
         starts = [int(x, 16) for x in args.only.split(',')]
     os.makedirs(OUT, exist_ok=True)
@@ -1382,8 +1463,13 @@ def main():
         nfile += 1
         chunk = []
 
+    os.makedirs(OUT, exist_ok=True)
+    with open(os.path.join(OUT, 'regflow.txt'), 'w', newline='\n') as fp:
+        for st, extra_in, extra_cl, fin in odd:
+            fp.write('F_%x %s: reads %s, changes %s, flags in %x\n' % (
+                st, kinds.get(st), regflow.mask_names(extra_in) or '-', regflow.mask_names(extra_cl) or '-', fin))
     for i, s in enumerate(starts):
-        src, unh = Fn(tr, s).translate()
+        src, unh = tr.fns[s].translate()
         total.update(unh)
         chunk.append(src)
         decls.append('void F_%x(X86* c);' % s)

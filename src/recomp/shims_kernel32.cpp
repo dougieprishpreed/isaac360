@@ -1,6 +1,7 @@
 // KERNEL32/WINMM/ADVAPI32/ole32/SHELL32/dbghelp imports (stdcall). Handles and synchronisation objects are host
 // objects keyed by guest values.
 #include "runtime.h"
+#include "guest_lock.h"
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -29,13 +30,14 @@ uint32_t shim_proc_address(const std::string& module, const std::string& name); 
 
 namespace {
 // ------------------------------------------------------------------------------------------------ sync
-// A critical section is a host mutex found by the guest structure's address. The game enters and leaves them
-// thousands of times a frame (its sound, resource and log locks), so the lookup takes no lock: an open-addressed
-// table whose slots are written once (the key last, after the mutex) and never removed, as Windows' are never
-// moved. A full table (it holds far more than the game makes) falls back to a map under a lock.
+// A critical section is a GuestLock (guest_lock.h) found by the guest structure's address. The game enters and
+// leaves them thousands of times a frame (its reference counts, sound, resource and log locks), so the lookup takes
+// no lock: an open-addressed table whose slots are written once (the key last, after the lock) and never removed,
+// as Windows' are never moved. A full table (it holds far more than the game makes) falls back to a map under a
+// lock.
 struct CsSlot {
     std::atomic<uint32_t> key;
-    std::recursive_mutex* m;
+    GuestLock* m;
     std::atomic<uint32_t> holder0, holder1;      // BOI360_PROFILE: the code that last entered it
 };
 const uint32_t kCsSlots = 8192;                    // a power of two
@@ -57,7 +59,7 @@ CsSlot* cs_slot(uint32_t a) {
         uint32_t k = g_csSlots[i].key.load(std::memory_order_relaxed);
         if (k == a) return &g_csSlots[i];
         if (!k) {
-            g_csSlots[i].m = new std::recursive_mutex;
+            g_csSlots[i].m = new GuestLock;
             g_csSlots[i].key.store(a, std::memory_order_release);
             ++g_csUsed;
             return &g_csSlots[i];
@@ -67,11 +69,11 @@ CsSlot* cs_slot(uint32_t a) {
     if (!more) {
         more = new CsSlot;
         more->key.store(a);
-        more->m = new std::recursive_mutex;
+        more->m = new GuestLock;
     }
     return more;
 }
-std::recursive_mutex* cs_of(uint32_t a) { return cs_slot(a)->m; }
+GuestLock* cs_of(uint32_t a) { return cs_slot(a)->m; }
 void k_InitializeCriticalSection(X86* c) { cs_of(ARG(c, 0)); RET_STD(c, 1, 0); }
 void k_InitializeCriticalSectionAndSpinCount(X86* c) { cs_of(ARG(c, 0)); RET_STD(c, 2, 1); }
 void k_DeleteCriticalSection(X86* c) { RET_STD(c, 1, 0); }
@@ -88,23 +90,22 @@ std::unordered_map<uint32_t, LockStats> g_lockStats;
 double g_lockWaitMs = 0;                            // all waits so far (the slow frame lines)
 int g_lockProfile = -1;                             // read at the first Enter, once the console's arguments are set
 
-void k_EnterCriticalSection(X86* c) {
-    uint32_t a = ARG(c, 0);
-    CsSlot* slot = cs_slot(a);
+// enters the section at a for c's thread; BOI360_PROFILE records a wait with where it came from (site: the return
+// into the caller, and the caller's own from its ebp frame where that is on the stack)
+void cs_enter(X86* c, uint32_t a, CsSlot* slot) {
+    uint32_t me = guest_thread(c)->id;
     if (g_lockProfile < 0) g_lockProfile = getenv("BOI360_PROFILE") ? 1 : 0;
     if (!g_lockProfile) {
-        slot->m->lock();
-        RET_STD(c, 1, 0);
+        guest_lock_enter(*slot->m, me);
         return;
     }
-    // the return into the game's wrapper, and the wrapper's own (its ebp frame) where that is on the stack
     uint32_t esp = c->r[4], ebp = c->r[5], site[2] = {RD32(esp), 0};
     if (ebp > esp && ebp - esp < 0x10000 && ebp + 8 <= g_mem_size) site[1] = RD32(ebp + 4);
     else recomp_guest_returns(c, site, 2);
-    if (!slot->m->try_lock()) {
+    if (!guest_lock_try(*slot->m, me)) {
         uint32_t holder0 = slot->holder0.load(std::memory_order_relaxed), holder1 = slot->holder1.load(std::memory_order_relaxed);
         std::chrono::steady_clock::time_point t0 = std::chrono::steady_clock::now();
-        slot->m->lock();
+        guest_lock_wait(*slot->m, me);
         double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
         std::lock_guard<std::mutex> l(g_lockStatsLock);
         g_lockWaitMs += ms;
@@ -121,10 +122,17 @@ void k_EnterCriticalSection(X86* c) {
     }
     slot->holder0.store(site[0], std::memory_order_relaxed);
     slot->holder1.store(site[1], std::memory_order_relaxed);
+}
+void k_EnterCriticalSection(X86* c) {
+    uint32_t a = ARG(c, 0);
+    cs_enter(c, a, cs_slot(a));
     RET_STD(c, 1, 0);
 }
-void k_LeaveCriticalSection(X86* c) { cs_of(ARG(c, 0))->unlock(); RET_STD(c, 1, 0); }
-void k_TryEnterCriticalSection(X86* c) { RET_STD(c, 1, cs_of(ARG(c, 0))->try_lock() ? 1 : 0); }
+void k_LeaveCriticalSection(X86* c) {
+    guest_lock_leave(*cs_of(ARG(c, 0)), guest_thread(c)->id);
+    RET_STD(c, 1, 0);
+}
+void k_TryEnterCriticalSection(X86* c) { RET_STD(c, 1, guest_lock_try(*cs_of(ARG(c, 0)), guest_thread(c)->id) ? 1 : 0); }
 
 struct Event {
     std::mutex m;
@@ -570,10 +578,10 @@ void shims_lock_stats_dump(void (*line)(const char*)) {
     }
 }
 
-// BOI360_BENCH: a critical section entered and left on a host mutex, through the game's imports (as the lock
-// wrapper calls them, its frame pointer set), and the game's add-ref (0x407770: its lock object's lock and unlock,
-// each a virtual call into a wrapper around the section), ~2,000 a frame on the menu. scratch: 128 bytes of guest
-// stack the bench clears after.
+// BOI360_BENCH: a critical section entered and left on a host mutex, a GuestLock, through the game's imports (as
+// the lock wrapper calls them, its frame pointer set), and the game's add-ref (0x407770: its lock object's lock and
+// unlock, each a virtual call into a wrapper around the section), ~2,000 a frame on the menu. scratch: 128 bytes of
+// guest stack the bench clears after.
 void shims_bench_locks(X86* c, uint32_t scratch) {
     typedef std::chrono::steady_clock Clock;
     const uint32_t n = 200000;
@@ -592,6 +600,13 @@ void shims_bench_locks(X86* c, uint32_t scratch) {
         word.store(0, std::memory_order_release);
     }
     double atomic = std::chrono::duration<double, std::nano>(Clock::now() - t0).count() / n;
+    GuestLock guest;
+    t0 = Clock::now();
+    for (uint32_t i = 0; i < n; ++i) {
+        guest_lock_enter(guest, 1);
+        guest_lock_leave(guest, 1);
+    }
+    double light = std::chrono::duration<double, std::nano>(Clock::now() - t0).count() / n;
     // the section, then the reference-counted object: its count at +4, its lock object at +8 (the vtable at
     // 0xb3d508 whose +0Ch locks and +10h unlocks, a ready flag, the section)
     const uint32_t cs = scratch, ref = scratch + 0x40, lockObj = ref + 8;
@@ -629,9 +644,41 @@ void shims_bench_locks(X86* c, uint32_t scratch) {
     double addRef = std::chrono::duration<double, std::nano>(Clock::now() - t0).count() / n;
     c->r[4] = esp;
     c->r[5] = ebp;
-    recomp_log("bench: a critical section entered and left %.1f ns on a host mutex (an atomic swap and store %.1f ns), "
-               "%.1f ns through the game's imports (%.1f profiled); the game's add-ref %.1f ns", host, atomic, shims[0],
-               shims[1], addRef);
+    recomp_log("bench: a critical section entered and left %.1f ns on a host mutex (an atomic swap and store %.1f ns, "
+               "a GuestLock %.1f ns), %.1f ns through the game's imports (%.1f profiled); the game's add-ref %.1f ns",
+               host, atomic, light, shims[0], shims[1], addRef);
+}
+
+// The engine's lock object (vtable 0xb3d508: a ready flag at +4, its critical section at +8, whose byte at +0x18
+// says it is held): its lock (0x94f870, thiscall, a timeout argument, ret 4) and unlock (0x94f930) as the game's
+// code does them, for the reference counting that calls them ~2,300 times a frame (translate.py HOST): each was a
+// virtual call into translated code calling the section's import. Anything else (not ready: the game logs it; a
+// timeout; the section already held by this thread, where the game's code waits forever) runs the game's code.
+extern "C" int hle_lockobj_lock(X86* c) {
+    uint32_t self = c->r[1], esp = c->r[4];
+    if (!RD8(self + 4) || RD32(esp + 4) != 0xffffffffu) return 0;
+    uint32_t cs = RD32(self + 8);
+    CsSlot* slot = cs_slot(cs);
+    cs_enter(c, cs, slot);
+    if (RD8(cs + 0x18)) {
+        guest_lock_leave(*slot->m, guest_thread(c)->id);
+        return 0;
+    }
+    WR8(cs + 0x18, 1);
+    c->r[0] = 1;
+    c->r[4] = esp + 8;
+    return 1;
+}
+
+extern "C" int hle_lockobj_unlock(X86* c) {
+    uint32_t self = c->r[1];
+    if (!RD8(self + 4)) return 0;
+    uint32_t cs = RD32(self + 8);
+    WR8(cs + 0x18, 0);
+    guest_lock_leave(*cs_of(cs), guest_thread(c)->id);
+    c->r[0] = 0;
+    c->r[4] += 4;
+    return 1;
 }
 
 void shims_kernel32_register() { shim_register(kKernel, (int)(sizeof(kKernel) / sizeof(kKernel[0]))); }
