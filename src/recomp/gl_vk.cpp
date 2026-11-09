@@ -300,6 +300,7 @@ uint32_t g_imagesMade = 0;
 uint64_t g_uploaded = 0;
 double g_waitAcquire = 0, g_waitFence = 0, g_waitIdle = 0;   // ms: for the display, a frame's GPU work, read-backs
 double g_texMs = 0, g_materializeMs = 0;            // ms in glTexImage2D (convert, pack) and in making packed images
+uint64_t g_texBytes = 0;                            // RGBA bytes glTexImage2D was given
 typedef std::chrono::steady_clock WaitClock;
 double since(WaitClock::time_point t0) { return std::chrono::duration<double, std::milli>(WaitClock::now() - t0).count(); }
 void ring_high(VkDeviceSize v, VkDeviceSize i, VkDeviceSize u) {
@@ -1439,17 +1440,21 @@ uint64_t g_packedBytes = 0;                        // the compressed pixels held
 uint64_t g_textureBudget = 96ull << 20;
 
 // The packer thread compresses what glTexImage2D gave (a room's 5-14 MB took the game's thread ~10 ms on the PC,
-// several times that on the console); collect_packed takes its results at a frame's end.
+// several times that on the console); collect_packed takes its results at the next upload or a frame's end.
+// Until then the pixels stay as they came, so past PACK_HELD the uploads pack on their own thread: a new run gives
+// ~150 MB of textures in one frame, and holding them all ran the console out of memory (boot 12).
 struct PackJob {
     uint32_t name, gen;
     std::shared_ptr<std::vector<uint8_t> > raw;
     std::vector<uint8_t> lz;
 };
+enum { PACK_HELD = 16 << 20 };
 std::mutex g_packLock;
 std::condition_variable g_packWake;
 std::deque<PackJob> g_packQueue, g_packDone;
 bool g_packerStarted = false;
 uint32_t g_packGen = 0;
+size_t g_packHeld = 0;                              // the raw pixels of jobs not collected yet
 
 void packer_thread(void*) {
     if (recomp_config().threadStarted) recomp_config().threadStarted("packer");
@@ -1467,11 +1472,23 @@ void packer_thread(void*) {
     }
 }
 
+void collect_packed();
+
 void pack_later(uint32_t name, Texture& t, std::vector<uint8_t>& rgba) {
+    collect_packed();
+    t.gen = ++g_packGen;
+    if (g_packHeld + rgba.size() > PACK_HELD) {
+        log_once("gl_vk: the packer holds %u MB; uploads pack on the game's thread until it catches up",
+                 (unsigned)(g_packHeld >> 20));
+        lz_compress(&rgba[0], rgba.size(), t.lz);
+        t.packed = (uint32_t)t.lz.size();
+        g_packedBytes += t.lz.size();
+        return;
+    }
     t.raw.reset(new std::vector<uint8_t>());
     t.raw->swap(rgba);
-    t.gen = ++g_packGen;
     g_packedBytes += t.raw->size();
+    g_packHeld += t.raw->size();
     std::lock_guard<std::mutex> l(g_packLock);
     if (!g_packerStarted) {
         g_packerStarted = true;
@@ -1492,6 +1509,7 @@ void collect_packed() {
         done.swap(g_packDone);
     }
     for (size_t i = 0; i < done.size(); ++i) {
+        g_packHeld -= done[i].raw->size();
         std::map<uint32_t, Texture>::iterator it = g_textures.find(done[i].name);
         if (it == g_textures.end() || !it->second.raw || it->second.gen != done[i].gen) continue;
         Texture& t = it->second;
@@ -2116,6 +2134,7 @@ void vk_glTexImage2D(X86* c) {
     t.uploadFrame = gl_frame_count();
     drop_packed(t);
     if (w <= 0 || h <= 0) return;
+    if (pixels) g_texBytes += (uint64_t)w * h * 4;
     std::vector<uint8_t> rgba;
     if (pixels && g_lazyTextures && !t.target) {
         // packed until a draw samples it (materialize); a GPU image it had goes
@@ -2494,6 +2513,7 @@ void gl_vk_work(GlVkWork* w) {
     w->waitIdle = g_waitIdle;
     w->texMs = g_texMs;
     w->materializeMs = g_materializeMs;
+    w->texBytes = g_texBytes;
 }
 uint64_t gl_vk_packed_bytes() { return g_packedBytes; }
 

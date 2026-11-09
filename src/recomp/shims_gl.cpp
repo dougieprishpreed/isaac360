@@ -301,11 +301,11 @@ static void log_slow_frame(double game, double present) {
     if (game + present > slowMs && g_frames > 3 && g_times.slowLogged < 12) {
         ++g_times.slowLogged;
         recomp_log("slow frame %u: game %.1f ms, present %.1f; read %llu KB (%llu KB from the drive in %.1f ms), %u images "
-                   "made, %llu KB uploaded; textures %.1f ms, packed images %.1f; waited for the GPU %.1f, read-backs "
+                   "made, %llu KB uploaded; textures %.1f ms for %llu KB, packed images %.1f; waited for the GPU %.1f, read-backs "
                    "%.1f, locks %.1f ms", g_frames, game, present, (unsigned long long)((bytes - lastBytes) >> 10),
                    (unsigned long long)((disk - lastDiskBytes) >> 10), diskMs - lastDisk, w.imagesMade - last.imagesMade,
                    (unsigned long long)((w.uploaded - last.uploaded) >> 10), w.texMs - last.texMs,
-                   w.materializeMs - last.materializeMs, w.waitFence - last.waitFence, w.waitIdle - last.waitIdle,
+                   (unsigned long long)((w.texBytes - last.texBytes) >> 10), w.materializeMs - last.materializeMs, w.waitFence - last.waitFence, w.waitIdle - last.waitIdle,
                    locks - lastLocks);
     }
     lastBytes = bytes;
@@ -362,7 +362,8 @@ void gl_present() {
         recomp_log("quitting at the end of frame %u", g_frames);
         if (g_hostQuit) g_hostQuit();
     }
-    if (g_frames % 60 == 0) vf_trim(60);                // archive blocks past the budget or unread for a minute go
+    // archive blocks past the budget or unread for a minute go; all but this second's when the console runs short
+    if (g_frames % 60 == 0) vf_trim(g_hostFreeMemory && g_hostFreeMemory() < (48u << 20) ? 1 : 60);
     if (g_frames <= 3 || g_frames % 600 == 0) {
         // seconds since the first frame: loading shows as the gap between frames 1 and 2
         static std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();

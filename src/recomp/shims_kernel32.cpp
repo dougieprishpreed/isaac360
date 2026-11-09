@@ -570,4 +570,68 @@ void shims_lock_stats_dump(void (*line)(const char*)) {
     }
 }
 
+// BOI360_BENCH: a critical section entered and left on a host mutex, through the game's imports (as the lock
+// wrapper calls them, its frame pointer set), and the game's add-ref (0x407770: its lock object's lock and unlock,
+// each a virtual call into a wrapper around the section), ~2,000 a frame on the menu. scratch: 128 bytes of guest
+// stack the bench clears after.
+void shims_bench_locks(X86* c, uint32_t scratch) {
+    typedef std::chrono::steady_clock Clock;
+    const uint32_t n = 200000;
+    std::recursive_mutex m;
+    Clock::time_point t0 = Clock::now();
+    for (uint32_t i = 0; i < n; ++i) {
+        m.lock();
+        m.unlock();
+    }
+    double host = std::chrono::duration<double, std::nano>(Clock::now() - t0).count() / n;
+    std::atomic<uint32_t> word(0);
+    t0 = Clock::now();
+    for (uint32_t i = 0; i < n; ++i) {
+        uint32_t expected = 0;
+        word.compare_exchange_strong(expected, 1, std::memory_order_acquire);
+        word.store(0, std::memory_order_release);
+    }
+    double atomic = std::chrono::duration<double, std::nano>(Clock::now() - t0).count() / n;
+    // the section, then the reference-counted object: its count at +4, its lock object at +8 (the vtable at
+    // 0xb3d508 whose +0Ch locks and +10h unlocks, a ready flag, the section)
+    const uint32_t cs = scratch, ref = scratch + 0x40, lockObj = ref + 8;
+    WR16(ref + 4, 1);
+    WR32(lockObj, 0x00b3d508u);
+    WR8(lockObj + 4, 1);
+    WR32(lockObj + 8, cs);
+    const uint32_t enter = shim_proc_address("kernel32.dll", "EnterCriticalSection");
+    const uint32_t leave = shim_proc_address("kernel32.dll", "LeaveCriticalSection");
+    const uint32_t esp = c->r[4], ebp = c->r[5];
+    c->r[5] = esp + 0x10;
+    double shims[2];
+    int profile = g_lockProfile < 0 ? (getenv("BOI360_PROFILE") ? 1 : 0) : g_lockProfile;
+    for (int p = 0; p < 2; ++p) {
+        g_lockProfile = p;
+        t0 = Clock::now();
+        for (uint32_t i = 0; i < n; ++i) {
+            c->r[4] -= 8;
+            WR32(c->r[4] + 4, cs);
+            WR32(c->r[4], 0x401000u);
+            x86_call(c, enter);
+            c->r[4] -= 8;
+            WR32(c->r[4] + 4, cs);
+            WR32(c->r[4], 0x401000u);
+            x86_call(c, leave);
+        }
+        shims[p] = std::chrono::duration<double, std::nano>(Clock::now() - t0).count() / n;
+    }
+    g_lockProfile = profile;
+    t0 = Clock::now();
+    for (uint32_t i = 0; i < n; ++i) {
+        c->r[1] = ref;
+        guest_call(c, 0x407770, 0, 0, true);
+    }
+    double addRef = std::chrono::duration<double, std::nano>(Clock::now() - t0).count() / n;
+    c->r[4] = esp;
+    c->r[5] = ebp;
+    recomp_log("bench: a critical section entered and left %.1f ns on a host mutex (an atomic swap and store %.1f ns), "
+               "%.1f ns through the game's imports (%.1f profiled); the game's add-ref %.1f ns", host, atomic, shims[0],
+               shims[1], addRef);
+}
+
 void shims_kernel32_register() { shim_register(kKernel, (int)(sizeof(kKernel) / sizeof(kKernel[0]))); }

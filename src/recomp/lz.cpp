@@ -58,6 +58,8 @@ void lz_compress(const uint8_t* src, size_t n, std::vector<uint8_t>& out) {
         ++i;
     }
     put_sequence(out, src + anchor, n - anchor, 0, 0);
+    // a texture's flat areas pack to a few percent: the reserve's n / 4 would stay held beside them
+    if (out.capacity() - out.size() > out.size() / 8) std::vector<uint8_t>(out.begin(), out.end()).swap(out);
 }
 
 bool lz_decompress(const uint8_t* src, size_t srcLen, uint8_t* dst, size_t n) {

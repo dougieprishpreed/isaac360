@@ -757,6 +757,8 @@ static double bench_ns(BenchClock::time_point t0, uint32_t n) {
     return std::chrono::duration<double, std::nano>(BenchClock::now() - t0).count() / n;
 }
 
+void shims_bench_locks(X86* c, uint32_t scratch);  // shims_kernel32.cpp
+
 void recomp_bench(X86* c) {
     const uint32_t n = 1000000;
     uint32_t sink = 0;
@@ -832,6 +834,7 @@ void recomp_bench(X86* c) {
         double fl = bench_ns(t0, n);
         recomp_log("bench: a float loaded from guest memory, added to and stored back %.1f ns", fl);
     }
+    shims_bench_locks(c, base + 0x100);
     memset(g_mem + base, 0, top - base);
     c->r[4] = top;
     recomp_log("bench: done (%u)", sink & 1);
