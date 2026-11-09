@@ -501,7 +501,7 @@ void s_set_errno(X86* c) { RET_CDECL(c, 0); }
 void s_exit(X86* c) {
     recomp_log("game exit(%d)", (int)ARG(c, 0));
     vf_drain();                         // the files the game wrote reach the drive
-    fflush(stdout);
+    recomp_log_drain();
     _exit((int)ARG(c, 0));
 }
 void s_abort(X86* c) { recomp_fatal(c, "abort()"); }

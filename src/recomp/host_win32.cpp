@@ -84,5 +84,7 @@ int main(int argc, char** argv) {
         gl_vk_configure(hooks);
     }
     shims_register_all();
-    return recomp_run(cfg);
+    int code = recomp_run(cfg);
+    recomp_log_drain();
+    return code;
 }

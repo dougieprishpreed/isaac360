@@ -41,6 +41,7 @@ struct GlVkWork {
     uint32_t imagesMade;
     uint64_t uploaded;
     double waitAcquire, waitFence, waitIdle;
+    double texMs, materializeMs;    // in glTexImage2D (converting and packing), making packed textures' images
 };
 void gl_vk_work(GlVkWork* w);
 uint64_t gl_vk_packed_bytes();      // host memory held by packed texture pixels (gl_vk.cpp, lazy textures)

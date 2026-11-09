@@ -42,8 +42,10 @@ PATCHES = {
 # which runs first and returns nonzero when it did the call (eax set, the return address popped), zero to let the
 # translated code run. The game's stb_vorbis decodes music on its sound thread holding the sound manager's lock;
 # translated, that decode is too slow on the console and the main thread waits on the lock
-# (src/recomp/hle_vorbis.cpp decodes ahead natively).
+# (src/recomp/hle_vorbis.cpp decodes ahead natively). libpng's row unfiltering runs per byte over every texture a
+# room loads (src/recomp/hle_png.cpp).
 HOST = {
+    0x9b2b60: 'hle_png_filter_row',           # png_read_filter_row (row_info edx; row, prev_row, filter on the stack)
     0x9aa630: 'hle_vorbis_get_samples',       # stb_vorbis_get_samples_short_interleaved (f ecx, channels edx)
     0x9a3e50: 'hle_vorbis_set_file_offset',   # set_file_offset (f ecx, loc edx): stb_vorbis_seek_start's start
     0x9a7910: 'hle_vorbis_pump_first_frame',  # vorbis_pump_first_frame (f ecx): stb_vorbis_seek_start's restart

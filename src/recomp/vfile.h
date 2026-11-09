@@ -34,7 +34,10 @@ void vf_drain();
 void vf_stats(uint64_t* opens, uint64_t* bytes, uint64_t* disk);
 // the shared readers' cached blocks, in bytes
 uint32_t vf_cached_bytes();
-// called now and then (the end of every 60th frame): blocks no read touched in the last idleCalls calls go
+// ms spent reading the drive so far (shared readers)
+double vf_disk_ms();
+// called now and then (the end of every 60th frame): the least recently read blocks past the cache's budget go,
+// and blocks no read touched in the last idleCalls calls
 void vf_trim(uint32_t idleCalls);
 // per shared reader: reads, bytes the game read, bytes read from the drive (BOI360_TRACE_READS)
 void vf_dump_readers(void (*line)(const char*));

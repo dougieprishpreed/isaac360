@@ -15,6 +15,10 @@
 #include "lz.h"
 #include <algorithm>
 #include <chrono>
+#include <condition_variable>
+#include <deque>
+#include <memory>
+#include <mutex>
 #include <map>
 #include <set>
 #include <stdarg.h>
@@ -141,8 +145,11 @@ struct Texture {
     uint32_t packed;                    // its pixels' size compressed (lz.h)
     // A texture the game gave pixels keeps them compressed (lz.h) and gets its GPU image only when a draw samples
     // it: the game loads far more than a screen draws (Basement I: 104 of 149 MB never drawn, 3.4 MB packed).
-    // Images not drawn for a while go again when the GPU's total passes the budget (evict_textures).
+    // Images not drawn for a while go again when the GPU's total passes the budget (evict_textures). The packing
+    // runs on the packer thread: until it is done the pixels are kept as they came (raw).
     std::vector<uint8_t> lz;
+    std::shared_ptr<std::vector<uint8_t> > raw;
+    uint32_t gen;                       // which upload the packer's result belongs to
     int lw, lh;
 };
 
@@ -292,6 +299,7 @@ VkDeviceSize g_ringHigh[3] = {0, 0, 0};            // the most of the vertex, in
 uint32_t g_imagesMade = 0;
 uint64_t g_uploaded = 0;
 double g_waitAcquire = 0, g_waitFence = 0, g_waitIdle = 0;   // ms: for the display, a frame's GPU work, read-backs
+double g_texMs = 0, g_materializeMs = 0;            // ms in glTexImage2D (convert, pack) and in making packed images
 typedef std::chrono::steady_clock WaitClock;
 double since(WaitClock::time_point t0) { return std::chrono::duration<double, std::milli>(WaitClock::now() - t0).count(); }
 void ring_high(VkDeviceSize v, VkDeviceSize i, VkDeviceSize u) {
@@ -1430,15 +1438,93 @@ uint64_t g_packedBytes = 0;                        // the compressed pixels held
 // images above this total make the least recently drawn packed textures give their images back (BOI360_TEX_BUDGET MB)
 uint64_t g_textureBudget = 96ull << 20;
 
+// The packer thread compresses what glTexImage2D gave (a room's 5-14 MB took the game's thread ~10 ms on the PC,
+// several times that on the console); collect_packed takes its results at a frame's end.
+struct PackJob {
+    uint32_t name, gen;
+    std::shared_ptr<std::vector<uint8_t> > raw;
+    std::vector<uint8_t> lz;
+};
+std::mutex g_packLock;
+std::condition_variable g_packWake;
+std::deque<PackJob> g_packQueue, g_packDone;
+bool g_packerStarted = false;
+uint32_t g_packGen = 0;
+
+void packer_thread(void*) {
+    if (recomp_config().threadStarted) recomp_config().threadStarted("packer");
+    std::unique_lock<std::mutex> l(g_packLock);
+    for (;;) {
+        while (g_packQueue.empty()) g_packWake.wait(l);
+        PackJob job;
+        std::swap(job, g_packQueue.front());
+        g_packQueue.pop_front();
+        l.unlock();
+        lz_compress(&(*job.raw)[0], job.raw->size(), job.lz);
+        l.lock();
+        g_packDone.push_back(PackJob());
+        std::swap(g_packDone.back(), job);
+    }
+}
+
+void pack_later(uint32_t name, Texture& t, std::vector<uint8_t>& rgba) {
+    t.raw.reset(new std::vector<uint8_t>());
+    t.raw->swap(rgba);
+    t.gen = ++g_packGen;
+    g_packedBytes += t.raw->size();
+    std::lock_guard<std::mutex> l(g_packLock);
+    if (!g_packerStarted) {
+        g_packerStarted = true;
+        host_thread_start(packer_thread, 0, 256u << 10);
+    }
+    g_packQueue.push_back(PackJob());
+    g_packQueue.back().name = name;
+    g_packQueue.back().gen = t.gen;
+    g_packQueue.back().raw = t.raw;
+    g_packWake.notify_one();
+}
+
+// the packer's finished textures keep their packed pixels and let the raw ones go (a newer upload's are newer)
+void collect_packed() {
+    std::deque<PackJob> done;
+    {
+        std::lock_guard<std::mutex> l(g_packLock);
+        done.swap(g_packDone);
+    }
+    for (size_t i = 0; i < done.size(); ++i) {
+        std::map<uint32_t, Texture>::iterator it = g_textures.find(done[i].name);
+        if (it == g_textures.end() || !it->second.raw || it->second.gen != done[i].gen) continue;
+        Texture& t = it->second;
+        g_packedBytes -= t.raw->size();
+        t.raw.reset();
+        t.lz.swap(done[i].lz);
+        t.packed = (uint32_t)t.lz.size();
+        g_packedBytes += t.lz.size();
+    }
+}
+
+bool has_pixels(const Texture& t) { return t.raw || !t.lz.empty(); }
+
 void drop_packed(Texture& t) {
     g_packedBytes -= t.lz.size();
     std::vector<uint8_t>().swap(t.lz);
+    if (t.raw) g_packedBytes -= t.raw->size();
+    t.raw.reset();
 }
 
 // the GPU image of a packed texture, made from its pixels; outside a render pass (the upload ends it)
 bool materialize(Texture& t) {
-    if (t.img.image || t.lz.empty()) return t.img.image != VK_NULL_HANDLE;
+    if (t.img.image || !has_pixels(t)) return t.img.image != VK_NULL_HANDLE;
+    WaitClock::time_point t0 = WaitClock::now();
+    struct Timed {
+        WaitClock::time_point t0;
+        ~Timed() { g_materializeMs += since(t0); }
+    } timed = {t0};
     if (!make_image(t.img, t.lw, t.lh, (VkFormat)COLOR_FORMAT, false)) return false;
+    if (t.raw) {                                        // not packed yet: as they came
+        upload_rgba(t.img, 0, 0, t.lw, t.lh, &(*t.raw)[0], true);
+        return true;
+    }
     std::vector<uint8_t> rgba((size_t)t.lw * t.lh * 4);
     if (!lz_decompress(&t.lz[0], t.lz.size(), &rgba[0], rgba.size())) {
         log_once("lz: a packed texture did not unpack");
@@ -1456,7 +1542,7 @@ bool reclaim_images() {
     uint64_t freed = 0;
     for (std::map<uint32_t, Texture>::iterator it = g_textures.begin(); it != g_textures.end(); ++it) {
         Texture& t = it->second;
-        if (!t.img.image || t.lz.empty() || t.target || t.drawFrame + 1 >= gl_frame_count()) continue;
+        if (!t.img.image || !has_pixels(t) || t.target || t.drawFrame + 1 >= gl_frame_count()) continue;
         if (g_inPass && t.img.view == g_passKey.color) end_pass();
         freed += t.img.bytes;
         retire_image(t.img);
@@ -1478,7 +1564,7 @@ void evict_textures() {
     if (g_hostFreeMemory && gl_frame_count() % 30 == 0 && g_hostFreeMemory() < (32u << 20)) {
         std::vector<std::pair<uint32_t, uint32_t> > idle;     // (last drawn frame, name)
         for (std::map<uint32_t, Texture>::iterator it = g_textures.begin(); it != g_textures.end(); ++it)
-            if (it->second.img.image && !it->second.lz.empty() && !it->second.target &&
+            if (it->second.img.image && has_pixels(it->second) && !it->second.target &&
                 it->second.drawFrame + 60 < gl_frame_count())
                 idle.push_back(std::make_pair(it->second.drawFrame, it->first));
         std::sort(idle.begin(), idle.end());
@@ -1495,7 +1581,7 @@ void evict_textures() {
     if (g_imageBytes <= g_textureBudget) return;
     std::vector<std::pair<uint32_t, uint32_t> > idle;     // (last drawn frame, name)
     for (std::map<uint32_t, Texture>::iterator it = g_textures.begin(); it != g_textures.end(); ++it)
-        if (it->second.img.image && !it->second.lz.empty() && !it->second.target &&
+        if (it->second.img.image && has_pixels(it->second) && !it->second.target &&
             it->second.drawFrame + 1 < gl_frame_count())
             idle.push_back(std::make_pair(it->second.drawFrame, it->first));
     std::sort(idle.begin(), idle.end());
@@ -1561,7 +1647,7 @@ void draw(uint32_t mode, int count, uint32_t indexType, uint32_t indices, int fi
             if (p.uniforms[u].bytes >= 0) continue;
             uint32_t unit = (uint32_t)p.samplerUnit[p.uniforms[u].offset];
             std::map<uint32_t, Texture>::iterator it = g_textures.find(unit < MAX_UNITS ? g_units[unit] : 0);
-            if (it != g_textures.end() && !it->second.img.image && !it->second.lz.empty()) materialize(it->second);
+            if (it != g_textures.end() && !it->second.img.image && has_pixels(it->second)) materialize(it->second);
         }
     f = &g_frames[g_frame];
     if (f->vOff + vbytes > VERTEX_RING || f->iOff + ibytes > INDEX_RING) flush_wait();
@@ -1940,6 +2026,7 @@ Texture& texture(uint32_t name) {
     t.target = t.data = false;
     t.uploadFrame = t.format = 0;
     t.drawFrame = t.draws = t.packed = 0;
+    t.gen = 0;
     t.lw = t.lh = 0;
     return t;
 }
@@ -1988,6 +2075,10 @@ bool to_rgba(uint32_t format, uint32_t type, int w, int h, uint32_t src, std::ve
     }
     out.resize((size_t)w * h * 4);
     int pitch = (w * comps + 3) & ~3;
+    if (format == GL_RGBA) {                            // the game's textures: rows as they are
+        for (int y = 0; y < h; ++y) memcpy(&out[(size_t)y * w * 4], g_mem + src + (size_t)y * pitch, (size_t)w * 4);
+        return true;
+    }
     for (int y = 0; y < h; ++y) {
         const uint8_t* s = g_mem + src + (size_t)y * pitch;
         uint8_t* d = &out[(size_t)y * w * 4];
@@ -2008,6 +2099,10 @@ bool to_rgba(uint32_t format, uint32_t type, int w, int h, uint32_t src, std::ve
 
 // glTexImage2D(target, level, internalformat, w, h, border, format, type, pixels)
 void vk_glTexImage2D(X86* c) {
+    struct Timed {
+        WaitClock::time_point t0;
+        ~Timed() { g_texMs += since(t0); }
+    } timed = {WaitClock::now()};
     uint32_t level = ARG(c, 1), format = ARG(c, 6), type = ARG(c, 7), pixels = ARG(c, 8);
     int w = (int)ARG(c, 3), h = (int)ARG(c, 4);
     RET_STD(c, 9, 0);
@@ -2025,11 +2120,10 @@ void vk_glTexImage2D(X86* c) {
     if (pixels && g_lazyTextures && !t.target) {
         // packed until a draw samples it (materialize); a GPU image it had goes
         if (!to_rgba(format, type, w, h, pixels, rgba)) rgba.assign((size_t)w * h * 4, 0);
-        lz_compress(&rgba[0], rgba.size(), t.lz);
         t.lw = w;
         t.lh = h;
-        t.packed = (uint32_t)t.lz.size();
-        g_packedBytes += t.lz.size();
+        t.packed = 0;
+        pack_later(g_units[g_activeUnit], t, rgba);
         if (t.img.image) {
             if (g_inPass && t.img.view == g_passKey.color) end_pass();
             retire_image(t.img);
@@ -2398,6 +2492,8 @@ void gl_vk_work(GlVkWork* w) {
     w->waitAcquire = g_waitAcquire;
     w->waitFence = g_waitFence;
     w->waitIdle = g_waitIdle;
+    w->texMs = g_texMs;
+    w->materializeMs = g_materializeMs;
 }
 uint64_t gl_vk_packed_bytes() { return g_packedBytes; }
 
@@ -2441,7 +2537,7 @@ void gl_vk_write_texture_list() {
     FILE* f = fopen((recomp_out_dir() + path).c_str(), "w");
     if (!f) return;
     for (std::map<uint32_t, Texture>::iterator it = g_textures.begin(); it != g_textures.end(); ++it)
-        if (it->second.img.image || !it->second.lz.empty())
+        if (it->second.img.image || has_pixels(it->second))
             fprintf(f, "%u %dx%d %u KB %s%s fmt %x frame %u drawn %u last %u packed %u KB\n", it->first,
                     it->second.img.image ? it->second.img.w : it->second.lw, it->second.img.image ? it->second.img.h : it->second.lh,
                     (unsigned)(it->second.img.bytes >> 10),
@@ -2522,6 +2618,7 @@ void gl_vk_present() {
     memset(&g_counts, 0, sizeof(g_counts));
     begin_recording();
     end_pass();
+    collect_packed();
     evict_textures();
     Frame& f = g_frames[g_frame];
     uint32_t image = 0;
@@ -2558,13 +2655,12 @@ void gl_vk_present() {
         vkCmdClearAttachments(f.cmd, 1, &att, 1, &cr);
         vkCmdBindPipeline(f.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, g_presentPipe);
         vkCmdBindDescriptorSets(f.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, g_presentLayout, 0, 1, &g_presentSet, 0, 0);
-        // a frame smaller than the output is enlarged k times with nearest pixels first (shaders.py PRESENT_FS): the
-        // 960x540 frame shows as the game's own 1920x1080 picture would, filtered to 1280x720
-        int k = (int)(vp.height / g_defColor.h + 0.999f);
-        if (k < 1) k = 1;
-        if (k > 4) k = 4;
-        const float pc[8] = {(float)(g_defColor.w * k), (float)(g_defColor.h * k), 1.0f / g_defColor.w, 1.0f / g_defColor.h,
-                             1.0f / k, 0.0f, 0.0f, 0.0f};
+        // each output pixel the area-weighted average of the frame's pixels under it, or BOI360_PRESENT_FILTER=doubled
+        // (shaders.py PRESENT_FS)
+        static const float doubled = getenv("BOI360_PRESENT_FILTER") && !strcmp(getenv("BOI360_PRESENT_FILTER"), "doubled")
+                                         ? 1.0f : 0.0f;
+        const float pc[8] = {(float)g_defColor.w, (float)g_defColor.h, 1.0f / g_defColor.w, 1.0f / g_defColor.h,
+                             g_defColor.w / vp.width, g_defColor.h / vp.height, doubled, 0.0f};
         vkCmdPushConstants(f.cmd, g_presentLayout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(pc), pc);
         vkCmdSetViewport(f.cmd, 0, 1, &vp);
         vkCmdSetScissor(f.cmd, 0, 1, &sc);

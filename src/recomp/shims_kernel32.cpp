@@ -190,8 +190,16 @@ void k_TlsAlloc(X86* c) {
     RET_STD(c, 0, g_tlsNext++);
 }
 void k_TlsFree(X86* c) { RET_STD(c, 1, 1); }
-void k_TlsGetValue(X86* c) { RET_STD(c, 1, t_tls[ARG(c, 0)]); }
-void k_TlsSetValue(X86* c) { t_tls[ARG(c, 0)] = ARG(c, 1); RET_STD(c, 2, 1); }
+void k_TlsGetValue(X86* c) {
+    uint32_t i = ARG(c, 0);
+    RET_STD(c, 1, i < 128 ? guest_thread(c)->tls[i] : t_tls[i]);
+}
+void k_TlsSetValue(X86* c) {
+    uint32_t i = ARG(c, 0);
+    if (i < 128) guest_thread(c)->tls[i] = ARG(c, 1);
+    else t_tls[i] = ARG(c, 1);
+    RET_STD(c, 2, 1);
+}
 
 // ------------------------------------------------------------------------------------------------ time
 std::chrono::steady_clock::time_point g_t0 = std::chrono::steady_clock::now();
@@ -240,7 +248,7 @@ void k_SetThreadPriority(X86* c) { RET_STD(c, 2, 1); }
 void k_TerminateThread(X86* c) { RET_STD(c, 2, 1); }
 void k_TerminateProcess(X86* c) {
     recomp_log("TerminateProcess(%u)", ARG(c, 1));
-    fflush(stdout);
+    recomp_log_drain();
     _exit((int)ARG(c, 1));
 }
 void k_SetThreadExecutionState(X86* c) { RET_STD(c, 1, 1); }

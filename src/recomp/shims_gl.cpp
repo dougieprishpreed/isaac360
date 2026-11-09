@@ -284,28 +284,33 @@ static void log_times() {
     t.work = w;
 }
 
-// a frame over 50 ms (up to 12 each 600 frames): what it did, to tell loading from waiting
+// a frame over 50 ms (BOI360_SLOW_MS; up to 12 each 600 frames): what it did, to tell loading from waiting
 static void log_slow_frame(double game, double present) {
-    static uint64_t lastBytes = 0, lastDisk = 0;
+    static uint64_t lastBytes = 0, lastDiskBytes = 0;
     static GlVkWork last;
-    static double lastLocks = 0;
+    static double lastLocks = 0, lastDisk = 0;
     static bool profiling = getenv("BOI360_PROFILE") != 0;
+    double diskMs = vf_disk_ms();
     uint64_t opens, bytes, disk;
     vf_stats(&opens, &bytes, &disk);
     GlVkWork w;
     memset(&w, 0, sizeof(w));
     if (gl_vk_enabled()) gl_vk_work(&w);
     double locks = profiling ? shims_lock_wait_ms() : 0;
-    if (game + present > 50.0 && g_frames > 3 && g_times.slowLogged < 12) {
+    static double slowMs = getenv("BOI360_SLOW_MS") ? atof(getenv("BOI360_SLOW_MS")) : 50.0;
+    if (game + present > slowMs && g_frames > 3 && g_times.slowLogged < 12) {
         ++g_times.slowLogged;
-        recomp_log("slow frame %u: game %.1f ms, present %.1f; read %llu KB (%llu KB from the drive), %u images made, "
-                   "%llu KB uploaded; waited for the GPU %.1f, read-backs %.1f, locks %.1f ms", g_frames, game, present,
-                   (unsigned long long)((bytes - lastBytes) >> 10), (unsigned long long)((disk - lastDisk) >> 10),
-                   w.imagesMade - last.imagesMade, (unsigned long long)((w.uploaded - last.uploaded) >> 10),
-                   w.waitFence - last.waitFence, w.waitIdle - last.waitIdle, locks - lastLocks);
+        recomp_log("slow frame %u: game %.1f ms, present %.1f; read %llu KB (%llu KB from the drive in %.1f ms), %u images "
+                   "made, %llu KB uploaded; textures %.1f ms, packed images %.1f; waited for the GPU %.1f, read-backs "
+                   "%.1f, locks %.1f ms", g_frames, game, present, (unsigned long long)((bytes - lastBytes) >> 10),
+                   (unsigned long long)((disk - lastDiskBytes) >> 10), diskMs - lastDisk, w.imagesMade - last.imagesMade,
+                   (unsigned long long)((w.uploaded - last.uploaded) >> 10), w.texMs - last.texMs,
+                   w.materializeMs - last.materializeMs, w.waitFence - last.waitFence, w.waitIdle - last.waitIdle,
+                   locks - lastLocks);
     }
     lastBytes = bytes;
-    lastDisk = disk;
+    lastDiskBytes = disk;
+    lastDisk = diskMs;
     last = w;
     lastLocks = locks;
 }
@@ -357,7 +362,7 @@ void gl_present() {
         recomp_log("quitting at the end of frame %u", g_frames);
         if (g_hostQuit) g_hostQuit();
     }
-    if (g_frames % 60 == 0) vf_trim(4);                 // archive blocks unread for ~4 s give their memory back
+    if (g_frames % 60 == 0) vf_trim(60);                // archive blocks past the budget or unread for a minute go
     if (g_frames <= 3 || g_frames % 600 == 0) {
         // seconds since the first frame: loading shows as the gap between frames 1 and 2
         static std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();

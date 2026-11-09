@@ -10,6 +10,8 @@
 #include <string.h>
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
+#include <deque>
 #include <thread>
 #include <unordered_map>
 #include <vector>
@@ -133,8 +135,34 @@ std::vector<std::string> recomp_host_dirs(const std::string& p) {
 }
 
 // ------------------------------------------------------------------------------------------------ log
+// Lines go to a writer thread, which writes and flushes them at once: on the console each flush is a USB write of
+// milliseconds, and the 600-frame summary (sixty lines) held the game's thread ~600 ms. recomp_log_drain waits for
+// the queue (before an exit or a fatal stop).
 static FILE* g_log = 0;
 static std::mutex g_logLock;
+static std::condition_variable g_logWake, g_logIdle;
+static std::deque<std::string> g_logQueue;
+static bool g_logWriter = false, g_logWriting = false;
+
+static void log_writer(void*) {
+    std::unique_lock<std::mutex> l(g_logLock);
+    for (;;) {
+        while (g_logQueue.empty()) g_logWake.wait(l);
+        std::deque<std::string> lines;
+        lines.swap(g_logQueue);
+        g_logWriting = true;
+        l.unlock();
+        for (size_t i = 0; i < lines.size(); ++i) {
+            fputs(lines[i].c_str(), stdout);
+            if (g_log) fputs(lines[i].c_str(), g_log);
+        }
+        fflush(stdout);
+        if (g_log) fflush(g_log);
+        l.lock();
+        g_logWriting = false;
+        g_logIdle.notify_all();
+    }
+}
 
 void recomp_log(const char* fmt, ...) {
     char line[2048];
@@ -145,12 +173,17 @@ void recomp_log(const char* fmt, ...) {
     size_t n = strlen(line);
     if (!n || line[n - 1] != '\n') strcat(line, "\n");
     std::lock_guard<std::mutex> g(g_logLock);
-    fputs(line, stdout);
-    fflush(stdout);
-    if (g_log) {
-        fputs(line, g_log);
-        fflush(g_log);
+    if (!g_logWriter) {
+        g_logWriter = true;
+        host_thread_start(log_writer, 0, 128u << 10);
     }
+    g_logQueue.push_back(line);
+    g_logWake.notify_one();
+}
+
+void recomp_log_drain() {
+    std::unique_lock<std::mutex> l(g_logLock);
+    while (!g_logQueue.empty() || g_logWriting) g_logIdle.wait(l);
 }
 
 // guest call stack: return addresses on the guest stack that follow a call into translated code
@@ -178,8 +211,7 @@ void recomp_fatal(X86* c, const char* fmt, ...) {
                    c->r[3], c->r[4], c->r[5], c->r[6], c->r[7]);
         guest_backtrace(c);
     }
-    if (g_log) fflush(g_log);
-    fflush(stdout);
+    recomp_log_drain();
     _exit(3);
 }
 
@@ -488,27 +520,36 @@ void shim_register(const ShimDef* defs, int count) {
 
 uint32_t thunk_for(ShimFn fn, const char* name) { return add_thunk(fn, name); }
 
-static thread_local const char* t_thunkName = "";
-const char* current_thunk_name() { return t_thunkName; }
+// Per guest thread, beside its CPU state (make_cpu): GCC for the console has no native TLS, and each thread_local
+// access there is a call to __emutls_get_address; the dispatcher below touched five per import call.
+struct HostCpu {
+    X86 cpu;                                // first: an X86* is its HostCpu*
+    GuestThread thread;
+};
+GuestThread* guest_thread(X86* c) { return &((HostCpu*)c)->thread; }
+static X86* thread_cpu();
+const char* current_thunk_name() {
+    X86* c = thread_cpu();
+    return c ? guest_thread(c)->thunkName : "";
+}
 
 // what each guest thread is in, for the console's watchdog (recomp_sample_threads): its CPU and the shim it is in
 static const int kSampledThreads = 8;
 static X86* volatile g_sampleCpu[kSampledThreads];
 static const char* volatile g_sampleThunk[kSampledThreads];
 static const char* g_sampleName[kSampledThreads];
-static thread_local int t_sampleSlot = -1;
-
 static void call_thunk(X86* c, uint32_t target) {
     uint32_t i = (target - kThunkBase) / 16;
     if (i >= g_thunks.size()) recomp_fatal(c, "call to a bad thunk %08x", target);
     Thunk& t = g_thunks[i];
     if (t.fn == missing_import) recomp_fatal(c, "import %s has no shim", t.name.c_str());
-    const char* outer = t_thunkName;
-    t_thunkName = t.name.c_str();
-    if (t_sampleSlot >= 0) g_sampleThunk[t_sampleSlot] = t_thunkName;
+    GuestThread* th = guest_thread(c);
+    const char* outer = th->thunkName;
+    th->thunkName = t.name.c_str();
+    if (th->sampleSlot >= 0) g_sampleThunk[th->sampleSlot] = th->thunkName;
     t.fn(c);
-    t_thunkName = outer;
-    if (t_sampleSlot >= 0) g_sampleThunk[t_sampleSlot] = outer;
+    th->thunkName = outer;
+    if (th->sampleSlot >= 0) g_sampleThunk[th->sampleSlot] = outer;
 }
 
 static void sample_register(X86* c, const char* name) {
@@ -518,7 +559,7 @@ static void sample_register(X86* c, const char* name) {
     g_sampleName[slot] = name;
     g_sampleThunk[slot] = "";
     g_sampleCpu[slot] = c;
-    t_sampleSlot = slot;
+    guest_thread(c)->sampleSlot = slot;
 }
 
 static bool guest_code(uint32_t v) {
@@ -838,15 +879,19 @@ void x86_trace_enter(X86* c, uint32_t fn) {
 void x86_trace_leave(X86* c, uint32_t fn, uint32_t eax) { (void)c; recomp_log("< %08x = %08x", fn, eax); }
 
 // ------------------------------------------------------------------------------------------------ threads
-static thread_local X86* t_cpu = 0;
+static thread_local X86* t_cpu = 0;              // (rare uses: current_cpu, current_thunk_name)
 static std::mutex g_threadLock;
 static uint32_t g_nextTid = 0x100;
 
 X86* current_cpu() { return t_cpu; }
+static X86* thread_cpu() { return t_cpu; }
 
 // a TIB, a stack and the static TLS blocks of every image, all in guest memory
 static X86* make_cpu(uint32_t stackSize) {
-    X86* c = (X86*)calloc(1, sizeof(X86));
+    HostCpu* hc = (HostCpu*)calloc(1, sizeof(HostCpu));
+    hc->thread.thunkName = "";
+    hc->thread.sampleSlot = -1;
+    X86* c = &hc->cpu;
     c->fcw = 0x27f;
     c->mxcsr = 0x1f80;
     uint32_t stack = guest_malloc(stackSize);

@@ -3,6 +3,7 @@
 #include "runtime.h"
 
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <deque>
 #include <list>
@@ -20,12 +21,17 @@ namespace {
 
 // plain counters: a lost increment between threads only blurs a diagnostic (64-bit atomics need libatomic on PPC32)
 volatile uint64_t g_opens = 0, g_bytes = 0, g_disk = 0;
+double g_diskMs = 0;                                 // time in drive reads, all threads (the slow frame lines)
 
-enum { BLOCK = 256 << 10, DIRECT = 1 << 20 };
+// Blocks of 64 KB: a room's textures and animations are small entries spread over the archives, and 256 KB blocks
+// read ~4 MB from the drive for the ~600 KB a door's room needed (the console's USB gives ~10 MB/s). A miss right
+// after the block before it reads four blocks in one request (an entry read through), else one.
+enum { BLOCK = 64 << 10, AHEAD = 4, DIRECT = 1 << 20 };
 
-// blocks each reader keeps (BOI360_READ_CACHE): enough for a burst of loading; vf_trim gives back the blocks
-// nobody read for a while, since kept for the run the dozen archives' blocks held ~30 MB of the console's memory
+// blocks each reader keeps (BOI360_READ_CACHE, 64: 4 MB) and all readers together (BOI360_READ_BUDGET MB, 24):
+// vf_trim drops the least recently read past the budget, and any block unread for a minute
 int g_cacheBlocks = -1;
+uint32_t g_budgetBlocks = 0;
 std::atomic<uint32_t> g_cachedBlocks(0);             // all readers' (the frame log's memory line)
 std::atomic<uint32_t> g_readTick(0);                 // vf_trim's clock: one tick a call
 
@@ -51,37 +57,58 @@ struct Reader {
     size_t raw_read(int64_t off, void* buf, size_t n) {
         g_disk += n;
         diskBytes += n;
+        std::chrono::steady_clock::time_point t0 = std::chrono::steady_clock::now();
 #if defined(_WIN32)
-        if (_fseeki64(f, off, SEEK_SET) != 0) return 0;
-        return fread(buf, 1, n, f);
+        size_t got = _fseeki64(f, off, SEEK_SET) != 0 ? 0 : fread(buf, 1, n, f);
 #else
         ssize_t r = pread(fd, buf, n, (off_t)off);
-        return r < 0 ? 0 : (size_t)r;
+        size_t got = r < 0 ? 0 : (size_t)r;
 #endif
+        g_diskMs += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+        return got;
     }
 
-    const std::vector<uint8_t>& block(int64_t index) {
+    Block* find(int64_t index) {
         for (std::list<Block>::iterator it = blocks.begin(); it != blocks.end(); ++it)
             if (it->index == index) {
                 if (it != blocks.begin()) blocks.splice(blocks.begin(), blocks, it);
                 blocks.front().used = g_readTick;
-                return blocks.front().data;
+                return &blocks.front();
             }
-        if (g_cacheBlocks < 0) g_cacheBlocks = getenv("BOI360_READ_CACHE") ? atoi(getenv("BOI360_READ_CACHE")) : 16;
+        return 0;
+    }
+
+    // a block for index at the front (the oldest one's storage once the reader holds its share)
+    Block& fresh(int64_t index) {
+        if (g_cacheBlocks < 0) g_cacheBlocks = getenv("BOI360_READ_CACHE") ? atoi(getenv("BOI360_READ_CACHE")) : 64;
         if (blocks.size() >= (size_t)(g_cacheBlocks < 1 ? 1 : g_cacheBlocks)) {
-            blocks.splice(blocks.begin(), blocks, --blocks.end());    // reuse the oldest block's storage
+            blocks.splice(blocks.begin(), blocks, --blocks.end());
         } else {
             blocks.push_front(Block());
             ++g_cachedBlocks;
         }
         blocks.front().index = index;
         blocks.front().used = g_readTick;
-        std::vector<uint8_t>& data = blocks.front().data;
+        return blocks.front();
+    }
+
+    const std::vector<uint8_t>& block(int64_t index) {
+        if (Block* b = find(index)) return b->data;
+        // read on through what follows a block just read, in one request
+        int64_t count = 1, last = (size - 1) / BLOCK;
+        if (index > 0 && find(index - 1))
+            while (count < AHEAD && index + count <= last && !find(index + count)) ++count;
         int64_t off = index * BLOCK;
-        size_t want = (size_t)(size - off < BLOCK ? size - off : BLOCK);
-        data.resize(want);
-        data.resize(raw_read(off, want ? &data[0] : 0, want));
-        return data;
+        size_t want = (size_t)((index + count - 1 >= last ? size : (index + count) * BLOCK) - off);
+        std::vector<uint8_t> run(want);
+        run.resize(raw_read(off, want ? &run[0] : 0, want));
+        for (int64_t k = count - 1; k >= 0; --k) {      // the asked-for block ends up in front
+            Block& b = fresh(index + k);
+            size_t from = (size_t)(k * BLOCK);
+            size_t len = from >= run.size() ? 0 : run.size() - from < (size_t)BLOCK ? run.size() - from : (size_t)BLOCK;
+            b.data.assign(run.begin() + (long)(from < run.size() ? from : run.size()), run.begin() + (long)(from + len));
+        }
+        return blocks.front().data;
     }
 
     size_t read(int64_t off, uint8_t* out, size_t n) {
@@ -257,15 +284,33 @@ void vf_dump_readers(void (*line)(const char*)) {
 }
 
 uint32_t vf_cached_bytes() { return g_cachedBlocks * (uint32_t)BLOCK; }
+double vf_disk_ms() { return g_diskMs; }
 
 void vf_trim(uint32_t idleCalls) {
     uint32_t now = ++g_readTick;
+    if (!g_budgetBlocks)
+        g_budgetBlocks = (uint32_t)(getenv("BOI360_READ_BUDGET") ? atoi(getenv("BOI360_READ_BUDGET")) : 24) * ((1u << 20) / BLOCK);
     std::lock_guard<std::mutex> l(g_readersLock);
-    for (std::map<std::string, Reader*>::iterator it = g_readers.begin(); it != g_readers.end(); ++it) {
-        Reader* r = it->second;
-        std::lock_guard<std::mutex> rl(r->lock);
-        while (!r->blocks.empty() && now - r->blocks.back().used > idleCalls) {
-            r->blocks.pop_back();
+    for (;;) {
+        // each reader's oldest block, the oldest of them goes while the total is past the budget; any idle too long
+        Reader* oldest = 0;
+        uint32_t oldestUsed = 0;
+        for (std::map<std::string, Reader*>::iterator it = g_readers.begin(); it != g_readers.end(); ++it) {
+            Reader* r = it->second;
+            std::lock_guard<std::mutex> rl(r->lock);
+            while (!r->blocks.empty() && now - r->blocks.back().used > idleCalls) {
+                r->blocks.pop_back();
+                --g_cachedBlocks;
+            }
+            if (!r->blocks.empty() && (!oldest || now - r->blocks.back().used > now - oldestUsed)) {
+                oldest = r;
+                oldestUsed = r->blocks.back().used;
+            }
+        }
+        if (!oldest || g_cachedBlocks <= g_budgetBlocks) break;
+        std::lock_guard<std::mutex> rl(oldest->lock);
+        if (!oldest->blocks.empty()) {
+            oldest->blocks.pop_back();
             --g_cachedBlocks;
         }
     }

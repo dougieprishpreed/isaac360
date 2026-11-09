@@ -228,11 +228,15 @@ def convert_fragment(src, vs_vary, uniforms, samplers):
     return g
 
 
-# the layer's own present pass: the default framebuffer (GL row order) to the display, flipped. It samples the
-# frame as if it were first enlarged by a whole factor k with nearest pixels and then filtered to the output: with
-# the console's 960x540 window, k = 2, the picture the game would draw at 1920x1080 (each pixel doubled) brought
-# to 1280x720 bilinearly. Pixel p of the enlarged frame is texel floor(p / k): a pair of enlarged pixels blends
-# only where it straddles two texels. size: the enlarged frame's width and height, 1 / the frame's; step.x: 1 / k
+# the layer's own present pass: the default framebuffer (GL row order) to the display, flipped. Each output pixel is
+# the average of the frame's pixels under it, weighted by how much of it each covers: the console's 960x540 picture
+# grows by 4/3 to 1280x720 with every pixel the same size and only the edges between pixels blended, where nearest
+# pixels or one bilinear tap of a doubled frame give some pixels one column and others two. A footprint narrower
+# than a texel crosses at most one texel edge, so one bilinear tap, placed by the share of each side, is the
+# average. BOI360_PRESENT_FILTER=doubled (gl_vk.cpp) gives console boot 11's look instead: the frame doubled with
+# nearest pixels, then one bilinear tap (what a 1920x1080 window gave). Both are worked out, one is kept (no branch).
+# size: the frame's width and height, 1 / those; step.xy: texels an output pixel spans (under 1 here); step.z: 1
+# for doubled
 PRESENT_VS = '''#version 450
 layout(location = 0) in vec2 a_pos;
 layout(location = 1) in vec2 a_uv;
@@ -245,12 +249,17 @@ layout(push_constant) uniform Present { vec4 size; vec4 step; } pc;
 layout(location = 0) in vec2 v_uv;
 layout(location = 0) out vec4 color;
 void main() {
-    vec2 p = v_uv * pc.size.xy - 0.5;
+    vec2 u = v_uv * pc.size.xy;
+    vec2 r = pc.step.xy * 0.5;
+    vec2 edge = floor(u + r);
+    vec2 before = clamp((edge - (u - r)) / pc.step.xy, 0.0, 1.0);
+    vec2 coverage = edge + 0.5 - before;
+    vec2 p = u * 2.0 - 0.5;
     vec2 i0 = floor(p);
-    vec2 t0 = floor(i0 * pc.step.x);
-    vec2 t1 = floor((i0 + 1.0) * pc.step.x);
-    vec2 u = t0 + 0.5 + (t1 - t0) * (p - i0);
-    color = vec4(texture(image, u * pc.size.zw).rgb, 1.0);
+    vec2 t0 = floor(i0 * 0.5);
+    vec2 t1 = floor((i0 + 1.0) * 0.5);
+    vec2 doubled = t0 + 0.5 + (t1 - t0) * (p - i0);
+    color = vec4(texture(image, mix(coverage, doubled, pc.step.z) * pc.size.zw).rgb, 1.0);
 }
 '''
 

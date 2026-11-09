@@ -57,10 +57,18 @@ const char* current_thunk_name();       // the import or thunk being run (for sh
 
 // threads: the context of the calling host thread
 X86* current_cpu();
+// what a guest thread keeps beside its CPU state (no thread_local: on the console each access is a call)
+struct GuestThread {
+    const char* thunkName;                  // the import or thunk it is in
+    int sampleSlot;                         // its slot in the profiler and watchdog samples, or -1
+    uint32_t tls[128];                      // TlsGetValue / TlsSetValue slots (more go to a map)
+};
+GuestThread* guest_thread(X86* c);
 uint32_t thread_create(uint32_t entry, uint32_t arg, uint32_t* tid_out);   // returns a handle
 X86* cpu_new_thread();
 
 void recomp_log(const char* fmt, ...);
+void recomp_log_drain();                    // waits until the log writer has written every line
 [[noreturn]] void recomp_fatal(X86* c, const char* fmt, ...);
 void guest_backtrace(X86* c);
 

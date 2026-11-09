@@ -197,6 +197,7 @@ void LogLine(const char* line) { recomp_log("%s", line); }
 
 void Quit() {
     vf_drain();                         // the files the game wrote reach the drive
+    recomp_log_drain();
     _exit(0);
 }
 
@@ -222,6 +223,7 @@ void* Watchdog(void*) {
         // a game that doesn't reach its frame's end (loading, stuck) goes anyway
         if (g_quitRequested.load() && ++quitWaited > 30) {
             recomp_log("no frame ended within 3 s of the quit: quitting from the watchdog");
+            recomp_log_drain();
             _exit(0);
         }
         uint32_t f = gl_frame_count();
@@ -278,11 +280,10 @@ void* GameMain(void*) {
     mkdir("save", 0777);
     // The game lays out for a 960x540 picture, as on a PC at 1920x1080, which it draws there with each pixel doubled:
     // at 1280x720 it takes its small-screen HUD (larger outlined icons) and scales an 852x480 picture by 1.5 into
-    // uneven pixels. A 960x540 window gets the 1080p layout without the 1080p frame: the present pass (shaders.py
-    // PRESENT_FS) shows it as the doubled picture filtered to vulkan4xenon's one 1280x720 mode, the same pixels as a
-    // 1920x1080 window gave in play, without its 8 MB frame and the targets past eDRAM that vulkan4xenon draws in
-    // bands (cutscenes draw at the window's size: there 960x540 shows them doubled too). boi360_args.txt can say
-    // BOI360_WINDOW=1920x1080 or 1280x720.
+    // uneven pixels. A 960x540 window gets the 1080p layout without the 1080p frame (8 MB, and targets past eDRAM
+    // that vulkan4xenon draws in bands); the present pass (shaders.py PRESENT_FS) grows it by 4/3 to
+    // vulkan4xenon's one 1280x720 mode, each output pixel the area-weighted average of the pixels under it.
+    // Cutscenes draw at the window's size too. boi360_args.txt can say BOI360_WINDOW=1920x1080 or 1280x720.
     setenv("BOI360_WINDOW", "960x540", 0);
 
     GlVkHooks hooks;
@@ -303,6 +304,7 @@ void* GameMain(void*) {
     shims_register_all();
     gExitCode = recomp_run(cfg);
     recomp_log("exit %d", gExitCode);
+    recomp_log_drain();
     return 0;
 }
 
