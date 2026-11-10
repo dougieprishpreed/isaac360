@@ -54,7 +54,7 @@ PATCHES = {
 # (src/recomp/hle_vorbis.cpp decodes ahead natively). libpng's row unfiltering runs per byte over every texture a
 # room loads (src/recomp/hle_png.cpp), and its zlib inflate was a fifth of a door's frame (src/recomp/hle_inflate.cpp).
 # The engine's reference counting locks a lock object ~2,300 times a frame, each a translated wrapper around a
-# critical section's import (src/recomp/shims_kernel32.cpp).
+# critical section's import, and its add-ref and release bodies around them (src/recomp/shims_kernel32.cpp).
 HOST = {
     0x9b2b60: 'hle_png_filter_row',           # png_read_filter_row (row_info edx; row, prev_row, filter on the stack)
     0x9af810: 'hle_inflate',                  # zlib 1.1's inflate (strm ecx, the flush folded in), libpng's only
@@ -65,6 +65,8 @@ HOST = {
     0x9a99c0: 'hle_vorbis_deinit',            # vorbis_deinit (f ecx), before the game frees the decoder
     0x94f870: 'hle_lockobj_lock',             # the engine lock object's lock (this ecx, timeout on the stack)
     0x94f930: 'hle_lockobj_unlock',           # and unlock (this ecx): shims_kernel32.cpp
+    0x407770: 'hle_refcount_add',             # the engine's reference count add-ref (this ecx)
+    0x407710: 'hle_refcount_release',         # and release, unless it reaches 0: shims_kernel32.cpp
 }
 
 M = ix.Mnemonic

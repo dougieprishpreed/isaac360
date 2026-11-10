@@ -8,6 +8,7 @@
 #include <atomic>
 #include <chrono>
 #include <map>
+#include <mutex>
 #include <set>
 #include <stdio.h>
 #include <stdlib.h>
@@ -262,7 +263,7 @@ void heap_profile_dump();                           // shims_crt.cpp
 // present's (recording the frame's end, submitting, waiting for a free frame and the display), with what the GL layer
 // waited for in them (the display, a frame's GPU work, read-backs)
 struct FrameTimes {
-    double game, present, frame, gameMax, presentMax, frameMax;
+    double game, present, frame, gameMax, presentMax, frameMax, slept;   // slept: the game's own Sleep calls
     uint32_t frames, over17, over34, slowLogged;
     GlVkWork work;                                  // at the block's start
 };
@@ -282,15 +283,115 @@ static void log_times() {
     if (timed)
         snprintf(gpu, sizeof(gpu), "; the GPU's work %.1f ms a frame (max %.1f, %u frames timed)",
                  (w.gpuMs - t.work.gpuMs) / timed, gpuMax, timed);
-    recomp_log("time: frame %.1f ms (max %.1f), game %.1f (max %.1f), present %.1f (max %.1f); %u of %u frames over "
+    recomp_log("time: frame %.1f ms (max %.1f), game %.1f (max %.1f; %.1f of it the game's sleeps), present %.1f (max "
+               "%.1f); %u of %u frames over "
                "17 ms, %u over 34; waited for the display %.1f, the GPU %.1f, read-backs %.1f ms a frame%s",
-               t.frame / t.frames, t.frameMax, t.game / t.frames, t.gameMax, t.present / t.frames, t.presentMax, t.over17,
+               t.frame / t.frames, t.frameMax, t.game / t.frames, t.gameMax, t.slept / t.frames, t.present / t.frames, t.presentMax, t.over17,
                t.frames, t.over34, (w.waitAcquire - t.work.waitAcquire) / t.frames, (w.waitFence - t.work.waitFence) / t.frames,
                (w.waitIdle - t.work.waitIdle) / t.frames, gpu);
     static bool profiling = getenv("BOI360_PROFILE") != 0;
     if (profiling && gl_vk_enabled()) gl_vk_gpu_trace_next();
     memset(&t, 0, sizeof(t));
     t.work = w;
+}
+
+// Each room the game enters (its log line, shims_crt.cpp) gets a line when the game leaves it: its first 30 frames
+// (the door's or load's cost) apart from the rest, whose times, slow frames and GPU work are a room's steady cost to
+// compare between builds. With BOI360_PROFILE the room's 60th steady frame gets a gpu trace (its draws one by one);
+// BOI360_PROFILE=room logs the samples of rooms held 240 frames or more there.
+struct RoomTimes {
+    std::string name, counts;                       // counts: its 60th frame after the first 30's
+    uint32_t frames, entryFrames, over17, over34;
+    double entry, entryMax, game, present, frameMax, slept;
+    GlVkWork work;                                  // after the first 30 frames
+    GuestHeapStats heap;
+    uint64_t enters;                                // the main thread's critical sections, after the first 30 frames
+    uint32_t traced;                                // the frame given a gpu trace (0: none)
+};
+static RoomTimes g_room;
+static std::mutex g_roomLock;
+static std::string g_roomNext;
+static std::atomic<bool> g_roomPending(false);
+static const uint32_t kRoomEntryFrames = 30;
+
+void gl_room_entered(const char* name) {
+    std::string s = name;
+    if (!s.compare(0, 5, "Room ")) s.erase(0, 5);
+    while (!s.empty() && (s.back() == '\n' || s.back() == '\r')) s.pop_back();
+    std::lock_guard<std::mutex> lock(g_roomLock);
+    g_roomNext = s;
+    g_roomPending = true;
+}
+
+static void log_room() {
+    RoomTimes& r = g_room;
+    if (r.name.empty()) return;
+    char steady[640] = "";
+    if (r.frames) {
+        GlVkWork w;
+        memset(&w, 0, sizeof(w));
+        if (gl_vk_enabled()) gl_vk_work(&w);
+        uint32_t timed = w.gpuFrames - r.work.gpuFrames;
+        GuestHeapStats h;
+        guest_heap_stats(&h);
+        uint64_t big = h.big - r.heap.big;
+        char trace[48] = "";
+        if (r.traced) snprintf(trace, sizeof(trace), ", gpu trace of frame %u", r.traced);
+        snprintf(steady, sizeof(steady), "; then %u frames: game %.1f ms (%.1f of it the game's sleeps), present %.1f "
+                 "(frame max %.1f), %u over 17 ms, %u over 34; the GPU's work %.1f ms a frame (%u timed%s); %s; %.0f "
+                 "critical sections, %.0f allocations a frame (%.1f over 2 KB, %.0f free runs looked at each)",
+                 r.frames, r.game / r.frames, r.slept / r.frames, r.present / r.frames, r.frameMax, r.over17, r.over34,
+                 timed ? (w.gpuMs - r.work.gpuMs) / timed : 0.0, timed, trace, r.counts.c_str(),
+                 (double)(shims_main_lock_enters() - r.enters) / r.frames, (double)(h.allocs - r.heap.allocs) / r.frames,
+                 (double)big / r.frames, big ? (double)(h.scanned - r.heap.scanned) / big : 0.0);
+    }
+    recomp_log("room %s: first %u frames %.0f ms (slowest %.1f)%s", r.name.c_str(), r.entryFrames, r.entry, r.entryMax,
+               steady);
+    if (recomp_profile_by_room() && r.frames >= 240) recomp_profile_dump(log_line);
+}
+
+static void room_frame(double ms, double game, double present, double slept) {
+    RoomTimes& r = g_room;
+    if (g_roomPending.load()) {
+        log_room();
+        std::string next;
+        {
+            std::lock_guard<std::mutex> lock(g_roomLock);
+            next = g_roomNext;
+            g_roomPending = false;
+        }
+        r = RoomTimes();
+        r.name = next;
+    }
+    if (r.name.empty()) return;
+    if (r.entryFrames < kRoomEntryFrames) {
+        ++r.entryFrames;
+        r.entry += ms;
+        if (ms > r.entryMax) r.entryMax = ms;
+        if (r.entryFrames == kRoomEntryFrames) {
+            if (gl_vk_enabled()) gl_vk_work(&r.work);
+            guest_heap_stats(&r.heap);
+            r.enters = shims_main_lock_enters();
+            if (recomp_profile_by_room()) recomp_profile_clear();
+        }
+        return;
+    }
+    if (++r.frames == 60 && gl_vk_enabled()) {
+        char counts[160];
+        gl_vk_frame_counts(counts, sizeof(counts));
+        r.counts = counts;
+        static bool profiling = getenv("BOI360_PROFILE") != 0;
+        if (profiling) {
+            gl_vk_gpu_trace_next();
+            r.traced = g_frames + 1;
+        }
+    }
+    r.game += game;
+    r.slept += slept;
+    r.present += present;
+    if (ms > r.frameMax) r.frameMax = ms;
+    if (ms > 17.5) ++r.over17;
+    if (ms > 34.0) ++r.over34;
 }
 
 // a frame over 50 ms (BOI360_SLOW_MS; up to 12 each 600 frames): what it did, to tell loading from waiting
@@ -353,8 +454,12 @@ void gl_present() {
     {
         double game = std::chrono::duration<double, std::milli>(start - lastEnd).count();
         double present = std::chrono::duration<double, std::milli>(end - start).count();
+        static double sleptBefore = 0;
+        double sleptNow = shims_main_sleep_ms(), slept = sleptNow - sleptBefore;
+        sleptBefore = sleptNow;
         FrameTimes& t = g_times;
         t.game += game;
+        t.slept += slept;
         t.present += present;
         t.frame += game + present;
         if (game > t.gameMax) t.gameMax = game;
@@ -365,10 +470,12 @@ void gl_present() {
         ++t.frames;
         lastEnd = end;
         log_slow_frame(game, present);
+        room_frame(game + present, game, present, slept);
     }
     ++g_frames;
     if (g_quitRequested.load()) {
         if (gl_vk_enabled()) gl_vk_wait_idle();
+        log_room();
         recomp_log("quitting at the end of frame %u", g_frames);
         if (g_hostQuit) g_hostQuit();
     }
@@ -401,7 +508,7 @@ void gl_present() {
         if (gl_vk_enabled()) gl_vk_write_stats();
         if (g_frames % 600 == 0) {
             log_times();
-            recomp_profile_dump(log_line);
+            if (!recomp_profile_by_room()) recomp_profile_dump(log_line);
             static bool profiling = getenv("BOI360_PROFILE") != 0;
             if (profiling) shims_lock_stats_dump(log_line);
         }

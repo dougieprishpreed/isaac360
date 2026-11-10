@@ -353,6 +353,14 @@ uint32_t carve(uint32_t total) {
 }
 }
 
+static GuestHeapStats g_heapStats;
+
+void guest_heap_stats(GuestHeapStats* out) {
+    std::lock_guard<std::mutex> g(g_heapLock);
+    *out = g_heapStats;
+    out->freeRuns = (uint32_t)g_freeBig.size();
+}
+
 // gives a block back to the free lists (the heap lock held)
 static void release_block(uint32_t block, uint32_t need) {
     if (need <= 2048) {
@@ -423,7 +431,8 @@ static uint32_t take_block(uint32_t need, uint32_t& total) {
         bin.pop_back();
         return block;
     }
-    for (std::map<uint32_t, uint32_t>::iterator it = g_freeBig.begin(); it != g_freeBig.end(); ++it)
+    ++g_heapStats.big;
+    for (std::map<uint32_t, uint32_t>::iterator it = g_freeBig.begin(); it != g_freeBig.end(); ++it, ++g_heapStats.scanned)
         if (it->second >= total) {
             uint32_t block = it->first, rest = it->second - total;
             g_freeBig.erase(it);
@@ -439,6 +448,7 @@ uint32_t guest_malloc(uint32_t size) {
     uint32_t need = (size + 15) & ~15u;
     guest_heap_checking();
     std::lock_guard<std::mutex> g(g_heapLock);
+    ++g_heapStats.allocs;
     uint32_t total = need + (g_heapCheck ? 32 : 16);
     uint32_t block = take_block(need, total);
     if (!block && g_heapCheck && !g_held.empty()) {
@@ -702,6 +712,8 @@ static void sample_register(X86* c, const char* name) {
     guest_thread(c)->sampleSlot = slot;
 }
 
+bool recomp_is_main_cpu(X86* c) { return g_sampleCpu[0] == c; }
+
 static bool guest_code(uint32_t v) {
     return (v >= kGuestImageBase + 0x1000 && v < kGuestImageBase + 0x5e8000) || (v >= 0x00C61000 && v < 0x00D60000);
 }
@@ -749,6 +761,9 @@ static std::map<ProfileKey, uint32_t> g_profileCounts, g_frameCounts;
 static std::map<uint32_t, uint32_t> g_profileIncl, g_frameIncl;
 static uint32_t g_profileSamples[kSampledThreads], g_frameSamples[kSampledThreads];
 static bool g_profileSlow = false;
+// BOI360_PROFILE=room samples everything as =1 but logs each room's samples when the game leaves it (shims_gl.cpp's
+// room lines), with the main thread's inclusive shares, instead of each 600 frames
+static bool g_profileRoom = false;
 
 int recomp_guest_returns(X86* c, uint32_t* out, int n) {
     int found = 0;
@@ -799,7 +814,17 @@ void recomp_profile_start() {
     const char* mode = getenv("BOI360_PROFILE");
     if (!mode) return;
     g_profileSlow = !strcmp(mode, "slow");
+    g_profileRoom = !strcmp(mode, "room");
     host_thread_start(profile_thread, 0, 256u << 10);
+}
+
+bool recomp_profile_by_room() { return g_profileRoom; }
+
+void recomp_profile_clear() {
+    std::lock_guard<std::mutex> lock(g_profileLock);
+    g_profileCounts.clear();
+    g_profileIncl.clear();
+    memset(g_profileSamples, 0, sizeof(g_profileSamples));
 }
 
 void recomp_profile_frame(bool slow) {
@@ -853,7 +878,7 @@ void recomp_profile_dump(void (*line)(const char*)) {
                 snprintf(buf, sizeof(buf), "profile %s: %5.1f%% at %08x", g_sampleName[t], share, k.at);
             line(buf);
         }
-        if (t != 0 || !g_profileSlow) continue;
+        if (t != 0 || !(g_profileSlow || g_profileRoom)) continue;
         std::vector<std::pair<uint32_t, uint32_t> > byIncl;
         for (std::map<uint32_t, uint32_t>::iterator it = incl.begin(); it != incl.end(); ++it)
             byIncl.push_back(std::make_pair(it->second, it->first));

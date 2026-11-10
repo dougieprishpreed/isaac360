@@ -206,6 +206,8 @@ void s_vsprintf(X86* c) {
         ++traced;
         recomp_log("printf> %s", s.substr(0, 200).c_str());
     }
+    // the game's log line for each room it enters ("Room %d.%d(%s)\n" in isaac-ng.exe): the room lines' boundary
+    if (ARG(c, 4) == 0xb2e1cc) gl_room_entered(s.c_str());
     if (buf && count) guest_write_str(buf, s, count);
     RET_CDECL(c, (uint32_t)s.size());
 }

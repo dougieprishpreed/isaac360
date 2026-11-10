@@ -46,6 +46,11 @@ uint32_t guest_calloc(uint32_t n, uint32_t size);
 uint32_t guest_block_size(uint32_t p);
 uint32_t guest_heap_used();
 uint32_t guest_heap_top();                  // the heap's high mark: the console commits up to it
+struct GuestHeapStats {
+    uint64_t allocs, big, scanned;            // all, over 2 KB (first fit), free runs looked at for those
+    uint32_t freeRuns;                        // free runs over 2 KB now
+};
+void guest_heap_stats(GuestHeapStats* out);
 // BOI360_HEAP_CHECK=1 (runtime.cpp): guard bytes, freed blocks filled and held back; the shims say where a block
 // was made or freed ("made from", "freed from") for its reports
 bool guest_heap_checking();
@@ -108,9 +113,15 @@ void recomp_sample_threads(void (*line)(const char*));   // each guest thread's 
 void recomp_profile_start();             // BOI360_PROFILE: sample the main guest thread (runtime.cpp)
 void recomp_profile_dump(void (*line)(const char*));   // the samples since the last dump, most frequent first
 void recomp_profile_frame(bool slow);    // BOI360_PROFILE=slow: a frame ended; its samples count if it was slow
+bool recomp_profile_by_room();           // BOI360_PROFILE=room: samples logged per room (shims_gl.cpp)
+void recomp_profile_clear();             // drops the samples since the last dump
+void gl_room_entered(const char* name);  // the game logged "Room type.variant(name)" (shims_crt.cpp)
 int recomp_guest_returns(X86* c, uint32_t* out, int n);    // the innermost guest return addresses on c's stack
 void shims_lock_stats_dump(void (*line)(const char*));    // BOI360_PROFILE: contended critical sections (kernel32)
 double shims_lock_wait_ms();               // BOI360_PROFILE: ms all threads waited for critical sections so far
+bool recomp_is_main_cpu(X86* c);           // the game's main thread (the first guest thread)
+uint64_t shims_main_lock_enters();         // critical sections the main thread entered so far
+double shims_main_sleep_ms();              // ms the main thread spent in Sleep so far (the game's own frame pacing)
 // where diagnostics go (screenshots, texture lists): BOI360_OUT_DIR, the console sets it beside the XEX
 std::string recomp_out_dir();
 

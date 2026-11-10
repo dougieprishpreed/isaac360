@@ -197,11 +197,20 @@ def convert_vertex(src, uniforms, samplers):
     return g, attrs, [n for _, n in vary]
 
 
-def convert_fragment(src, vs_vary, uniforms, samplers):
+# Programs whose depth tail stays the branch it was (the kill flag joined by &&), which keeps xost's optimiser off
+# them: dizzy's angle wrap (x - 2 pi floor(x / 2 pi + 0.5) at large times) fused into one multiply-add by the
+# optimiser moves its colours past check_shaders.py's 2/255 at 4 of 96 points.
+BRANCH_TAIL = {'resources-dlc3/shaders/dizzy'}
+
+
+def convert_fragment(src, vs_vary, uniforms, samplers, label=''):
     d = decls(src)
     g = header()
     g += 'layout(location = 0) out vec4 boi_out_FragColor;\nvec4 boi_FragColor;\n#define gl_FragColor boi_FragColor\n'
-    g += 'layout(location = %d) in float boi_depth;\nbool boi_kill = false;\n' % len(vs_vary)
+    kills = re.search(r'\bdiscard\b', src) is not None or label in BRANCH_TAIL
+    g += 'layout(location = %d) in float boi_depth;\n' % len(vs_vary)
+    if kills:
+        g += 'float boi_keep = 1.0;\n'
     loc = {n: i for i, n in enumerate(vs_vary)}
     extra = len(vs_vary) + 1
     for k, t, n, _, _ in d:
@@ -215,15 +224,20 @@ def convert_fragment(src, vs_vary, uniforms, samplers):
         g += 'layout(set = 0, binding = %d) uniform %s %s;\n' % (b, t, n)
     g += SAFE_HELPERS + POW_HELPERS
     # the game's own discards set a flag (the shader runs on; what it writes is dropped below)
-    body = re.sub(r'\bdiscard\b', 'boi_kill = true', init_locals(strip_decls(src, ('varying', 'uniform'))))
+    body = re.sub(r'\bdiscard\b', 'boi_keep = 0.0', init_locals(strip_decls(src, ('varying', 'uniform'))))
     g += '#define main boi_main\n#line 1\n' + safe_calls(body)
     # The compatibility profile's alpha test (on once, GREATER 0, never changed) keeps transparent texels out of
     # the depth buffer. xost refuses a discard beside the shaders' own if/else (and recurses without end on
     # some), so a fragment to drop is written at depth 0 instead: the game always draws with the depth test
     # GREATER against a depth cleared to 0 (-1000 clamped), so it fails the test and writes neither colour nor
-    # depth, as a discarded one (gl_vk.cpp logs a draw with other depth state). A select, not a branch.
+    # depth, as a discarded one (gl_vk.cpp logs a draw with other depth state). A select, not a branch: a test
+    # joined by && (as the kill flag once was) is one for xost, and its optimiser then leaves the whole shader as
+    # written (colormod 49 instructions, 12 without), so a discard clears a factor instead.
     g += '\n#undef main\nvoid main() {\n    boi_main();\n'
-    g += '    gl_FragDepth = mix(0.0, boi_depth, !boi_kill && boi_FragColor.a > 0.0);\n'
+    if label in BRANCH_TAIL:
+        g += '    gl_FragDepth = mix(0.0, boi_depth, boi_keep > 0.0 && boi_FragColor.a > 0.0);\n'
+    else:
+        g += '    gl_FragDepth = (boi_FragColor.a > 0.0 ? boi_depth : 0.0)%s;\n' % (' * boi_keep' if kills else '')
     g += '    boi_out_FragColor = boi_FragColor;\n}\n'
     return g
 
@@ -394,7 +408,8 @@ def program(vs, fs, label=''):
             uniforms.append((t, n))
     # the vertex stage declares the uniforms it uses; both declare the whole block at the same offsets
     vglsl, attrs, vary = convert_vertex(vs, uniforms, [s for s in samplers if s[1][1] in {n for _, _, n, _, _ in vd}])
-    fglsl = convert_fragment(fs, vary, uniforms, [s for s in samplers if s[1][1] in {n for _, _, n, _, _ in fd}])
+    fglsl = convert_fragment(fs, vary, uniforms, [s for s in samplers if s[1][1] in {n for _, _, n, _, _ in fd}],
+                             label)
     meta = {
         'attribs': ','.join('%s:%d:%d' % (n, i, SIZES[t][2]) for i, (t, n) in enumerate(attrs)),
         'samplers': ','.join('%s:%d' % (n, b) for b, (_, n) in samplers),

@@ -93,8 +93,12 @@ int g_lockProfile = -1;                             // read at the first Enter, 
 
 // enters the section at a for c's thread; BOI360_PROFILE records a wait with where it came from (site: the return
 // into the caller, and the caller's own from its ebp frame where that is on the stack)
+// critical sections the main thread entered (the room lines, shims_gl.cpp): one thread writes it, no atomic
+uint64_t g_mainEnters = 0;
+
 void cs_enter(X86* c, uint32_t a, CsSlot* slot) {
     uint32_t me = guest_thread(c)->id;
+    if (recomp_is_main_cpu(c)) ++g_mainEnters;
     if (g_lockProfile < 0) g_lockProfile = getenv("BOI360_PROFILE") ? 1 : 0;
     if (!g_lockProfile) {
         guest_lock_enter(*slot->m, me);
@@ -236,10 +240,16 @@ void w_timeGetTime(X86* c) { RET_STD(c, 0, (uint32_t)(now_us() / 1000)); }
 void w_timeBeginPeriod(X86* c) { RET_STD(c, 1, 0); }
 void w_timeEndPeriod(X86* c) { RET_STD(c, 1, 0); }
 void w_timeGetDevCaps(X86* c) { WR32(ARG(c, 0), 1); WR32(ARG(c, 0) + 4, 1000000); RET_STD(c, 2, 0); }
+// the main thread's sleeps, kept apart from its work in the frame times (shims_gl.cpp): the game paces its own frames
+static std::atomic<uint64_t> g_mainSleepUs(0);
+
 void k_Sleep(X86* c) {
     uint32_t ms = ARG(c, 0);
+    bool main = recomp_is_main_cpu(c);
+    uint64_t start = main ? now_us() : 0;
     if (ms) std::this_thread::sleep_for(std::chrono::milliseconds(ms));
     else std::this_thread::yield();
+    if (main) g_mainSleepUs += now_us() - start;
     RET_STD(c, 1, 0);
 }
 
@@ -573,6 +583,9 @@ const ShimDef kKernel[] = {
 };
 }
 
+uint64_t shims_main_lock_enters() { return g_mainEnters; }
+double shims_main_sleep_ms() { return g_mainSleepUs.load() / 1000.0; }
+
 double shims_lock_wait_ms() {
     std::lock_guard<std::mutex> l(g_lockStatsLock);
     return g_lockWaitMs;
@@ -697,6 +710,59 @@ extern "C" int hle_lockobj_unlock(X86* c) {
     WR8(cs + 0x18, 0);
     guest_lock_leave(*cs_of(cs), guest_thread(c)->id);
     c->r[0] = 0;
+    c->r[4] += 4;
+    return 1;
+}
+
+// The engine's reference counting itself (translate.py HOST): add-ref (0x407770) and release (0x407710), thiscall
+// on an object whose 16-bit count is at +4 and whose lock object (vtable 0xb3d508) is at +8, each a lock, a count
+// change and an unlock: 1,000 to 6,700 a frame (more in large rooms), each a translated body making two virtual
+// calls. Done here on the same section as the game's lock object, with its held flag set while the count changes.
+// A release that would reach 0 (the object's teardown follows) and anything the lock object's fast path would not
+// take run the game's code.
+static CsSlot* refcount_lock(X86* c, uint32_t lockObj, uint32_t* cs) {
+    if (RD32(lockObj) != 0x00b3d508u || !RD8(lockObj + 4)) return 0;
+    *cs = RD32(lockObj + 8);
+    CsSlot* slot = cs_slot(*cs);
+    cs_enter(c, *cs, slot);
+    if (RD8(*cs + 0x18)) {
+        guest_lock_leave(*slot->m, guest_thread(c)->id);
+        return 0;
+    }
+    WR8(*cs + 0x18, 1);
+    return slot;
+}
+
+static void refcount_unlock(X86* c, uint32_t cs, CsSlot* slot) {
+    WR8(cs + 0x18, 0);
+    guest_lock_leave(*slot->m, guest_thread(c)->id);
+}
+
+extern "C" int hle_refcount_add(X86* c) {
+    uint32_t self = c->r[1], cs;
+    CsSlot* slot = refcount_lock(c, self + 8, &cs);
+    if (!slot) return 0;
+    WR16(self + 4, (uint16_t)(RD16(self + 4) + 1));
+    refcount_unlock(c, cs, slot);
+    c->r[0] = 0;                                    // the unlock's result, as the tail call leaves it
+    c->r[1] = self + 8;
+    c->r[4] += 4;
+    return 1;
+}
+
+extern "C" int hle_refcount_release(X86* c) {
+    uint32_t self = c->r[1], cs;
+    CsSlot* slot = refcount_lock(c, self + 8, &cs);
+    if (!slot) return 0;
+    uint16_t n = RD16(self + 4);
+    if (n == 1) {
+        refcount_unlock(c, cs, slot);
+        return 0;
+    }
+    if (n) WR16(self + 4, (uint16_t)(n - 1));
+    refcount_unlock(c, cs, slot);
+    c->r[0] = 1;                                    // mov al, 1 over the unlock's 0
+    c->r[1] = self + 8;
     c->r[4] += 4;
     return 1;
 }
