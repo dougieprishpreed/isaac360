@@ -3,6 +3,7 @@
 #include "runtime.h"
 #include "guest_lock.h"
 #include <algorithm>
+#include <ctype.h>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -347,17 +348,36 @@ void k_GetFileAttributesA(X86* c) {
 }
 // The game counts a failure as success only with ERROR_ALREADY_EXISTS (183) from GetLastError, the shim's own
 // value: without it a save folder that already existed was "not writable" and options.ini was never written.
+// The game asks again for the same folders as it loads (doors included): a folder made or found once is answered
+// from memory, where each ask stat'ed it on the console's USB drive after the file writer's queue (boot 15's door
+// profile: 4%). The game removes no folders.
+std::mutex g_dirsLock;
+std::set<std::string> g_knownDirs;
 void k_CreateDirectoryA(X86* c) {
-    std::string guest = guest_str(ARG(c, 0));
+    std::string guest = guest_str(ARG(c, 0)), key = guest;
+    for (size_t i = 0; i < key.size(); ++i) key[i] = key[i] == '\\' ? '/' : (char)tolower((unsigned char)key[i]);
+    while (!key.empty() && key[key.size() - 1] == '/') key.erase(key.size() - 1);
+    {
+        std::lock_guard<std::mutex> l(g_dirsLock);
+        if (g_knownDirs.count(key)) {
+            g_lastError = 183;
+            RET_STD(c, 2, 0);
+            return;
+        }
+    }
     bool dir = false;
     bool existed = recomp_host_exists(recomp_host_path(guest), &dir) && dir;
     std::string p = recomp_host_path(guest + "/", true);     // makes the folder (and its parents) in the overlay
+    bool made = existed || (recomp_host_exists(p, &dir) && dir);
+    if (made) {
+        std::lock_guard<std::mutex> l(g_dirsLock);
+        g_knownDirs.insert(key);
+    }
     if (existed) {
         g_lastError = 183;
         RET_STD(c, 2, 0);
         return;
     }
-    bool made = recomp_host_exists(p, &dir) && dir;
     g_lastError = made ? 0 : 3;                               // ERROR_PATH_NOT_FOUND
     RET_STD(c, 2, made ? 1 : 0);
 }

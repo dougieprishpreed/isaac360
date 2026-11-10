@@ -275,11 +275,20 @@ static void log_times() {
     GlVkWork w;
     memset(&w, 0, sizeof(w));
     if (gl_vk_enabled()) gl_vk_work(&w);
+    // the GPU's own work a frame (gl_vk.cpp's time stamps), the number to compare between builds whatever was played
+    char gpu[96] = "";
+    uint32_t timed = w.gpuFrames - t.work.gpuFrames;
+    double gpuMax = gl_vk_enabled() ? gl_vk_gpu_max_reset() : 0;
+    if (timed)
+        snprintf(gpu, sizeof(gpu), "; the GPU's work %.1f ms a frame (max %.1f, %u frames timed)",
+                 (w.gpuMs - t.work.gpuMs) / timed, gpuMax, timed);
     recomp_log("time: frame %.1f ms (max %.1f), game %.1f (max %.1f), present %.1f (max %.1f); %u of %u frames over "
-               "17 ms, %u over 34; waited for the display %.1f, the GPU %.1f, read-backs %.1f ms a frame",
+               "17 ms, %u over 34; waited for the display %.1f, the GPU %.1f, read-backs %.1f ms a frame%s",
                t.frame / t.frames, t.frameMax, t.game / t.frames, t.gameMax, t.present / t.frames, t.presentMax, t.over17,
                t.frames, t.over34, (w.waitAcquire - t.work.waitAcquire) / t.frames, (w.waitFence - t.work.waitFence) / t.frames,
-               (w.waitIdle - t.work.waitIdle) / t.frames);
+               (w.waitIdle - t.work.waitIdle) / t.frames, gpu);
+    static bool profiling = getenv("BOI360_PROFILE") != 0;
+    if (profiling && gl_vk_enabled()) gl_vk_gpu_trace_next();
     memset(&t, 0, sizeof(t));
     t.work = w;
 }

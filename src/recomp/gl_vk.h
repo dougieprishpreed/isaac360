@@ -43,8 +43,12 @@ struct GlVkWork {
     double waitAcquire, waitFence, waitIdle;
     double texMs, materializeMs;    // in glTexImage2D (converting and packing), making packed textures' images
     uint64_t texBytes;              // pixels glTexImage2D was given (as RGBA)
+    double gpuMs;                   // the GPU's work on the frames timed (first to last command), and how many
+    uint32_t gpuFrames;
 };
 void gl_vk_work(GlVkWork* w);
+double gl_vk_gpu_max_reset();       // the longest frame of GPU work since the last call
+void gl_vk_gpu_trace_next();        // BOI360_PROFILE: stamp the next frame's draws one by one (gpu trace lines)
 uint64_t gl_vk_packed_bytes();      // host memory held by packed texture pixels (gl_vk.cpp, lazy textures)
 void gl_vk_write_texture_list();    // build/recomp/textures.txt
 void gl_vk_write_stats();           // build/recomp/gl_stats.txt (BOI360_GL_STATS)

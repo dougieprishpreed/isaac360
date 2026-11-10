@@ -8,6 +8,7 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <ctype.h>
 #include <string.h>
 #include <atomic>
 #include <chrono>
@@ -67,12 +68,35 @@ bool recomp_host_exists(const std::string& path, bool* isDir) {
     return true;
 }
 
+// a guest path as the cache compares them: slashes, no leading "./" or trailing "/", lower case (FAT32 and Windows
+// ignore case)
+static std::string path_key(std::string s) {
+    for (size_t i = 0; i < s.size(); ++i) s[i] = s[i] == '\\' ? '/' : (char)tolower((unsigned char)s[i]);
+    while (s.compare(0, 2, "./") == 0) s.erase(0, 2);
+    while (!s.empty() && s[s.size() - 1] == '/') s.erase(s.size() - 1);
+    return s;
+}
+
+// A write can make an overlay entry appear: the lookups of that path and of its folders go (the folders may be new
+// in the overlay too). Others stay: clearing them all made every open after the game's CreateDirectory at a door
+// probe the USB drive again (console boot 15's door profile: fopen 5%).
+static void forget_written(const std::string& p) {
+    std::string target = path_key(p);
+    for (std::unordered_map<std::string, std::string>::iterator it = g_pathCache.begin(); it != g_pathCache.end();) {
+        std::string k = path_key(it->first);
+        if (k == target || (target.size() > k.size() && target.compare(0, k.size(), k) == 0 && target[k.size()] == '/'))
+            it = g_pathCache.erase(it);
+        else
+            ++it;
+    }
+}
+
 std::string recomp_host_path(const std::string& p, bool write) {
     std::string s = p;
     for (size_t i = 0; i < s.size(); ++i)
         if (s[i] == '\\') s[i] = '/';
     std::lock_guard<std::mutex> l(g_pathLock);
-    if (write) g_pathCache.clear();
+    if (write) forget_written(s);
     else {
         std::unordered_map<std::string, std::string>::iterator it = g_pathCache.find(s);
         if (it != g_pathCache.end()) return it->second;

@@ -57,7 +57,8 @@ namespace {
     X(vkCmdPushConstants) X(vkCmdSetViewport) X(vkCmdSetScissor) X(vkCmdDraw) X(vkCmdDrawIndexed)                \
     X(vkCmdClearAttachments) X(vkCmdPipelineBarrier) X(vkCmdCopyBufferToImage) X(vkCmdCopyImageToBuffer)         \
     X(vkCreateSwapchainKHR) X(vkDestroySwapchainKHR) X(vkGetSwapchainImagesKHR) X(vkAcquireNextImageKHR)         \
-    X(vkQueuePresentKHR)
+    X(vkQueuePresentKHR) X(vkCreateQueryPool) X(vkCmdResetQueryPool) X(vkCmdWriteTimestamp)                      \
+    X(vkGetQueryPoolResults)
 
 #define GLVK_DECLARE(name) PFN_##name name = 0;
 GLVK_GLOBAL(GLVK_DECLARE)
@@ -262,7 +263,8 @@ VkImage g_swapImages[MAX_SWAP];
 VkImageView g_swapViews[MAX_SWAP];
 VkFramebuffer g_swapFbs[MAX_SWAP];
 VkSemaphore g_swapDone[MAX_SWAP];
-VkPipeline g_presentPipe = VK_NULL_HANDLE;
+VkPipeline g_presentPipe = VK_NULL_HANDLE, g_presentCopyPipe = VK_NULL_HANDLE;
+bool g_presentWhole = false;                        // the display holds the frame a whole number of times
 Buffer g_presentQuad;
 VkDescriptorPool g_presentPool = VK_NULL_HANDLE;
 VkDescriptorSet g_presentSet = VK_NULL_HANDLE;
@@ -339,6 +341,29 @@ FrameCounts g_counts, g_lastCounts;
 // textures, the first vertex and the push constants)
 std::set<uint32_t> g_traceFrames;
 bool tracing() { return !g_traceFrames.empty() && g_traceFrames.count(gl_frame_count()); }
+
+// GPU time: a time stamp at each frame's first command and its last (a frame is one submit at its end, so the two
+// bound the GPU's work on it); a frame that also submitted mid-way (read-backs, full rings) is left out, its span
+// holding the CPU's waits. With BOI360_PROFILE every 600th frame's draws are stamped one by one too, each after
+// the GPU finished what came before, and the frame's GPU time by program and target size is logged once its fence
+// has passed (gl_vk_gpu_trace_next). Query slots: two a frame, then the trace's.
+enum { GPU_TRACE_MAX = 400 };
+VkQueryPool g_queries = VK_NULL_HANDLE;
+double g_tickNs = 0;
+bool g_frameTimed[FRAMES], g_frameFlushed[FRAMES];
+double g_gpuMs = 0, g_gpuMax = 0;
+uint32_t g_gpuFrames = 0;
+bool g_gpuTraceNext = false;
+int g_gpuTraceSlot = -1;                            // the frame slot being traced, or -1
+uint32_t g_gpuTraceFrame = 0;
+std::vector<std::string> g_gpuTraceLabels;          // what each stamp after the first follows
+
+void gpu_stamp(const std::string& label) {
+    if (g_gpuTraceSlot != g_frame || g_gpuTraceLabels.size() + 1 >= GPU_TRACE_MAX) return;
+    vkCmdWriteTimestamp(g_frames[g_frame].cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, g_queries,
+                        (uint32_t)(2 * FRAMES + 1 + g_gpuTraceLabels.size()));
+    g_gpuTraceLabels.push_back(label);
+}
 
 void log_once(const char* fmt, ...) {
     char buf[512];
@@ -554,6 +579,7 @@ void flush_wait() {
     si.commandBufferCount = 1;
     si.pCommandBuffers = &f.cmd;
     vkQueueSubmit(g_queue, 1, &si, VK_NULL_HANDLE);
+    g_frameFlushed[g_frame] = true;
     WaitClock::time_point t0 = WaitClock::now();
     vkQueueWaitIdle(g_queue);
     g_waitIdle += since(t0);
@@ -770,6 +796,7 @@ void ensure_default_framebuffer() {
         bool whole = !g_swapchain || (g_swapExtent.width % uw == 0 && g_swapExtent.height % uh == 0 &&
                                       g_swapExtent.width / uw == g_swapExtent.height / uh);
         uint32_t filter = whole ? GL_NEAREST : GL_LINEAR;
+        g_presentWhole = whole && g_presentCopyPipe;
         VkDescriptorImageInfo img = {sampler_for(filter, filter, GL_CLAMP_TO_EDGE, GL_CLAMP_TO_EDGE), g_defColor.view,
                                      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
         VkWriteDescriptorSet wr;
@@ -1107,6 +1134,15 @@ bool make_device() {
     GLVK_DEVICE(GLVK_LOAD_DEVICE)
     vkGetDeviceQueue(g_dev, g_family, 0, &g_queue);
     recomp_log("gl_vk: %s, depth %s", props.deviceName, g_depthFormat == VK_FORMAT_D32_SFLOAT ? "D32" : "D24S8");
+    g_tickNs = props.limits.timestampPeriod;
+    if (g_tickNs > 0 && vkCreateQueryPool && vkCmdWriteTimestamp) {
+        VkQueryPoolCreateInfo qi;
+        memset(&qi, 0, sizeof(qi));
+        qi.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
+        qi.queryType = VK_QUERY_TYPE_TIMESTAMP;
+        qi.queryCount = 2 * FRAMES + GPU_TRACE_MAX;
+        if (vkCreateQueryPool(g_dev, &qi, 0, &g_queries) != VK_SUCCESS) g_queries = VK_NULL_HANDLE;
+    }
     return true;
 }
 
@@ -1323,6 +1359,11 @@ bool make_output() {
     gp.layout = g_presentLayout;
     gp.renderPass = pass;
     vkCreateGraphicsPipelines(g_dev, VK_NULL_HANDLE, 1, &gp, 0, &g_presentPipe);
+    // and one nearest sample where the display holds the frame a whole number of times (shaders.py PRESENT_COPY_FS)
+    VkShaderModule copy = make_module(GLVK_PRESENT_COPY_FS, sizeof(GLVK_PRESENT_COPY_FS) / 4);
+    stages[1].module = copy;
+    vkCreateGraphicsPipelines(g_dev, VK_NULL_HANDLE, 1, &gp, 0, &g_presentCopyPipe);
+    vkDestroyShaderModule(g_dev, copy, 0);
     vkDestroyShaderModule(g_dev, vs, 0);
     vkDestroyShaderModule(g_dev, fs, 0);
     // position, uv: the default framebuffer's row 0 is GL's bottom row
@@ -1907,6 +1948,11 @@ void draw(uint32_t mode, int count, uint32_t indexType, uint32_t indices, int fi
         recomp_log("trace:   push%s", vals.c_str());
     }
     vkCmdDrawIndexed(cmd, (uint32_t)count, 1, 0, 0, 0);
+    if (g_gpuTraceSlot == g_frame) {
+        char where[64];
+        snprintf(where, sizeof(where), " into %dx%d", g_passW, g_passH);
+        gpu_stamp(std::string(p.desc ? p.desc->label : "?") + where);
+    }
     f->vOff = (f->vOff + vbytes + 15) & ~(VkDeviceSize)15;
     f->iOff = (f->iOff + (wide ? 4 : 2) * (VkDeviceSize)count + 15) & ~(VkDeviceSize)15;
 }
@@ -2518,6 +2564,37 @@ const Entry kEntries[] = {
     {"glVertexAttribPointer", vk_glVertexAttribPointer}, {"glDrawElements", vk_glDrawElements}, {"glDrawArrays", vk_glDrawArrays},
 };
 
+// the traced frame's stamps, once its fence has passed: each one's time since the one before, charged to what it
+// follows, summed by program and target and logged most first
+void gpu_trace_report() {
+    size_t n = g_gpuTraceLabels.size() + 1;
+    std::vector<uint64_t> t(n);
+    g_gpuTraceSlot = -1;
+    if (vkGetQueryPoolResults(g_dev, g_queries, 2 * FRAMES, (uint32_t)n, n * sizeof(uint64_t), &t[0], sizeof(uint64_t),
+                              VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT) != VK_SUCCESS)
+        return;
+    std::map<std::string, std::pair<double, int> > by;
+    double total = 0;
+    for (size_t i = 1; i < n; ++i) {
+        double ms = t[i] >= t[i - 1] ? (double)(t[i] - t[i - 1]) * g_tickNs / 1e6 : 0;
+        total += ms;
+        std::pair<double, int>& e = by[g_gpuTraceLabels[i - 1]];
+        e.first += ms;
+        ++e.second;
+    }
+    std::vector<std::pair<double, std::string> > order;
+    for (std::map<std::string, std::pair<double, int> >::iterator it = by.begin(); it != by.end(); ++it) {
+        char b[24];
+        snprintf(b, sizeof(b), " (%d)", it->second.second);
+        order.push_back(std::make_pair(it->second.first, it->first + b));
+    }
+    std::sort(order.rbegin(), order.rend());
+    recomp_log("gpu trace of frame %u: %.2f ms over %u draws, each stamped after the GPU finished what came before",
+               g_gpuTraceFrame, total, (unsigned)(n - 1));
+    for (size_t i = 0; i < order.size() && i < 12; ++i)
+        recomp_log("gpu trace: %.2f ms %s", order[i].first, order[i].second.c_str());
+}
+
 void next_frame() {
     g_frame = (g_frame + 1) % FRAMES;
     Frame& f = g_frames[g_frame];
@@ -2525,6 +2602,17 @@ void next_frame() {
     vkWaitForFences(g_dev, 1, &f.fence, VK_TRUE, ~0ull);
     g_waitFence += since(t0);
     vkResetFences(g_dev, 1, &f.fence);
+    if (g_queries && g_frameTimed[g_frame] && !g_frameFlushed[g_frame]) {
+        uint64_t t[2];
+        if (vkGetQueryPoolResults(g_dev, g_queries, (uint32_t)(2 * g_frame), 2, sizeof(t), t, sizeof(uint64_t),
+                                  VK_QUERY_RESULT_64_BIT) == VK_SUCCESS && t[1] >= t[0]) {
+            double ms = (double)(t[1] - t[0]) * g_tickNs / 1e6;
+            g_gpuMs += ms;
+            if (ms > g_gpuMax) g_gpuMax = ms;
+            ++g_gpuFrames;
+        }
+    }
+    if (g_gpuTraceSlot == g_frame) gpu_trace_report();
     free_garbage(f);
     vkResetCommandBuffer(f.cmd, 0);
     vkResetDescriptorPool(g_dev, f.pool, 0);
@@ -2532,6 +2620,20 @@ void next_frame() {
     f.vOff = f.iOff = f.uOff = 0;
     g_recording = false;
     begin_recording();
+    g_frameTimed[g_frame] = g_queries != VK_NULL_HANDLE;
+    g_frameFlushed[g_frame] = false;
+    if (g_queries) {
+        vkCmdResetQueryPool(f.cmd, g_queries, (uint32_t)(2 * g_frame), 2);
+        vkCmdWriteTimestamp(f.cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, g_queries, (uint32_t)(2 * g_frame));
+        if (g_gpuTraceNext && g_gpuTraceSlot < 0) {
+            g_gpuTraceNext = false;
+            g_gpuTraceSlot = g_frame;
+            g_gpuTraceFrame = gl_frame_count();
+            g_gpuTraceLabels.clear();
+            vkCmdResetQueryPool(f.cmd, g_queries, 2 * FRAMES, GPU_TRACE_MAX);
+            vkCmdWriteTimestamp(f.cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, g_queries, 2 * FRAMES);
+        }
+    }
 }
 
 }  // namespace
@@ -2567,7 +2669,15 @@ void gl_vk_work(GlVkWork* w) {
     w->texMs = g_texMs;
     w->materializeMs = g_materializeMs;
     w->texBytes = g_texBytes;
+    w->gpuMs = g_gpuMs;
+    w->gpuFrames = g_gpuFrames;
 }
+double gl_vk_gpu_max_reset() {
+    double m = g_gpuMax;
+    g_gpuMax = 0;
+    return m;
+}
+void gl_vk_gpu_trace_next() { g_gpuTraceNext = g_queries != VK_NULL_HANDLE; }
 uint64_t gl_vk_packed_bytes() { return g_packedBytes; }
 
 void write_shader_samples() {
@@ -2718,15 +2828,18 @@ void gl_vk_present() {
         vp.minDepth = 0.0f;
         vp.maxDepth = 1.0f;
         VkRect2D sc = {{0, 0}, g_swapExtent};
-        VkClearAttachment att;
-        memset(&att, 0, sizeof(att));
-        att.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        VkClearRect cr;
-        memset(&cr, 0, sizeof(cr));
-        cr.rect = sc;
-        cr.layerCount = 1;
-        vkCmdClearAttachments(f.cmd, 1, &att, 1, &cr);
-        vkCmdBindPipeline(f.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, g_presentPipe);
+        // black bars only where the picture leaves some (the pass begins DONT_CARE)
+        if (vp.width < g_swapExtent.width - 0.5f || vp.height < g_swapExtent.height - 0.5f) {
+            VkClearAttachment att;
+            memset(&att, 0, sizeof(att));
+            att.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+            VkClearRect cr;
+            memset(&cr, 0, sizeof(cr));
+            cr.rect = sc;
+            cr.layerCount = 1;
+            vkCmdClearAttachments(f.cmd, 1, &att, 1, &cr);
+        }
+        vkCmdBindPipeline(f.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, g_presentWhole ? g_presentCopyPipe : g_presentPipe);
         vkCmdBindDescriptorSets(f.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, g_presentLayout, 0, 1, &g_presentSet, 0, 0);
         // each output pixel the area-weighted average of the frame's pixels under it, or BOI360_PRESENT_FILTER=doubled
         // (shaders.py PRESENT_FS)
@@ -2741,7 +2854,15 @@ void gl_vk_present() {
         vkCmdBindVertexBuffers(f.cmd, 0, 1, &g_presentQuad.buf, &off);
         vkCmdDraw(f.cmd, 6, 1, 0, 0);
         vkCmdEndRenderPass(f.cmd);
+        if (g_gpuTraceSlot == g_frame) {
+            char where[64];
+            snprintf(where, sizeof(where), "the present into %ux%u (and the pass ends before it)", g_swapExtent.width,
+                     g_swapExtent.height);
+            gpu_stamp(where);
+        }
     }
+    if (g_queries && g_frameTimed[g_frame])
+        vkCmdWriteTimestamp(f.cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, g_queries, (uint32_t)(2 * g_frame + 1));
     vkEndCommandBuffer(f.cmd);
     g_recording = false;
     VkPipelineStageFlags wait = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
