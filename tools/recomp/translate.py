@@ -52,10 +52,13 @@ PATCHES = {
 # translated code run. The game's stb_vorbis decodes music on its sound thread holding the sound manager's lock;
 # translated, that decode is too slow on the console and the main thread waits on the lock
 # (src/recomp/hle_vorbis.cpp decodes ahead natively). libpng's row unfiltering runs per byte over every texture a
-# room loads (src/recomp/hle_png.cpp). The engine's reference counting locks a lock object ~2,300 times a frame,
-# each a translated wrapper around a critical section's import (src/recomp/shims_kernel32.cpp).
+# room loads (src/recomp/hle_png.cpp), and its zlib inflate was a fifth of a door's frame (src/recomp/hle_inflate.cpp).
+# The engine's reference counting locks a lock object ~2,300 times a frame, each a translated wrapper around a
+# critical section's import (src/recomp/shims_kernel32.cpp).
 HOST = {
     0x9b2b60: 'hle_png_filter_row',           # png_read_filter_row (row_info edx; row, prev_row, filter on the stack)
+    0x9af810: 'hle_inflate',                  # zlib 1.1's inflate (strm ecx, the flush folded in), libpng's only
+    0x9af540: 'hle_inflate_end',              # its inflateEnd (strm ecx): the host's state goes, the game's end runs
     0x9aa630: 'hle_vorbis_get_samples',       # stb_vorbis_get_samples_short_interleaved (f ecx, channels edx)
     0x9a3e50: 'hle_vorbis_set_file_offset',   # set_file_offset (f ecx, loc edx): stb_vorbis_seek_start's start
     0x9a7910: 'hle_vorbis_pump_first_frame',  # vorbis_pump_first_frame (f ecx): stb_vorbis_seek_start's restart

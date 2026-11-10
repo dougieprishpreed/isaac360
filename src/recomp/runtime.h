@@ -46,6 +46,10 @@ uint32_t guest_calloc(uint32_t n, uint32_t size);
 uint32_t guest_block_size(uint32_t p);
 uint32_t guest_heap_used();
 uint32_t guest_heap_top();                  // the heap's high mark: the console commits up to it
+// BOI360_HEAP_CHECK=1 (runtime.cpp): guard bytes, freed blocks filled and held back; the shims say where a block
+// was made or freed ("made from", "freed from") for its reports
+bool guest_heap_checking();
+void guest_heap_note(uint32_t p, const char* what, const std::string& where);
 
 // call a guest function from host code (window procedures, thread entries, callbacks): pushes the arguments
 // right to left and a host return marker; stdcall callees pop their own arguments, cdecl ones are popped here.
@@ -103,6 +107,7 @@ std::vector<std::string> recomp_host_dirs(const std::string& guestDir);   // hos
 void recomp_sample_threads(void (*line)(const char*));   // each guest thread's shim and stack (watchdog)
 void recomp_profile_start();             // BOI360_PROFILE: sample the main guest thread (runtime.cpp)
 void recomp_profile_dump(void (*line)(const char*));   // the samples since the last dump, most frequent first
+void recomp_profile_frame(bool slow);    // BOI360_PROFILE=slow: a frame ended; its samples count if it was slow
 int recomp_guest_returns(X86* c, uint32_t* out, int n);    // the innermost guest return addresses on c's stack
 void shims_lock_stats_dump(void (*line)(const char*));    // BOI360_PROFILE: contended critical sections (kernel32)
 double shims_lock_wait_ms();               // BOI360_PROFILE: ms all threads waited for critical sections so far

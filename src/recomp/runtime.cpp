@@ -289,6 +289,20 @@ std::map<uint32_t, uint32_t> g_freeBig;                      // address -> size 
 uint32_t g_used = 0;
 const uint32_t kMagic = 0x48454150;                          // 'HEAP'
 
+// BOI360_HEAP_CHECK=1, a debug heap for overruns and use after free (the races a guest thread can make): each block
+// keeps 16 more bytes, and the bytes past its requested size (to its end) hold 0xFD until it is freed and checked;
+// a freed block is filled with 0xDD and held back from reuse until 32 MB of later frees have passed, then checked
+// again before it goes back. Each failure is logged with where the block was made and freed (shims_crt.cpp).
+int g_heapCheck = -1;
+struct HeldBlock {
+    uint32_t block, need;
+};
+std::deque<HeldBlock> g_held;
+uint32_t g_heldBytes = 0;
+std::unordered_map<uint32_t, std::string> g_heapSites;      // block -> "made from ..." (", freed from ...")
+const uint32_t kFreed = 0x44454144;                          // 'DEAD': a held block
+const uint32_t kHoldBytes = 32u << 20;
+
 uint32_t carve(uint32_t total) {
     for (;;) {
         uint32_t at = g_heapTop;
@@ -315,61 +329,13 @@ uint32_t carve(uint32_t total) {
 }
 }
 
-uint32_t guest_malloc(uint32_t size) {
-    if (size == 0) size = 1;
-    uint32_t need = (size + 15) & ~15u;
-    std::lock_guard<std::mutex> g(g_heapLock);
-    uint32_t block = 0, total = need + 16;
-    if (need <= 2048) {
-        std::vector<uint32_t>& bin = g_bins[need >> 4];
-        if (!bin.empty()) {
-            block = bin.back();
-            bin.pop_back();
-        } else {
-            block = carve(total);
-        }
-    } else {
-        for (std::map<uint32_t, uint32_t>::iterator it = g_freeBig.begin(); it != g_freeBig.end(); ++it)
-            if (it->second >= total) {
-                block = it->first;
-                uint32_t rest = it->second - total;
-                g_freeBig.erase(it);
-                if (rest >= 4096) g_freeBig[block + total] = rest;
-                else total += rest;
-                break;
-            }
-        if (!block) block = carve(total);
-    }
-    if (!block) {
-        recomp_log("guest heap exhausted: %u bytes requested, %u in use", size, g_used);
-        return 0;
-    }
-    WR32(block, total - 16);
-    WR32(block + 4, kMagic);
-    g_used += total;
-    return block + 16;
-}
-
-uint32_t guest_block_size(uint32_t p) { return p ? RD32(p - 16) : 0; }
-uint32_t guest_heap_used() { return g_used; }
-uint32_t guest_heap_top() { return g_heapTop; }
-
-void guest_free(uint32_t p) {
-    if (!p) return;
-    std::lock_guard<std::mutex> g(g_heapLock);
-    uint32_t block = p - 16;
-    if (RD32(block + 4) != kMagic) {
-        recomp_log("guest free of a bad block %08x", p);
-        return;
-    }
-    uint32_t need = RD32(block);
-    WR32(block + 4, 0);
-    g_used -= need + 16;
+// gives a block back to the free lists (the heap lock held)
+static void release_block(uint32_t block, uint32_t need) {
     if (need <= 2048) {
         g_bins[need >> 4].push_back(block);
         return;
     }
-    uint32_t total = need + 16;
+    uint32_t total = need + (g_heapCheck ? 32 : 16);
     std::map<uint32_t, uint32_t>::iterator next = g_freeBig.lower_bound(block);
     if (next != g_freeBig.end() && next->first == block + total) {
         total += next->second;
@@ -386,6 +352,131 @@ void guest_free(uint32_t p) {
     g_freeBig[block] = total;
 }
 
+static std::string heap_site(uint32_t block) {
+    std::unordered_map<uint32_t, std::string>::iterator it = g_heapSites.find(block);
+    return it == g_heapSites.end() ? std::string("made from an unknown site") : it->second;
+}
+
+// BOI360_HEAP_CHECK: the fill of the oldest held blocks, then their release (the heap lock held)
+static void release_held(uint32_t keep) {
+    while (g_heldBytes > keep && !g_held.empty()) {
+        HeldBlock h = g_held.front();
+        g_held.pop_front();
+        g_heldBytes -= h.need + 32;
+        const uint8_t* p = g_mem + h.block + 16;
+        for (uint32_t i = 0; i < h.need; ++i)
+            if (p[i] != 0xDD) {
+                recomp_log("heap check: block %08x (%u bytes, %s) was written after it was freed: at +%u %02x %02x %02x %02x",
+                           h.block + 16, h.need, heap_site(h.block).c_str(), i, p[i], i + 1 < h.need ? p[i + 1] : 0,
+                           i + 2 < h.need ? p[i + 2] : 0, i + 3 < h.need ? p[i + 3] : 0);
+                break;
+            }
+        WR32(h.block + 4, 0);
+        g_heapSites.erase(h.block);
+        release_block(h.block, h.need);
+    }
+}
+
+bool guest_heap_checking() {
+    if (g_heapCheck < 0) g_heapCheck = getenv("BOI360_HEAP_CHECK") && atoi(getenv("BOI360_HEAP_CHECK")) ? 1 : 0;
+    return g_heapCheck != 0;
+}
+
+void guest_heap_note(uint32_t p, const char* what, const std::string& where) {
+    if (!p || !g_heapCheck) return;
+    std::lock_guard<std::mutex> g(g_heapLock);
+    std::string& s = g_heapSites[p - 16];
+    s = s.empty() ? std::string(what) + " " + where : s + ", " + what + " " + where;
+}
+
+// a block of total bytes (header included) from the free lists or the heap's end; total grows by a free run's
+// remainder too small to keep (the heap lock held)
+static uint32_t take_block(uint32_t need, uint32_t& total) {
+    if (need <= 2048) {
+        std::vector<uint32_t>& bin = g_bins[need >> 4];
+        if (bin.empty()) return carve(total);
+        uint32_t block = bin.back();
+        bin.pop_back();
+        return block;
+    }
+    for (std::map<uint32_t, uint32_t>::iterator it = g_freeBig.begin(); it != g_freeBig.end(); ++it)
+        if (it->second >= total) {
+            uint32_t block = it->first, rest = it->second - total;
+            g_freeBig.erase(it);
+            if (rest >= 4096) g_freeBig[block + total] = rest;
+            else total += rest;
+            return block;
+        }
+    return carve(total);
+}
+
+uint32_t guest_malloc(uint32_t size) {
+    if (size == 0) size = 1;
+    uint32_t need = (size + 15) & ~15u;
+    guest_heap_checking();
+    std::lock_guard<std::mutex> g(g_heapLock);
+    uint32_t total = need + (g_heapCheck ? 32 : 16);
+    uint32_t block = take_block(need, total);
+    if (!block && g_heapCheck && !g_held.empty()) {
+        release_held(0);                             // held blocks go back before the heap counts as full
+        block = take_block(need, total);
+    }
+    if (!block) {
+        recomp_log("guest heap exhausted: %u bytes requested, %u in use", size, g_used);
+        return 0;
+    }
+    uint32_t extra = g_heapCheck ? 32 : 16;
+    WR32(block, total - extra);
+    WR32(block + 4, kMagic);
+    g_used += total;
+    if (g_heapCheck) {
+        need = total - extra;
+        WR32(block + 8, size);
+        memset(g_mem + block + 16 + size, 0xFD, need + 16 - size);
+        g_heapSites.erase(block);
+    }
+    return block + 16;
+}
+
+// the requested size under BOI360_HEAP_CHECK (its 0xFD bytes follow it), else the block's whole size
+uint32_t guest_block_size(uint32_t p) { return p ? RD32(p - 16 + (g_heapCheck ? 8 : 0)) : 0; }
+uint32_t guest_heap_used() { return g_used; }
+uint32_t guest_heap_top() { return g_heapTop; }
+
+void guest_free(uint32_t p) {
+    if (!p) return;
+    std::lock_guard<std::mutex> g(g_heapLock);
+    uint32_t block = p - 16;
+    if (RD32(block + 4) != kMagic) {
+        if (g_heapCheck && RD32(block + 4) == kFreed)
+            recomp_log("heap check: block %08x (%s) freed again", p, heap_site(block).c_str());
+        else
+            recomp_log("guest free of a bad block %08x", p);
+        return;
+    }
+    uint32_t need = RD32(block);
+    if (!g_heapCheck) {
+        WR32(block + 4, 0);
+        g_used -= need + 16;
+        release_block(block, need);
+        return;
+    }
+    uint32_t asked = RD32(block + 8);
+    const uint8_t* tail = g_mem + p;
+    for (uint32_t i = asked; i < need + 16; ++i)
+        if (tail[i] != 0xFD) {
+            recomp_log("heap check: block %08x (%u bytes, %s) was written %u bytes past its end", p, asked,
+                       heap_site(block).c_str(), i - asked + 1);
+            break;
+        }
+    WR32(block + 4, kFreed);
+    memset(g_mem + p, 0xDD, need);
+    g_used -= need + 32;
+    g_held.push_back(HeldBlock{block, need});
+    g_heldBytes += need + 32;
+    release_held(kHoldBytes);
+}
+
 uint32_t guest_realloc(uint32_t p, uint32_t size) {
     if (!p) return guest_malloc(size);
     if (!size) {
@@ -393,10 +484,10 @@ uint32_t guest_realloc(uint32_t p, uint32_t size) {
         return 0;
     }
     uint32_t old = guest_block_size(p);
-    if (size <= old) return p;
+    if (size <= old && !g_heapCheck) return p;
     uint32_t q = guest_malloc(size);
     if (q) {
-        memcpy(g_mem + q, g_mem + p, old);
+        memcpy(g_mem + q, g_mem + p, std::min(old, size));
         guest_free(p);
     }
     return q;
@@ -626,9 +717,14 @@ struct ProfileKey {
         return at < o.at;
     }
 };
+// BOI360_PROFILE=slow keeps only the samples of frames that turn out slow (recomp_profile_frame: the slow frame
+// lines' test), to see what a door's or a load's frame does; the main thread's samples also count every guest
+// return address on its stack once ("incl" lines: a function's share with all it calls).
 static std::mutex g_profileLock;
-static std::map<ProfileKey, uint32_t> g_profileCounts;
-static uint32_t g_profileSamples[kSampledThreads];
+static std::map<ProfileKey, uint32_t> g_profileCounts, g_frameCounts;
+static std::map<uint32_t, uint32_t> g_profileIncl, g_frameIncl;
+static uint32_t g_profileSamples[kSampledThreads], g_frameSamples[kSampledThreads];
+static bool g_profileSlow = false;
 
 int recomp_guest_returns(X86* c, uint32_t* out, int n) {
     int found = 0;
@@ -651,6 +747,9 @@ static uint32_t innermost_return(X86* c) {
 
 static void profile_thread(void*) {
     if (g_cfg.threadStarted) g_cfg.threadStarted("profiler");
+    std::map<ProfileKey, uint32_t>& counts = g_profileSlow ? g_frameCounts : g_profileCounts;
+    std::map<uint32_t, uint32_t>& incl = g_profileSlow ? g_frameIncl : g_profileIncl;
+    uint32_t* samples = g_profileSlow ? g_frameSamples : g_profileSamples;
     for (;;) {
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
         std::lock_guard<std::mutex> lock(g_profileLock);
@@ -659,23 +758,49 @@ static void profile_thread(void*) {
             if (!c) continue;
             const char* thunk = g_sampleThunk[i];
             ProfileKey k = {i, thunk && thunk[0] ? thunk : 0, innermost_return(c)};
-            ++g_profileCounts[k];
-            ++g_profileSamples[i];
+            ++counts[k];
+            ++samples[i];
+            if (i == 0) {
+                uint32_t rets[24];
+                int n = recomp_guest_returns(c, rets, 24);
+                std::sort(rets, rets + n);
+                for (int j = 0; j < n; ++j)
+                    if (!j || rets[j] != rets[j - 1]) ++incl[rets[j]];
+            }
         }
     }
 }
 
 void recomp_profile_start() {
-    if (!getenv("BOI360_PROFILE")) return;
+    const char* mode = getenv("BOI360_PROFILE");
+    if (!mode) return;
+    g_profileSlow = !strcmp(mode, "slow");
     host_thread_start(profile_thread, 0, 256u << 10);
+}
+
+void recomp_profile_frame(bool slow) {
+    if (!g_profileSlow) return;
+    std::lock_guard<std::mutex> lock(g_profileLock);
+    if (slow) {
+        for (std::map<ProfileKey, uint32_t>::iterator it = g_frameCounts.begin(); it != g_frameCounts.end(); ++it)
+            g_profileCounts[it->first] += it->second;
+        for (std::map<uint32_t, uint32_t>::iterator it = g_frameIncl.begin(); it != g_frameIncl.end(); ++it)
+            g_profileIncl[it->first] += it->second;
+        for (int i = 0; i < kSampledThreads; ++i) g_profileSamples[i] += g_frameSamples[i];
+    }
+    g_frameCounts.clear();
+    g_frameIncl.clear();
+    memset(g_frameSamples, 0, sizeof(g_frameSamples));
 }
 
 void recomp_profile_dump(void (*line)(const char*)) {
     std::map<ProfileKey, uint32_t> counts;
+    std::map<uint32_t, uint32_t> incl;
     uint32_t totals[kSampledThreads];
     {
         std::lock_guard<std::mutex> lock(g_profileLock);
         counts.swap(g_profileCounts);
+        incl.swap(g_profileIncl);
         memcpy(totals, g_profileSamples, sizeof(totals));
         memset(g_profileSamples, 0, sizeof(g_profileSamples));
     }
@@ -702,6 +827,16 @@ void recomp_profile_dump(void (*line)(const char*)) {
                 snprintf(buf, sizeof(buf), "profile %s: %5.1f%% in %s from %08x", g_sampleName[t], share, k.thunk, k.at);
             else
                 snprintf(buf, sizeof(buf), "profile %s: %5.1f%% at %08x", g_sampleName[t], share, k.at);
+            line(buf);
+        }
+        if (t != 0 || !g_profileSlow) continue;
+        std::vector<std::pair<uint32_t, uint32_t> > byIncl;
+        for (std::map<uint32_t, uint32_t>::iterator it = incl.begin(); it != incl.end(); ++it)
+            byIncl.push_back(std::make_pair(it->second, it->first));
+        std::sort(byIncl.rbegin(), byIncl.rend());
+        for (size_t i = 0; i < byIncl.size() && i < 60; ++i) {
+            snprintf(buf, sizeof(buf), "profile %s: incl %5.1f%% at %08x", g_sampleName[t], 100.0 * byIncl[i].first / totals[t],
+                     byIncl[i].second);
             line(buf);
         }
     }

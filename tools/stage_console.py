@@ -106,7 +106,8 @@ Files
   dlls\\              the game's runtime libraries, prepared for the console
   save\\              saves and the game's settings are written here
   boi360.log         written each session: copy it off before ejecting the drive
-  boi360_args.txt    options: --mem MB (address space for the game)
+  boi360_args.txt    options: --mem MB (address space for the game); a line BOI360_DISPLAY=720p
+                     keeps the picture at 1280x720 when the console is set to 1080p
   licenses\\          licences of the toolchain the build uses
 
 Controls: the game's own controller layout (left stick moves, right stick fires).

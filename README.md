@@ -82,10 +82,10 @@ From the repository root:
    py -3 tools\recomp\console_sfx.py
    ```
 
-6. The console's `default.xex`, in WSL:
+6. The console's `default.xex`, in WSL. The xsdk and vulkan4xenon checkouts get the patches in `tools/xsdk/patches` (a 1920x1080 display on a 1080p console) and their libraries are built first (`tools/xsdk/deps.sh`), so give it checkouts of its own, side by side:
 
    ```sh
-   XSDK=/path/to/xsdk VULKAN4XENON=/path/to/vulkan4xenon tools/xsdk/build_recomp.sh
+   XSDK=/path/to/deps/xsdk VULKAN4XENON=/path/to/deps/vulkan4xenon tools/xsdk/build_recomp.sh
    ```
 
 7. Stage the folder for the USB drive:
@@ -103,7 +103,9 @@ The folder holds:
 - `game\` (your game files, with the converted sound archives and `sfx.pcm`)
 - `dlls\`
 - `save\` (saves and settings)
-- `boi360_args.txt`: `--mem MB` sets the game's address space
+- `boi360_args.txt`: `--mem MB` sets the game's address space; a line `BOI360_DISPLAY=720p` keeps the picture at 1280x720 on a 1080p console
+
+On a console set to 1080p the game shows a 1920x1080 picture with each of its pixels as an exact 2x2 block, as the PC version does at 1920x1080. On other video settings it draws 1280x720, which the console scales to the screen.
 
 Each session writes `boi360.log` and `default.log` beside the XEX. They show how far loading got and how much memory is free, so copy them off before ejecting the drive.
 

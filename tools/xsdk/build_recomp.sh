@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Builds the console's default.xex of the recompiled game (docs/RECOMP_PLAN.md) with the open xsdk toolchain
-# (WSL on Windows). Defaults: the CTR360-XSDK distro's shared checkouts in /opt/ctr360-xsdk (read only), boi360's
-# own output in /opt/boi360-xsdk/recomp.
+# (WSL on Windows). Defaults: boi360's own xsdk and vulkan4xenon checkouts in /opt/boi360-xsdk/deps, patched and
+# built by tools/xsdk/deps.sh first; the toolchain and glslang from the CTR360-XSDK distro's shared /opt/ctr360-xsdk
+# (read only); the output in /opt/boi360-xsdk/recomp.
 #
 #   [XSDK=... VULKAN4XENON=... GLSLANG=... XSDK_TOOLCHAIN=... JOBS=2 GEN_OPT=-O2] tools/xsdk/build_recomp.sh
 #
@@ -11,14 +12,18 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 DEPS=/opt/ctr360-xsdk
-XSDK="${XSDK:-$DEPS/xsdk}"
-VULKAN4XENON="${VULKAN4XENON:-$DEPS/vulkan4xenon}"
+XSDK="${XSDK:-/opt/boi360-xsdk/deps/xsdk}"
+VULKAN4XENON="${VULKAN4XENON:-/opt/boi360-xsdk/deps/vulkan4xenon}"
 GLSLANG="${GLSLANG:-$DEPS/glslang/build-host/StandAlone/glslang}"
 XSDK_TOOLCHAIN="${XSDK_TOOLCHAIN:-$DEPS/toolchain}"
 OUT="${BOI_XSDK_BUILD:-/opt/boi360-xsdk/recomp}"
 JOBS="${JOBS:-2}"
 GEN_OPT="${GEN_OPT:--O2}"
 mkdir -p "$OUT"
+# the display-output patches (tools/xsdk/patches) go on boi360's own checkouts
+if [ "$(dirname "$XSDK")" = "$(dirname "$VULKAN4XENON")" ] && [ "$(dirname "$XSDK")" != "$DEPS" ]; then
+  DEPS="$(dirname "$XSDK")" TOOLCHAIN="$XSDK_TOOLCHAIN/bin/powerpc-xsdk-elf-" JOBS="$JOBS" bash "$ROOT/tools/xsdk/deps.sh"
+fi
 for f in "$XSDK/build/libxsdk.a" "$XSDK/build/host/libxsc.so" "$VULKAN4XENON/build/libvulkan4xenon.a" "$GLSLANG" \
          "$ROOT/build/recomp/gl_shaders.inc" "$ROOT/build/recomp/out/functions.c" "$ROOT/build/recomp/out_lua/functions.c" \
          "$ROOT/build/recomp/out_msvcp/functions.c"; do

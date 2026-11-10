@@ -4,7 +4,8 @@ The profiler (runtime.cpp) samples every guest thread each millisecond: the shim
 called it, or in game code the innermost return address on its stack. A return address follows the call of the
 function that was running, so each is shown as that callee and the function holding the call site. The log's
 blocks (one each 600 frames) are averaged per thread, from --from-block on. The "locks:" lines (contended critical
-sections, kernel32 shims) are summed, their waiting and holding code named the same way.
+sections, kernel32 shims) are summed, their waiting and holding code named the same way. A BOI360_PROFILE=slow log
+(only slow frames' samples) adds the main thread's inclusive shares: each call on the stack, with all it calls.
 
     tools/.venv/Scripts/python tools/recomp/profile_report.py work/console09/boi360.log [--from-block N] [--top 30]
 """
@@ -86,10 +87,16 @@ def main():
     blocks = defaultdict(int)                 # thread -> blocks seen from --from-block
     seen = defaultdict(int)                   # thread -> blocks seen
     shares = defaultdict(Counter)             # thread -> key -> summed share
+    incl = Counter()                          # BOI360_PROFILE=slow: return address -> summed inclusive share
     game = defaultdict(float)
     locks = {}
     for line in open(args.log, errors='replace'):
         line = line.rstrip()
+        m = re.match(r'profile main: incl\s+([\d.]+)% at ([0-9a-f]{8})', line)
+        if m:
+            if seen['main'] > args.from_block:
+                incl[int(m.group(2), 16)] += float(m.group(1))
+            continue
         m = re.match(r'profile(?: (.+?))?: (\d+) samples, ([\d.]+)% in game code', line)
         if m:
             t = m.group(1) or 'main'
@@ -128,6 +135,10 @@ def main():
                 print('%6.1f%%  %s, called in %s' % (share / n, shim, namer.caller(at) if at else '?'))
             else:
                 print('%6.1f%%  %s' % (share / n, namer.site(at) if at else 'game code, no return address'))
+        if t == 'main' and incl:
+            print('== main, inclusive: the share of samples with each call on the stack')
+            for at, share in incl.most_common(args.top * 2):
+                print('%6.1f%%  %s' % (share / n, namer.site(at)))
     if locks:
         print('== contended locks (summed)')
         for a, e in sorted(locks.items(), key=lambda kv: -kv[1]['ms'])[:10]:

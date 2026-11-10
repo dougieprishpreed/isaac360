@@ -1,0 +1,184 @@
+diff --git a/include/xsdk/display.h b/include/xsdk/display.h
+index 0e307d0..2d41c73 100644
+--- a/include/xsdk/display.h
++++ b/include/xsdk/display.h
+@@ -18,10 +18,16 @@ typedef enum {
+ 	XSDK_DISPLAY_720P,
+ 	// The kernel's own front buffer and scaling, 640x480 on the console tested.
+ 	XSDK_DISPLAY_KERNEL,
++	// The output's own size shown 1:1, the scaler off, where the output is progressive, widescreen and no larger than
++	// 1920x1080 (and the title hasn't forced letterboxing); elsewhere as XSDK_DISPLAY_720P.
++	XSDK_DISPLAY_OUTPUT,
+ } XsdkDisplayMode;
+ 
+ // Takes the display and returns the front buffer's size; STATUS_NOT_SUPPORTED where there is none, as in Xenia.
+ NTSTATUS xsdk_display_open(XsdkDisplayMode mode, uint32_t *width, uint32_t *height);
++// The front buffer's size XSDK_DISPLAY_720P or XSDK_DISPLAY_OUTPUT would give now, without taking the display: for a
++// title to size its frames before xsdk_present_open.
++void xsdk_display_mode_size(XsdkDisplayMode mode, uint32_t *width, uint32_t *height);
+ // A test hook: has xsdk_present letterbox 1280x720 from the next open on any screen, as on a 4:3 one; on a
+ // widescreen screen the picture shows squashed.
+ void xsdk_display_force_letterbox(bool force);
+diff --git a/src/display.c b/src/display.c
+index 2c81e3f..050fe36 100644
+--- a/src/display.c
++++ b/src/display.c
+@@ -51,6 +51,12 @@ enum {
+ 	LUT_ALL_CHANNELS = 7,
+ 	WIDTH_720P = 1280,
+ 	HEIGHT_720P = 720,
++	// The largest output XSDK_DISPLAY_OUTPUT shows 1:1: the line buffer holds 1920 pixels (docs/HARDWARE.md, "The
++	// built-in 2-tap filter scales 1280x720 to 1920x1080 whole": DC_LB_MEM_SIZE).
++	WIDTH_1080P = 1920,
++	HEIGHT_1080P = 1080,
++	// A resolve, and so a front buffer's pitch, is whole columns of 32 pixels (gpu_draw.c).
++	RESOLVE_COLUMN = 32,
+ 	SCALE_ONE_LOG2 = 24,
+ 	// 2 taps each way through the built-in filter, the only setting that scaled whole (docs/HARDWARE.md).
+ 	TWO_TAPS = 0x101,
+@@ -92,9 +98,11 @@ static const uint32_t scaler_registers[SCALER_REGISTERS] = { AVIVO_D1SCL_SCALER_
+ 	UNKNOWN_1972 };
+ 
+ static bool is_open;
++static uint32_t mode_width;
+ static uint32_t mode_height;
+ static Surface old_surface;
+-// Set while the title's front buffer is 1280x720 on the SDK's scaling rather than the kernel's.
++// Set while the title's front buffer is 1280x720, or the output's own size, on the SDK's scaling rather than the
++// kernel's.
+ static bool scaling;
+ // Set where the screen is 4:3, or the title forced it, for xsdk_present to letterbox its frames.
+ static bool letterboxed;
+@@ -154,8 +162,26 @@ static void plan_values(uint32_t width, uint32_t height, uint32_t *values)
+ 	values[VERTICAL_PHASE] = phase(vertical);
+ }
+ 
+-// Plans 1280x720 filling the output.
+-static bool plan_scaler(void)
++// Whether XSDK_DISPLAY_OUTPUT shows this output at its own size: its width a whole number of the tiled layout's
++// 32-pixel columns, as the display's pitch is the front buffer's width (a VGA output's 1360x768 stays on 1280x720).
++static bool shows_output(const VIDEO_MODE *video)
++{
++	return !video->is_interlaced && video->is_widescreen && !letterbox_forced && video->display_width &&
++		video->display_height && video->display_width <= WIDTH_1080P && video->display_height <= HEIGHT_1080P &&
++		video->display_width % RESOLVE_COLUMN == 0;
++}
++
++void xsdk_display_mode_size(XsdkDisplayMode mode, uint32_t *width, uint32_t *height)
++{
++	VIDEO_MODE video;
++	VdQueryVideoMode(&video);
++	const bool output = mode == XSDK_DISPLAY_OUTPUT && shows_output(&video);
++	*width = output ? video.display_width : WIDTH_720P;
++	*height = output ? video.display_height : HEIGHT_720P;
++}
++
++// Plans the mode's front buffer filling the output: 1280x720, or the output's own size 1:1.
++static bool plan_scaler(XsdkDisplayMode mode)
+ {
+ 	VIDEO_MODE video;
+ 	VdQueryVideoMode(&video);
+@@ -169,15 +195,34 @@ static bool plan_scaler(void)
+ 	output_width = video.display_width;
+ 	output_height = video.display_height;
+ 	letterboxed = !video.is_widescreen || letterbox_forced;
+-	plan_values(WIDTH_720P, HEIGHT_720P, new_scaler);
+-	xsdk_log_write("display: 1280x720 %s to the %ux%u output", new_scaler[SCALER_ENABLE] ? "scaled" : "shown 1:1",
+-		(unsigned)video.display_width, (unsigned)video.display_height);
++	xsdk_display_mode_size(mode, &mode_width, &mode_height);
++	plan_values(mode_width, mode_height, new_scaler);
++	xsdk_log_write("display: %ux%u %s to the %ux%u output", (unsigned)mode_width, (unsigned)mode_height,
++		new_scaler[SCALER_ENABLE] ? "scaled" : "shown 1:1", (unsigned)video.display_width,
++		(unsigned)video.display_height);
+ 	if (letterboxed)
+ 		xsdk_log_write("display: xsdk_present letterboxes its frames, as %s",
+ 			video.is_widescreen ? "the title asks" : "the screen is 4:3");
+ 	return true;
+ }
+ 
++bool xsdk_display_take_output(uint32_t *width, uint32_t *height)
++{
++	assert(is_open);
++	VIDEO_MODE video;
++	VdQueryVideoMode(&video);
++	if (!scaling || !shows_output(&video) || (video.display_width == mode_width && video.display_height == mode_height))
++		return false;
++	mode_width = video.display_width;
++	mode_height = video.display_height;
++	plan_values(mode_width, mode_height, new_scaler);
++	xsdk_log_write("display: %ux%u shown 1:1 on the output from the first frame", (unsigned)mode_width,
++		(unsigned)mode_height);
++	*width = mode_width;
++	*height = mode_height;
++	return true;
++}
++
+ void xsdk_display_force_letterbox(bool force)
+ {
+ 	letterbox_forced = force;
+@@ -229,10 +274,11 @@ NTSTATUS xsdk_display_open(XsdkDisplayMode mode, uint32_t *width, uint32_t *heig
+ 		.x_end = gpu_registers[D1GRPH_X_END],
+ 		.y_end = gpu_registers[D1GRPH_Y_END],
+ 	};
+-	scaling = mode == XSDK_DISPLAY_720P && plan_scaler();
++	scaling = (mode == XSDK_DISPLAY_720P || mode == XSDK_DISPLAY_OUTPUT) && plan_scaler(mode);
+ 	scaler_applied = false;
+-	*width = scaling ? WIDTH_720P : viewport >> 16;
+-	*height = scaling ? HEIGHT_720P : viewport & 0xFFFF;
++	*width = scaling ? mode_width : viewport >> 16;
++	*height = scaling ? mode_height : viewport & 0xFFFF;
++	mode_width = *width;
+ 	mode_height = *height;
+ 	is_open = true;
+ 	return STATUS_SUCCESS;
+@@ -303,7 +349,7 @@ NTSTATUS xsdk_display_show(uint32_t address, uint32_t pitch_pixels)
+ 	const Surface surface = { .address = address, .pitch = pitch_pixels, .x_end = pitch_pixels, .y_end = mode_height };
+ 	if (!scaling)
+ 		return apply(&surface);
+-	DisplaySize size = { .pitch = pitch_pixels, .width = WIDTH_720P, .height = mode_height };
++	DisplaySize size = { .pitch = pitch_pixels, .width = mode_width, .height = mode_height };
+ 	memcpy(size.scaler, new_scaler, sizeof size.scaler);
+ 	return xsdk_display_show_sized(address, &size);
+ }
+diff --git a/src/gpu_private.h b/src/gpu_private.h
+index f2bf7e1..34dbb08 100644
+--- a/src/gpu_private.h
++++ b/src/gpu_private.h
+@@ -321,6 +321,9 @@ bool xsdk_display_plan(uint32_t width, uint32_t height, uint32_t pitch, DisplayS
+ bool xsdk_display_output(uint32_t *width, uint32_t *height);
+ // Whether the 720p mode's frames are to be letterboxed: the screen is 4:3, or the title forced it.
+ bool xsdk_display_letterboxed(void);
++// For a display the splash opened at 1280x720 that XSDK_DISPLAY_OUTPUT takes over: plans the output's own size 1:1
++// in its place and gives it, or false where the output doesn't take it (or already shows it).
++bool xsdk_display_take_output(uint32_t *width, uint32_t *height);
+ // As xsdk_display_show, a surface of a planned size.
+ NTSTATUS xsdk_display_show_sized(uint32_t address, const DisplaySize *size);
+ // As xsdk_display_flip, to a surface of a planned size: the scaler and the surface's size change first when they
+diff --git a/src/present.c b/src/present.c
+index 89f7543..21a3dcd 100644
+--- a/src/present.c
++++ b/src/present.c
+@@ -179,10 +179,13 @@ NTSTATUS xsdk_present_open(
+ {
+ 	assert(!present.open && buffer_count >= 2 && buffer_count <= XSDK_PRESENT_MAX_BUFFERS);
+ 	assert(swap_interval >= 1 && swap_interval <= 2);
+-	const bool splash_held = mode == XSDK_DISPLAY_720P && xsdk_splash_hand_over(width, height);
++	const bool splash_held =
++		(mode == XSDK_DISPLAY_720P || mode == XSDK_DISPLAY_OUTPUT) && xsdk_splash_hand_over(width, height);
+ 	const NTSTATUS status = splash_held ? STATUS_SUCCESS : xsdk_display_open(mode, width, height);
+ 	if (!NT_SUCCESS(status))
+ 		return status;
++	// The splash's display is 1280x720: the output's own size takes over with the first flip.
++	const bool resized = splash_held && mode == XSDK_DISPLAY_OUTPUT && xsdk_display_take_output(width, height);
+ 	const bool letterbox = xsdk_display_letterboxed();
+ 	present = (Present){ .buffer_count = buffer_count,
+ 		.swap_interval = swap_interval,
+@@ -191,7 +194,7 @@ NTSTATUS xsdk_present_open(
+ 		.frame_offset_bytes = letterbox ? *width * LETTERBOX_TOP * 4 : 0,
+ 		.splash_held = splash_held,
+ 		// The splash's logo shows at 1280x720, so the first flip changes the scale, as after XAM's surface.
+-		.showed_system = splash_held && letterbox };
++		.showed_system = splash_held && (letterbox || resized) };
+ 	// XAM is told of the whole front buffer, bars and all, as VdSwap hands it over.
+ 	present.sized = xsdk_display_plan(present.width, present.height, present.width, &present.own_size);
+ 	describe_display(present.width, present.height);

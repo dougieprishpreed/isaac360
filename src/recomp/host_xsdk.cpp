@@ -5,13 +5,15 @@
 // NAME=value settings the PC takes from the environment (BOI360_SHOTS=600,1200 etc.; screenshots land beside it).
 //
 // * Guest memory is reserved whole and committed as the game's heap grows.
-// * The game draws through the GL-on-Vulkan layer (gl_vk.cpp) on vulkan4xenon's one 1280x720 display mode.
+// * The game draws through the GL-on-Vulkan layer (gl_vk.cpp) on vulkan4xenon's display: the output's own size 1:1
+//   (a 1080p output's 1920x1080; tools/xsdk/patches), else 1280x720 scaled to it.
 // * XInput reads the console's pads (index 0..3); OpenAL's mixer feeds the kernel's audio frames through a ring.
 // * Back + Start held for two seconds returns to the dashboard; a watchdog logs when frames stop (xsdk has no
 //   fault handler).
 #include "runtime.h"
 #include "gl_vk.h"
 #include "vfile.h"
+#include <vulkan4xenon.h>
 #include <xsdk/audio.h>
 #include <xsdk/kernel.h>
 #include <xsdk/thread.h>
@@ -281,10 +283,14 @@ void* GameMain(void*) {
     // The game lays out for a 960x540 picture, as on a PC at 1920x1080, which it draws there with each pixel doubled:
     // at 1280x720 it takes its small-screen HUD (larger outlined icons) and scales an 852x480 picture by 1.5 into
     // uneven pixels. A 960x540 window gets the 1080p layout without the 1080p frame (8 MB, and targets past eDRAM
-    // that vulkan4xenon draws in bands); the present pass (shaders.py PRESENT_FS) grows it by 4/3 to
-    // vulkan4xenon's one 1280x720 mode, each output pixel the area-weighted average of the pixels under it.
-    // Cutscenes draw at the window's size too. boi360_args.txt can say BOI360_WINDOW=1920x1080 or 1280x720.
+    // that vulkan4xenon draws in bands). On a 1080p output the display's front buffer is 1920x1080 shown 1:1 and
+    // the present pass (shaders.py PRESENT_FS) gives each pixel an exact 2x2, the PC's 1080p picture; elsewhere it
+    // grows the picture to 1280x720, each output pixel the area-weighted average of the pixels under it, which the
+    // display scales to the output. Cutscenes draw at the window's size too. boi360_args.txt can say
+    // BOI360_WINDOW=1920x1080 or 1280x720, and BOI360_DISPLAY=720p for 1280x720 on every output (boot 14's picture).
     setenv("BOI360_WINDOW", "960x540", 0);
+    const char* display = getenv("BOI360_DISPLAY");
+    v4x_set_display_output(!(display && !strcmp(display, "720p")));
 
     GlVkHooks hooks;
     memset(&hooks, 0, sizeof(hooks));

@@ -146,11 +146,14 @@ struct Texture {
     // A texture the game gave pixels keeps them compressed (lz.h) and gets its GPU image only when a draw samples
     // it: the game loads far more than a screen draws (Basement I: 104 of 149 MB never drawn, 3.4 MB packed).
     // Images not drawn for a while go again when the GPU's total passes the budget (evict_textures). The packing
-    // runs on the packer thread: until it is done the pixels are kept as they came (raw).
+    // runs on the packer thread: until it is done the pixels are kept as they came (raw), and after it, beside the
+    // packed ones until the first draw, within RAW_KEPT (rawKept).
     std::vector<uint8_t> lz;
     std::shared_ptr<std::vector<uint8_t> > raw;
     uint32_t gen;                       // which upload the packer's result belongs to
     int lw, lh;
+    bool rawKept;
+    uint32_t keptFrame;
 };
 
 struct Renderbuffer {
@@ -761,9 +764,12 @@ void ensure_default_framebuffer() {
     upload_rgba(g_defColor, 0, 0, w, h, &black[0], true);
     init_depth_layout(g_defDepth);
     if (g_presentSet) {
-        // a frame larger than the display (the console's 1080p frame in 720p) is filtered down; one its size is copied
-        bool scaled = g_swapchain && ((uint32_t)w != g_swapExtent.width || (uint32_t)h != g_swapExtent.height);
-        uint32_t filter = scaled ? GL_LINEAR : GL_NEAREST;
+        // a frame the display holds a whole number of times (its size, or the console's 960x540 on a 1920x1080
+        // display) takes nearest pixels; any other scale is filtered (shaders.py PRESENT_FS)
+        uint32_t uw = (uint32_t)w, uh = (uint32_t)h;
+        bool whole = !g_swapchain || (g_swapExtent.width % uw == 0 && g_swapExtent.height % uh == 0 &&
+                                      g_swapExtent.width / uw == g_swapExtent.height / uh);
+        uint32_t filter = whole ? GL_NEAREST : GL_LINEAR;
         VkDescriptorImageInfo img = {sampler_for(filter, filter, GL_CLAMP_TO_EDGE, GL_CLAMP_TO_EDGE), g_defColor.view,
                                      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
         VkWriteDescriptorSet wr;
@@ -1455,6 +1461,35 @@ std::deque<PackJob> g_packQueue, g_packDone;
 bool g_packerStarted = false;
 uint32_t g_packGen = 0;
 size_t g_packHeld = 0;                              // the raw pixels of jobs not collected yet
+// A packed texture not drawn yet keeps its raw pixels too, so its first draw makes its image without unpacking: a
+// door's new textures are drawn a frame or two after their upload, and unpacking them took 40-110 ms of the door's
+// frame on the console (boot 14). Up to RAW_KEPT, the oldest let go first, each for at most two seconds, and all of
+// them when an image finds no memory.
+enum { RAW_KEPT = 24 << 20, RAW_KEPT_FRAMES = 120 };
+size_t g_rawKept = 0;
+std::deque<std::pair<uint32_t, uint32_t> > g_keptRaw;   // (name, gen), oldest first
+
+void release_raw(Texture& t) {
+    if (!t.rawKept) return;
+    t.rawKept = false;
+    g_rawKept -= t.raw->size();
+    g_packedBytes -= t.raw->size();
+    t.raw.reset();
+}
+
+// lets kept raw pixels go: those of textures gone, drawn, re-given or past RAW_KEPT_FRAMES, and the oldest while
+// more than keep bytes are kept
+void release_kept_raw(size_t keep) {
+    while (!g_keptRaw.empty()) {
+        std::map<uint32_t, Texture>::iterator it = g_textures.find(g_keptRaw.front().first);
+        if (it != g_textures.end() && it->second.rawKept && it->second.gen == g_keptRaw.front().second) {
+            Texture& t = it->second;
+            if (g_rawKept <= keep && t.keptFrame + RAW_KEPT_FRAMES > gl_frame_count()) break;
+            release_raw(t);
+        }
+        g_keptRaw.pop_front();
+    }
+}
 
 void packer_thread(void*) {
     if (recomp_config().threadStarted) recomp_config().threadStarted("packer");
@@ -1513,17 +1548,28 @@ void collect_packed() {
         std::map<uint32_t, Texture>::iterator it = g_textures.find(done[i].name);
         if (it == g_textures.end() || !it->second.raw || it->second.gen != done[i].gen) continue;
         Texture& t = it->second;
-        g_packedBytes -= t.raw->size();
-        t.raw.reset();
         t.lz.swap(done[i].lz);
         t.packed = (uint32_t)t.lz.size();
         g_packedBytes += t.lz.size();
+        size_t n = t.raw->size();
+        if (!t.img.image && n <= RAW_KEPT) {
+            release_kept_raw(RAW_KEPT - n);
+            t.rawKept = true;
+            t.keptFrame = gl_frame_count();
+            g_rawKept += n;
+            g_keptRaw.push_back(std::make_pair(it->first, t.gen));
+        } else {
+            g_packedBytes -= n;
+            t.raw.reset();
+        }
     }
+    release_kept_raw(RAW_KEPT);
 }
 
 bool has_pixels(const Texture& t) { return t.raw || !t.lz.empty(); }
 
 void drop_packed(Texture& t) {
+    release_raw(t);
     g_packedBytes -= t.lz.size();
     std::vector<uint8_t>().swap(t.lz);
     if (t.raw) g_packedBytes -= t.raw->size();
@@ -1539,8 +1585,9 @@ bool materialize(Texture& t) {
         ~Timed() { g_materializeMs += since(t0); }
     } timed = {t0};
     if (!make_image(t.img, t.lw, t.lh, (VkFormat)COLOR_FORMAT, false)) return false;
-    if (t.raw) {                                        // not packed yet: as they came
+    if (t.raw) {                                        // not packed yet, or kept for this draw: as they came
         upload_rgba(t.img, 0, 0, t.lw, t.lh, &(*t.raw)[0], true);
+        release_raw(t);
         return true;
     }
     std::vector<uint8_t> rgba((size_t)t.lw * t.lh * 4);
@@ -1557,6 +1604,7 @@ bool materialize(Texture& t) {
 // at once rather than when the frame retires. True if any went. A target without an image would draw nothing and
 // read as the 1x1 white placeholder (the white playfield of console boot 10).
 bool reclaim_images() {
+    release_kept_raw(0);
     uint64_t freed = 0;
     for (std::map<uint32_t, Texture>::iterator it = g_textures.begin(); it != g_textures.end(); ++it) {
         Texture& t = it->second;
@@ -1580,6 +1628,7 @@ bool reclaim_images() {
 // frames; retired images free two frames later).
 void evict_textures() {
     if (g_hostFreeMemory && gl_frame_count() % 30 == 0 && g_hostFreeMemory() < (32u << 20)) {
+        release_kept_raw(0);
         std::vector<std::pair<uint32_t, uint32_t> > idle;     // (last drawn frame, name)
         for (std::map<uint32_t, Texture>::iterator it = g_textures.begin(); it != g_textures.end(); ++it)
             if (it->second.img.image && has_pixels(it->second) && !it->second.target &&
@@ -2321,6 +2370,9 @@ void vk_glGetShaderiv(X86* c) {
     RET_STD(c, 3, 0);
 }
 void vk_glDeleteShader(X86* c) { RET_STD(c, 1, 0); }
+// the game deletes its programs only as it shuts down (boot 14's quit); their pipelines live as long as the layer
+void vk_glDeleteProgram(X86* c) { RET_STD(c, 1, 0); }
+void vk_glDetachShader(X86* c) { RET_STD(c, 2, 0); }
 void vk_glCreateProgram(X86* c) {
     uint32_t name = g_nextName++;
     Program& p = g_programs[name];
@@ -2457,6 +2509,7 @@ const Entry kEntries[] = {
     {"glGetRenderbufferParameteriv", vk_glGetRenderbufferParameteriv}, {"glDeleteRenderbuffers", vk_glDeleteRenderbuffers},
     {"glReadPixels", vk_glReadPixels}, {"glCreateShader", vk_glCreateShader}, {"glShaderSource", vk_glShaderSource},
     {"glCompileShader", vk_glCompileShader}, {"glGetShaderiv", vk_glGetShaderiv}, {"glDeleteShader", vk_glDeleteShader},
+    {"glDeleteProgram", vk_glDeleteProgram}, {"glDetachShader", vk_glDetachShader},
     {"glCreateProgram", vk_glCreateProgram}, {"glAttachShader", vk_glAttachShader}, {"glLinkProgram", vk_glLinkProgram},
     {"glGetProgramiv", vk_glGetProgramiv}, {"glUseProgram", vk_glUseProgram}, {"glGetAttribLocation", vk_glGetAttribLocation},
     {"glGetUniformLocation", vk_glGetUniformLocation}, {"glUniform1i", vk_glUniform1i}, {"glUniform1f", vk_glUniform1f},

@@ -1,0 +1,179 @@
+diff --git a/include/vulkan4xenon.h b/include/vulkan4xenon.h
+index 2d5b541..fef0c79 100644
+--- a/include/vulkan4xenon.h
++++ b/include/vulkan4xenon.h
+@@ -95,6 +95,11 @@ extern const V4xShaderBundle v4x_shader_bundle;
+ // Keeps the shaders the layer compiles in this folder and reads them back from it; call before making any modules.
+ void v4x_set_shader_cache(const char *directory);
+ 
++// Has the display take the console's output size, shown 1:1, where the output can show it (progressive, widescreen,
++// no larger than 1920x1080: xsdk's XSDK_DISPLAY_OUTPUT) in place of 1280x720 scaled to it; the display mode's visible
++// region and the surface's extent give the size. Call before asking for the display's properties.
++void v4x_set_display_output(bool output);
++
+ // Shaders the layer has compiled, and read back from its cache, since the title started.
+ typedef struct {
+ 	uint32_t compiled;
+diff --git a/src/display.c b/src/display.c
+index 33b48f9..aad42c5 100644
+--- a/src/display.c
++++ b/src/display.c
+@@ -4,10 +4,12 @@
+ #include "objects.h"
+ #include "xsdk/kernel.h"
+ 
+-// One display with one plane and one mode: xsdk_present's 1280x720, which the console scales to its output.
++// One display with one plane and one mode: xsdk_present's 1280x720, which the console scales to its output, or the
++// output's own size 1:1 where the title asks (v4x_set_display_output).
+ 
+ static const char display_object;
+ static const char mode_object;
++static bool display_output;
+ 
+ static VkDisplayKHR display_handle(void)
+ {
+@@ -19,7 +21,24 @@ static VkDisplayModeKHR mode_handle(void)
+ 	return v4x_handle(&mode_object);
+ }
+ 
+-static const VkExtent2D display_extent = { V4X_DISPLAY_WIDTH, V4X_DISPLAY_HEIGHT };
++void v4x_set_display_output(bool output)
++{
++	display_output = output;
++}
++
++XsdkDisplayMode v4x_display_mode(void)
++{
++	return display_output ? XSDK_DISPLAY_OUTPUT : XSDK_DISPLAY_720P;
++}
++
++VkExtent2D v4x_display_extent(void)
++{
++	uint32_t width = V4X_DISPLAY_WIDTH;
++	uint32_t height = V4X_DISPLAY_HEIGHT;
++	if (display_output)
++		xsdk_display_mode_size(XSDK_DISPLAY_OUTPUT, &width, &height);
++	return (VkExtent2D){ width, height };
++}
+ 
+ VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceDisplayPropertiesKHR(
+ 	VkPhysicalDevice physicalDevice, uint32_t *pPropertyCount, VkDisplayPropertiesKHR *pProperties)
+@@ -28,7 +47,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceDisplayPropertiesKHR(
+ 	const VkDisplayPropertiesKHR display = {
+ 		.display = display_handle(),
+ 		.displayName = "Xbox 360 video output",
+-		.physicalResolution = display_extent,
++		.physicalResolution = v4x_display_extent(),
+ 		.supportedTransforms = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR,
+ 	};
+ 	return v4x_host_enumerate(pPropertyCount, pProperties, &display, 1, sizeof display);
+@@ -59,7 +78,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetDisplayModePropertiesKHR(VkPhysicalDevice ph
+ 	VdQueryVideoMode(&video);
+ 	const VkDisplayModePropertiesKHR mode = {
+ 		.displayMode = mode_handle(),
+-		.parameters = { .visibleRegion = display_extent, .refreshRate = (uint32_t)(video.refresh_rate * 1000.0f) },
++		.parameters = { .visibleRegion = v4x_display_extent(),
++			.refreshRate = (uint32_t)(video.refresh_rate * 1000.0f) },
+ 	};
+ 	return v4x_host_enumerate(pPropertyCount, pProperties, &mode, 1, sizeof mode);
+ }
+@@ -81,13 +101,14 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetDisplayPlaneCapabilitiesKHR(VkPhysicalDevice
+ 	(void)physicalDevice;
+ 	(void)mode;
+ 	(void)planeIndex;
++	const VkExtent2D extent = v4x_display_extent();
+ 	*pCapabilities = (VkDisplayPlaneCapabilitiesKHR){
+ 		.supportedAlpha = VK_DISPLAY_PLANE_ALPHA_OPAQUE_BIT_KHR,
+-		.minSrcExtent = display_extent,
+-		.maxSrcExtent = display_extent,
++		.minSrcExtent = extent,
++		.maxSrcExtent = extent,
+ 		.maxDstPosition = { 0, 0 },
+-		.minDstExtent = display_extent,
+-		.maxDstExtent = display_extent,
++		.minDstExtent = extent,
++		.maxDstExtent = extent,
+ 	};
+ 	return VK_SUCCESS;
+ }
+@@ -97,16 +118,17 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateDisplayPlaneSurfaceKHR(VkInstance instanc
+ {
+ 	if (pCreateInfo->displayMode != mode_handle() || pCreateInfo->planeIndex != 0)
+ 		return VK_ERROR_INITIALIZATION_FAILED;
++	const VkExtent2D extent = v4x_display_extent();
+ 	if (pCreateInfo->transform != VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR ||
+ 		pCreateInfo->alphaMode != VK_DISPLAY_PLANE_ALPHA_OPAQUE_BIT_KHR ||
+-		pCreateInfo->imageExtent.width != V4X_DISPLAY_WIDTH || pCreateInfo->imageExtent.height != V4X_DISPLAY_HEIGHT)
++		pCreateInfo->imageExtent.width != extent.width || pCreateInfo->imageExtent.height != extent.height)
+ 		return v4x_host_unsupported("display surfaces other than full-screen, opaque and untransformed");
+ 	const VkAllocationCallbacks *const allocator =
+ 		pAllocator ? pAllocator : (instance->has_allocator ? &instance->allocator : NULL);
+ 	Surface *const surface = v4x_host_alloc(allocator, sizeof *surface, VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
+ 	if (!surface)
+ 		return VK_ERROR_OUT_OF_HOST_MEMORY;
+-	*surface = (Surface){ .width = V4X_DISPLAY_WIDTH, .height = V4X_DISPLAY_HEIGHT };
++	*surface = (Surface){ .width = extent.width, .height = extent.height };
+ 	*pSurface = v4x_handle(surface);
+ 	return VK_SUCCESS;
+ }
+@@ -132,13 +154,14 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceSurfaceCapabilitiesKHR(
+ 	VkPhysicalDevice physicalDevice, VkSurfaceKHR surface, VkSurfaceCapabilitiesKHR *pSurfaceCapabilities)
+ {
+ 	(void)physicalDevice;
+-	(void)surface;
++	const Surface *const object = v4x_object(surface);
++	const VkExtent2D extent = { object->width, object->height };
+ 	*pSurfaceCapabilities = (VkSurfaceCapabilitiesKHR){
+ 		.minImageCount = V4X_MIN_SWAPCHAIN_IMAGES,
+ 		.maxImageCount = V4X_MAX_SWAPCHAIN_IMAGES,
+-		.currentExtent = display_extent,
+-		.minImageExtent = display_extent,
+-		.maxImageExtent = display_extent,
++		.currentExtent = extent,
++		.minImageExtent = extent,
++		.maxImageExtent = extent,
+ 		.maxImageArrayLayers = 1,
+ 		.supportedTransforms = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR,
+ 		.currentTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR,
+diff --git a/src/objects.h b/src/objects.h
+index 5dc79af..3c21396 100644
+--- a/src/objects.h
++++ b/src/objects.h
+@@ -849,6 +849,11 @@ typedef struct {
+ 	uint32_t acquired_index;
+ } Swapchain;
+ 
++// The display's xsdk mode and size: V4X_DISPLAY_WIDTH by V4X_DISPLAY_HEIGHT scaled to the output, or the output's own
++// size where the title asked for it (v4x_set_display_output) and the output takes it.
++XsdkDisplayMode v4x_display_mode(void);
++VkExtent2D v4x_display_extent(void);
++
+ // Non-dispatchable handles are 64-bit integers on 32-bit targets, so they carry the object's pointer.
+ static inline uint64_t v4x_handle(const void *object)
+ {
+diff --git a/src/swapchain.c b/src/swapchain.c
+index 156f6e5..ac40e92 100644
+--- a/src/swapchain.c
++++ b/src/swapchain.c
+@@ -27,8 +27,9 @@ static VkResult check_create_info(const VkSwapchainCreateInfoKHR *info)
+ {
+ 	if (swapchain_exists || info->oldSwapchain)
+ 		return VK_ERROR_NATIVE_WINDOW_IN_USE_KHR;
++	const Surface *const surface = v4x_object(info->surface);
+ 	if (info->imageFormat != VK_FORMAT_B8G8R8A8_UNORM || info->imageColorSpace != VK_COLOR_SPACE_SRGB_NONLINEAR_KHR ||
+-		info->imageExtent.width != V4X_DISPLAY_WIDTH || info->imageExtent.height != V4X_DISPLAY_HEIGHT ||
++		info->imageExtent.width != surface->width || info->imageExtent.height != surface->height ||
+ 		info->imageArrayLayers != 1 || info->imageUsage != VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT ||
+ 		info->preTransform != VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR ||
+ 		info->compositeAlpha != VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR || info->presentMode != VK_PRESENT_MODE_FIFO_KHR)
+@@ -67,8 +68,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateSwapchainKHR(VkDevice device, const VkSwa
+ 	count = count > V4X_MAX_SWAPCHAIN_IMAGES ? V4X_MAX_SWAPCHAIN_IMAGES : count;
+ 	uint32_t width = 0;
+ 	uint32_t height = 0;
+-	const NTSTATUS status = xsdk_present_open(XSDK_DISPLAY_720P, count, FIFO_SWAP_INTERVAL, &width, &height);
+-	if (!NT_SUCCESS(status) || width != V4X_DISPLAY_WIDTH || height != V4X_DISPLAY_HEIGHT) {
++	const NTSTATUS status = xsdk_present_open(v4x_display_mode(), count, FIFO_SWAP_INTERVAL, &width, &height);
++	if (!NT_SUCCESS(status) || width != pCreateInfo->imageExtent.width || height != pCreateInfo->imageExtent.height) {
+ 		xsdk_log_write("vulkan4xenon: xsdk_present_open failed: 0x%08X, %ux%u", (unsigned)status, (unsigned)width,
+ 			(unsigned)height);
+ 		if (NT_SUCCESS(status))

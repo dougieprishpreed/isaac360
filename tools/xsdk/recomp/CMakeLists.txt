@@ -39,7 +39,7 @@ endforeach()
 
 file(GLOB SHIM_SOURCES "${RECOMP}/shims_*.cpp")
 list(FILTER SHIM_SOURCES EXCLUDE REGEX "shims_gl_pt\\.cpp$")
-set(HOST_SOURCES "${RECOMP}/host_xsdk.cpp" "${RECOMP}/runtime.cpp" "${RECOMP}/gl_vk.cpp" "${RECOMP}/vfile.cpp" "${RECOMP}/lz.cpp" "${RECOMP}/hle_vorbis.cpp" "${RECOMP}/hle_png.cpp" ${SHIM_SOURCES})
+set(HOST_SOURCES "${RECOMP}/host_xsdk.cpp" "${RECOMP}/runtime.cpp" "${RECOMP}/gl_vk.cpp" "${RECOMP}/vfile.cpp" "${RECOMP}/lz.cpp" "${RECOMP}/hle_vorbis.cpp" "${RECOMP}/hle_png.cpp" "${RECOMP}/hle_inflate.cpp" ${SHIM_SOURCES})
 set(C_SOURCES "${ROOT}/src/platform/xsdk/big_alloc.c" "${BOI_SHADERS}/boi_shaders.c" "${ROOT}/src/third_party/miniz/miniz_tinfl.c")
 
 add_executable(boi360 ${HOST_SOURCES} ${C_SOURCES})

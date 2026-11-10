@@ -217,9 +217,12 @@ void s_vfprintf(X86* c) {
     if (f) vf_puts(s.c_str(), f);
     RET_CDECL(c, (uint32_t)s.size());
 }
-// __stdio_common_vsscanf(options(8), buffer, count, format, locale, va_list): the formats the game uses
+// __stdio_common_vsscanf(options(8), buffer, count, format, locale, va_list): the formats the game uses. sscanf_s
+// (options bit 0, _CRT_INTERNAL_SCANF_SECURECRT) passes each %s buffer's size after it; a word that doesn't fit
+// empties the buffer and ends the scan, as the CRT does.
 void s_vsscanf(X86* c) {
     std::string in = guest_str(ARG(c, 2)), fmt = guest_str(ARG(c, 4));
+    bool secure = (ARG(c, 0) & 1) != 0;
     uint32_t va = ARG(c, 6);
     const char* p = in.c_str();
     int assigned = 0;
@@ -255,8 +258,17 @@ void s_vsscanf(X86* c) {
             while (isspace((unsigned char)*p)) ++p;
             const char* s = p;
             while (*p && !isspace((unsigned char)*p)) ++p;
+            if (p == s) break;
             std::string w(s, p);
-            memcpy(g_mem + RD32(va), w.c_str(), w.size() + 1);
+            if (secure) {
+                uint32_t room = RD32(va + 4);
+                va += 4;
+                if (w.size() + 1 > room) {
+                    if (room) WR8(RD32(va - 4), 0);
+                    break;
+                }
+            }
+            memcpy(g_mem + RD32(secure ? va - 4 : va), w.c_str(), w.size() + 1);
             end = (char*)p;
         } else {
             recomp_log("sscanf: %%%c not handled (%s)", conv, fmt.c_str());
@@ -278,8 +290,8 @@ void big_alloc_log(X86* c, uint32_t size) {
 bool g_heapProfile = getenv("BOI360_HEAP_PROFILE") != 0;
 std::map<uint32_t, std::pair<std::string, uint32_t> > g_live;
 std::mutex g_liveLock;
-void profile_alloc(X86* c, uint32_t p, uint32_t size) {
-    if (!p) return;
+// the first three return addresses in isaac-ng.exe on c's stack
+std::string stack_site(X86* c) {
     std::string site;
     char b[16];
     int found = 0;
@@ -291,6 +303,11 @@ void profile_alloc(X86* c, uint32_t p, uint32_t size) {
             ++found;
         }
     }
+    return site;
+}
+void profile_alloc(X86* c, uint32_t p, uint32_t size) {
+    if (!p) return;
+    std::string site = stack_site(c);
     std::lock_guard<std::mutex> lock(g_liveLock);
     g_live[p] = std::make_pair(site, size);
 }
@@ -301,11 +318,13 @@ void profile_free(uint32_t p) {
 }
 uint32_t traced_alloc(X86* c, uint32_t p, uint32_t size) {
     if (g_heapProfile) profile_alloc(c, p, size);
+    if (guest_heap_checking()) guest_heap_note(p, "made from", stack_site(c));
     return p;
 }
 void s_malloc(X86* c) { big_alloc_log(c, ARG(c, 0)); RET_CDECL(c, traced_alloc(c, guest_malloc(ARG(c, 0)), ARG(c, 0))); }
 void s_free(X86* c) {
     if (g_heapProfile) profile_free(ARG(c, 0));
+    if (guest_heap_checking()) guest_heap_note(ARG(c, 0), "freed from", stack_site(c));
     hle_vorbis_freed(ARG(c, 0));                    // a music decoder the host serves goes with its object
     guest_free(ARG(c, 0));
     RET_CDECL(c, 0);
@@ -313,6 +332,7 @@ void s_free(X86* c) {
 void s_realloc(X86* c) {
     big_alloc_log(c, ARG(c, 1));
     if (g_heapProfile) profile_free(ARG(c, 0));
+    if (guest_heap_checking() && ARG(c, 0)) guest_heap_note(ARG(c, 0), "moved from", stack_site(c));
     RET_CDECL(c, traced_alloc(c, guest_realloc(ARG(c, 0), ARG(c, 1)), ARG(c, 1)));
 }
 void s_calloc(X86* c) { big_alloc_log(c, ARG(c, 0) * ARG(c, 1)); RET_CDECL(c, traced_alloc(c, guest_calloc(ARG(c, 0), ARG(c, 1)), ARG(c, 0) * ARG(c, 1))); }

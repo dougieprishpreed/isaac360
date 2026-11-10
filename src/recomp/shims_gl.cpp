@@ -298,6 +298,7 @@ static void log_slow_frame(double game, double present) {
     if (gl_vk_enabled()) gl_vk_work(&w);
     double locks = profiling ? shims_lock_wait_ms() : 0;
     static double slowMs = getenv("BOI360_SLOW_MS") ? atof(getenv("BOI360_SLOW_MS")) : 50.0;
+    if (profiling) recomp_profile_frame(game + present > slowMs && g_frames > 3);
     if (game + present > slowMs && g_frames > 3 && g_times.slowLogged < 12) {
         ++g_times.slowLogged;
         recomp_log("slow frame %u: game %.1f ms, present %.1f; read %llu KB (%llu KB from the drive in %.1f ms), %u images "
