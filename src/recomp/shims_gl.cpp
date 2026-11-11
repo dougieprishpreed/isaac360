@@ -306,6 +306,7 @@ struct RoomTimes {
     GlVkWork work;                                  // after the first 30 frames
     GuestHeapStats heap;
     uint64_t enters;                                // the main thread's critical sections, after the first 30 frames
+    uint64_t imageHits, imageMisses;                // hle_image.cpp's counts as the room began
     uint32_t traced;                                // the frame given a gpu trace (0: none)
 };
 static RoomTimes g_room;
@@ -348,8 +349,13 @@ static void log_room() {
                  (double)(shims_main_lock_enters() - r.enters) / r.frames, (double)(h.allocs - r.heap.allocs) / r.frames,
                  (double)big / r.frames, big ? (double)(h.scanned - r.heap.scanned) / big : 0.0);
     }
-    recomp_log("room %s: first %u frames %.0f ms (slowest %.1f)%s", r.name.c_str(), r.entryFrames, r.entry, r.entryMax,
-               steady);
+    uint64_t hits, misses, hitBytes;
+    size_t cached;
+    hle_image_stats(&hits, &misses, &hitBytes, &cached);
+    recomp_log("room %s: first %u frames %.0f ms (slowest %.1f), %llu images decoded and %llu from the cache (%u MB "
+               "held)%s", r.name.c_str(), r.entryFrames, r.entry, r.entryMax,
+               (unsigned long long)(misses - r.imageMisses), (unsigned long long)(hits - r.imageHits),
+               (unsigned)(cached >> 20), steady);
     if (recomp_profile_by_room() && r.frames >= 240) recomp_profile_dump(log_line);
 }
 
@@ -365,6 +371,9 @@ static void room_frame(double ms, double game, double present, double slept) {
         }
         r = RoomTimes();
         r.name = next;
+        uint64_t hitBytes;
+        size_t cached;
+        hle_image_stats(&r.imageHits, &r.imageMisses, &hitBytes, &cached);
     }
     if (r.name.empty()) return;
     if (r.entryFrames < kRoomEntryFrames) {
@@ -483,7 +492,11 @@ void gl_present() {
         if (g_hostQuit) g_hostQuit();
     }
     // archive blocks past the budget or unread for a minute go; all but this second's when the console runs short
-    if (g_frames % 60 == 0) vf_trim(g_hostFreeMemory && g_hostFreeMemory() < (48u << 20) ? 1 : 60);
+    if (g_frames % 60 == 0) {
+        uint32_t free = g_hostFreeMemory ? g_hostFreeMemory() : ~0u;
+        vf_trim(free < (48u << 20) ? 1 : 60);
+        if (free < (32u << 20)) hle_image_trim_low();     // as gl_vk gives idle images back
+    }
     if (g_frames <= 3 || g_frames % 600 == 0) {
         // seconds since the first frame: loading shows as the gap between frames 1 and 2
         static std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();

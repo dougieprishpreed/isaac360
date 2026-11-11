@@ -69,6 +69,8 @@ HOST = {
     0x407710: 'hle_refcount_release',         # and release, unless it reaches 0: shims_kernel32.cpp
     0x407790: 'hle_refcount_use',             # a count test then a virtual call on the object (this ecx)
     0x959c30: 'hle_refcount_peek',            # a {pointer, count} pair's count read (cdecl)
+    0x98cd10: 'hle_image_load',               # an image's load-from-file (this ecx, path): cached decodes
+    0x99d030: 'hle_image_pixels',             # its pixel hand-off, where a decode goes into the cache: hle_image.cpp
 }
 
 M = ix.Mnemonic

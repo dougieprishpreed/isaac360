@@ -55,7 +55,7 @@ namespace {
     X(vkResetFences) X(vkCreateSemaphore) X(vkDestroySemaphore) X(vkCmdBeginRenderPass) X(vkCmdEndRenderPass)   \
     X(vkCmdBindPipeline) X(vkCmdBindDescriptorSets) X(vkCmdBindVertexBuffers) X(vkCmdBindIndexBuffer)            \
     X(vkCmdPushConstants) X(vkCmdSetViewport) X(vkCmdSetScissor) X(vkCmdDraw) X(vkCmdDrawIndexed)                \
-    X(vkCmdClearAttachments) X(vkCmdPipelineBarrier) X(vkCmdCopyBufferToImage) X(vkCmdCopyImageToBuffer)         \
+    X(vkCmdClearAttachments) X(vkCmdClearColorImage) X(vkCmdPipelineBarrier) X(vkCmdCopyBufferToImage) X(vkCmdCopyImageToBuffer)         \
     X(vkCreateSwapchainKHR) X(vkDestroySwapchainKHR) X(vkGetSwapchainImagesKHR) X(vkAcquireNextImageKHR)         \
     X(vkQueuePresentKHR) X(vkCreateQueryPool) X(vkCmdResetQueryPool) X(vkCmdWriteTimestamp)                      \
     X(vkGetQueryPoolResults)
@@ -157,6 +157,10 @@ struct Texture {
     int lw, lh;
     bool rawKept;
     uint32_t keptFrame;
+    // pixels all one colour (the game makes blank images for its room targets at every door: 4 MB each copied,
+    // packed and uploaded): only the colour is kept, and the image is made by a clear on the GPU
+    bool solid;
+    uint8_t solidRgba[4];
 };
 
 struct Renderbuffer {
@@ -1687,14 +1691,46 @@ void collect_packed() {
     release_kept_raw(RAW_KEPT);
 }
 
-bool has_pixels(const Texture& t) { return t.raw || !t.lz.empty(); }
+bool has_pixels(const Texture& t) { return t.raw || !t.lz.empty() || t.solid; }
 
 void drop_packed(Texture& t) {
+    t.solid = false;
     release_raw(t);
     g_packedBytes -= t.lz.size();
     std::vector<uint8_t>().swap(t.lz);
     if (t.raw) g_packedBytes -= t.raw->size();
     t.raw.reset();
+}
+
+// an image filled with one colour on the GPU, in SHADER_READ_ONLY layout; outside a render pass
+void clear_image(Image& im, const uint8_t* rgba, bool fresh) {
+    begin_recording();
+    end_pass();
+    barrier(im.image, false, fresh ? VK_IMAGE_LAYOUT_UNDEFINED : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, kAllAccess, VK_ACCESS_TRANSFER_WRITE_BIT, kAllGraphics,
+            VK_PIPELINE_STAGE_TRANSFER_BIT);
+    VkClearColorValue v;
+    for (int i = 0; i < 4; ++i) v.float32[i] = rgba[i] / 255.0f;
+    VkImageSubresourceRange range = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    vkCmdClearColorImage(g_frames[g_frame].cmd, im.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &v, 1, &range);
+    barrier(im.image, false, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            VK_ACCESS_TRANSFER_WRITE_BIT, kAllAccess, VK_PIPELINE_STAGE_TRANSFER_BIT, kAllGraphics);
+}
+
+// the guest's RGBA bytes all one colour (the first difference ends the look, so pictures cost a few reads)
+bool solid_rgba(uint32_t pixels, int w, int h, uint8_t* rgba) {
+    size_t n = (size_t)w * h;
+    if (!pixels || pixels >= g_mem_size || n * 4 > g_mem_size - pixels) return false;
+    const uint8_t* p = g_mem + pixels;
+    uint32_t first;
+    memcpy(&first, p, 4);
+    for (size_t i = 1; i < n; ++i) {
+        uint32_t v;
+        memcpy(&v, p + 4 * i, 4);
+        if (v != first) return false;
+    }
+    memcpy(rgba, p, 4);
+    return true;
 }
 
 // the GPU image of a packed texture, made from its pixels; outside a render pass (the upload ends it)
@@ -1706,6 +1742,10 @@ bool materialize(Texture& t) {
         ~Timed() { g_materializeMs += since(t0); }
     } timed = {t0};
     if (!make_image(t.img, t.lw, t.lh, (VkFormat)COLOR_FORMAT, false)) return false;
+    if (t.solid) {
+        clear_image(t.img, t.solidRgba, true);
+        return true;
+    }
     if (t.raw) {                                        // not packed yet, or kept for this draw: as they came
         upload_rgba(t.img, 0, 0, t.lw, t.lh, &(*t.raw)[0], true);
         release_raw(t);
@@ -2288,6 +2328,7 @@ Texture& texture(uint32_t name) {
     t.drawFrame = t.draws = t.packed = 0;
     t.gen = 0;
     t.lw = t.lh = 0;
+    t.solid = false;
     return t;
 }
 
@@ -2378,13 +2419,20 @@ void vk_glTexImage2D(X86* c) {
     if (w <= 0 || h <= 0) return;
     if (pixels) g_texBytes += (uint64_t)w * h * 4;
     std::vector<uint8_t> rgba;
+    uint8_t one[4];
+    bool solid = pixels && format == GL_RGBA && type == GL_UNSIGNED_BYTE && solid_rgba(pixels, w, h, one);
     if (pixels && g_lazyTextures && !t.target) {
         // packed until a draw samples it (materialize); a GPU image it had goes
-        if (!to_rgba(format, type, w, h, pixels, rgba)) rgba.assign((size_t)w * h * 4, 0);
         t.lw = w;
         t.lh = h;
         t.packed = 0;
-        pack_later(g_units[g_activeUnit], t, rgba);
+        if (solid) {
+            t.solid = true;
+            memcpy(t.solidRgba, one, 4);
+        } else {
+            if (!to_rgba(format, type, w, h, pixels, rgba)) rgba.assign((size_t)w * h * 4, 0);
+            pack_later(g_units[g_activeUnit], t, rgba);
+        }
         if (t.img.image) {
             if (g_inPass && t.img.view == g_passKey.color) end_pass();
             retire_image(t.img);
@@ -2399,11 +2447,12 @@ void vk_glTexImage2D(X86* c) {
         if (!make_image(t.img, w, h, (VkFormat)COLOR_FORMAT, false)) return;
         fresh = true;
     }
-    if (pixels) {
-        if (!to_rgba(format, type, w, h, pixels, rgba)) rgba.assign((size_t)w * h * 4, 0);
-    } else {
-        rgba.assign((size_t)w * h * 4, 0);  // render targets: GL leaves them undefined, drivers zero them
+    if (!pixels || solid) {                 // render targets: GL leaves them undefined, drivers zero them
+        static const uint8_t zero[4] = {0, 0, 0, 0};
+        clear_image(t.img, pixels ? one : zero, fresh);
+        return;
     }
+    if (!to_rgba(format, type, w, h, pixels, rgba)) rgba.assign((size_t)w * h * 4, 0);
     upload_rgba(t.img, 0, 0, w, h, &rgba[0], fresh);
 }
 // glTexSubImage2D(target, level, x, y, w, h, format, type, pixels)

@@ -26,14 +26,19 @@ void unfilter(uint8_t* r, const uint8_t* p, uint32_t n, uint32_t bpp, uint32_t f
         for (uint32_t i = bpp; i < n; ++i) r[i] = (uint8_t)(r[i] + ((r[i - bpp] + p[i]) >> 1));
         break;
     case 4:                                             // Paeth
+        // without branches: the console's in-order CPU paid a mispredicted branch on most bytes. Masks from sign
+        // bits (an arithmetic shift of a negative int on both compilers) pick the predictor as the branches did.
         for (uint32_t i = 0; i < bpp; ++i) r[i] = (uint8_t)(r[i] + p[i]);
         for (uint32_t i = bpp; i < n; ++i) {
             int a = r[i - bpp], b = p[i], cc = p[i - bpp];
             int pa = b - cc, pb = a - cc, pc = pa + pb;
-            if (pa < 0) pa = -pa;
-            if (pb < 0) pb = -pb;
-            if (pc < 0) pc = -pc;
-            int pred = pa <= pb && pa <= pc ? a : pb <= pc ? b : cc;
+            int sa = pa >> 31, sb = pb >> 31, sc = pc >> 31;
+            pa = (pa ^ sa) - sa;
+            pb = (pb ^ sb) - sb;
+            pc = (pc ^ sc) - sc;
+            int useA = ~((pb - pa) >> 31) & ~((pc - pa) >> 31);   // pa <= pb && pa <= pc
+            int useB = ~useA & ~((pc - pb) >> 31);                 // else pb <= pc
+            int pred = (a & useA) | (b & useB) | (cc & ~(useA | useB));
             r[i] = (uint8_t)(r[i] + pred);
         }
         break;
