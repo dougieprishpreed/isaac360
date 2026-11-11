@@ -143,6 +143,7 @@ struct Event {
     std::mutex m;
     std::condition_variable cv;
     bool manual, set;
+    uint32_t code;                                         // a thread's: its exit code once set
 };
 std::mutex g_evLock;
 std::unordered_map<uint32_t, Event*> g_events;
@@ -182,7 +183,7 @@ void k_ResetEvent(X86* c) {
 }
 uint32_t wait(uint32_t h, uint32_t ms) {
     Event* e = event_of(h);
-    if (!e) return 0;                                      // threads and others: signalled
+    if (!e) return 0;                                      // others: signalled
     std::unique_lock<std::mutex> l(e->m);
     bool ok = ms == 0xffffffffu ? (e->cv.wait(l, [e] { return e->set; }), true)
                                  : e->cv.wait_for(l, std::chrono::milliseconds(ms), [e] { return e->set; });
@@ -584,6 +585,36 @@ const ShimDef kKernel[] = {
 }
 
 uint64_t shims_main_lock_enters() { return g_mainEnters; }
+
+// A guest thread's handle is a manual-reset event set when its function returns, so WaitForSingleObject on it waits
+// for the thread: it returned at once before, and the game's thread object, finding its thread still running after
+// the wait, called terminate() as the game shut down (console boot 18).
+void shims_thread_created(uint32_t handle) {
+    Event* e = new Event;
+    e->manual = true;
+    e->set = false;
+    e->code = 259;                                  // STILL_ACTIVE
+    std::lock_guard<std::mutex> l(g_evLock);
+    g_events[handle] = e;
+}
+
+void shims_thread_exited(uint32_t handle, uint32_t code) {
+    Event* e = event_of(handle);
+    if (!e) return;
+    {
+        std::lock_guard<std::mutex> l(e->m);
+        e->code = code;
+        e->set = true;
+    }
+    e->cv.notify_all();
+}
+
+uint32_t shims_thread_exit_code(uint32_t handle) {
+    Event* e = event_of(handle);
+    if (!e) return 0;
+    std::lock_guard<std::mutex> l(e->m);
+    return e->code;
+}
 double shims_main_sleep_ms() { return g_mainSleepUs.load() / 1000.0; }
 
 double shims_lock_wait_ms() {
@@ -763,6 +794,46 @@ extern "C" int hle_refcount_release(X86* c) {
     refcount_unlock(c, cs, slot);
     c->r[0] = 1;                                    // mov al, 1 over the unlock's 0
     c->r[1] = self + 8;
+    c->r[4] += 4;
+    return 1;
+}
+
+// 0x407790 (thiscall on the counted object): under the lock, a count of 0 answers 0; otherwise, after the unlock, a
+// virtual call on the object (its vtable's +8) and 1. 0x959c30 (cdecl, a {pointer, counted object} pair): the
+// count read under the lock; a count of 1 (the pair's release follows) runs the game's code. Together with add-ref
+// and release they were a quarter of the console's frame in a room of many objects (boot 18, room 1.735).
+extern "C" int hle_refcount_use(X86* c) {
+    uint32_t self = c->r[1], cs;
+    CsSlot* slot = refcount_lock(c, self + 8, &cs);
+    if (!slot) return 0;
+    uint16_t n = RD16(self + 4);
+    refcount_unlock(c, cs, slot);
+    if (!n) {
+        c->r[0] = 0;
+        c->r[1] = self + 8;
+    } else {
+        c->r[1] = self;
+        uint32_t ret = guest_call(c, RD32(RD32(self) + 8), 0, 0, true);
+        c->r[0] = (ret & ~0xffu) | 1;
+    }
+    c->r[4] += 4;
+    return 1;
+}
+
+extern "C" int hle_refcount_peek(X86* c) {
+    uint32_t pair = RD32(c->r[4] + 4), ctrl = RD32(pair + 4);
+    if (!ctrl) {
+        c->r[4] += 4;
+        return 1;
+    }
+    uint32_t cs;
+    CsSlot* slot = refcount_lock(c, ctrl + 8, &cs);
+    if (!slot) return 0;
+    uint16_t n = RD16(ctrl + 4);
+    refcount_unlock(c, cs, slot);
+    if (n == 1) return 0;
+    c->r[0] = 0;
+    c->r[1] = ctrl + 8;
     c->r[4] += 4;
     return 1;
 }

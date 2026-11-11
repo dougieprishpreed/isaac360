@@ -103,7 +103,7 @@ The folder holds:
 - `game\` (your game files, with the converted sound archives and `sfx.pcm`)
 - `dlls\`
 - `save\` (saves and settings)
-- `boi360_args.txt`: `--mem MB` sets the game's address space; a line `BOI360_DISPLAY=720p` keeps the picture at 1280x720 on a 1080p console
+- `boi360_args.txt`: `--mem MB` sets the game's address space; a line `BOI360_DISPLAY=720p` keeps the picture at 1280x720 on a 1080p console; a line `BOI360_DEADZONE=N` sets the sticks' dead zone in percent (default 24, XInput's own; 100 turns the sticks off and leaves the d-pad); a line `BOI360_SWAP_IMAGES=2` shows each frame one refresh sooner where the game keeps up (default 3, which lets the GPU work on one frame while the next is made)
 
 On a console set to 1080p the game shows a 1920x1080 picture with each of its pixels as an exact 2x2 block, as the PC version does at 1920x1080. On other video settings it draws 1280x720, which the console scales to the screen.
 

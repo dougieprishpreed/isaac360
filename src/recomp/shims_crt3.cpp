@@ -81,7 +81,7 @@ void k_LocalFree(X86* c) { RET_STD(c, 1, 0); }
 void k_RtlCaptureStackBackTrace(X86* c) { RET_STD(c, 4, 0); }
 void k_AreFileApisANSI(X86* c) { RET_STD(c, 0, 1); }
 void k_GetModuleHandleExW(X86* c) { if (ARG(c, 2)) WR32(ARG(c, 2), kGuestImageBase); RET_STD(c, 3, 1); }
-void k_GetExitCodeThread(X86* c) { WR32(ARG(c, 1), 0); RET_STD(c, 2, 1); }
+void k_GetExitCodeThread(X86* c) { WR32(ARG(c, 1), shims_thread_exit_code(ARG(c, 0))); RET_STD(c, 2, 1); }
 // CP_ACP / UTF-8 as Latin-1 / ASCII: the game's text is ASCII or UTF-8 handled by the game itself
 void k_MultiByteToWideChar(X86* c) {
     uint32_t src = ARG(c, 2), dst = ARG(c, 4), cap = ARG(c, 5);

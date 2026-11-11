@@ -1196,7 +1196,7 @@ void host_thread_start(void (*fn)(void*), void* arg, uint32_t stackBytes) {
 #endif
 
 struct ThreadStart {
-    uint32_t entry, arg;
+    uint32_t entry, arg, handle;
     X86* cpu;
 };
 
@@ -1211,6 +1211,7 @@ static void thread_main(void* arg) {
     sample_register(s->cpu, strdup(name));
     uint32_t args[1] = {s->arg};
     guest_call(s->cpu, s->entry, 1, args, true);
+    shims_thread_exited(s->handle, s->cpu->r[0]);
     delete s;
 }
 
@@ -1220,8 +1221,11 @@ uint32_t thread_create(uint32_t entry, uint32_t arg, uint32_t* tid_out) {
     s->arg = arg;
     s->cpu = cpu_new_thread();
     if (tid_out) *tid_out = RD32(s->cpu->fs_base + 0x24);
+    s->handle = 0x1000 + RD32(s->cpu->fs_base + 0x24);
+    uint32_t handle = s->handle;
+    shims_thread_created(handle);                   // its handle signals when it returns (WaitForSingleObject)
     host_thread_start(thread_main, s, 2u << 20);
-    return 0x1000 + RD32(s->cpu->fs_base + 0x24);
+    return handle;
 }
 
 // ------------------------------------------------------------------------------------------------ run

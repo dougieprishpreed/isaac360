@@ -70,6 +70,7 @@ enum {
     VERTEX_RING = 512 << 10,            // a frame of play uses ~22 KB of vertices and 1 KB of indices (the frame log's
     INDEX_RING = 128 << 10,             // "rings at most"); a full ring waits for the GPU and starts again
     UPLOAD_RING = 4 << 20,              // larger uploads get a buffer of their own
+    PIXEL_READS = 256,                  // single pixels glReadPixels may queue a frame
     MAX_SETS = 2048,
     SAMPLER_SLOTS = 4,                  // set 0 bindings 0..3 (the game's programs use at most two)
     PUSH_BYTES = 128,
@@ -129,6 +130,7 @@ struct Image {
     VkImageView view;
     int w, h;
     VkDeviceSize bytes;
+    int drawnW, drawnH;                 // a colour target: the area its draws' viewports reach (0: not seen yet)
 };
 
 struct Garbage {
@@ -209,6 +211,12 @@ struct VertexArray {
     bool normalized;
 };
 
+// a pixel glReadPixels asked for, copied in the frame's commands and taken once its fence has passed
+struct PixelRead {
+    VkImage image;
+    int x, y;
+};
+
 struct Frame {
     VkCommandBuffer cmd;
     VkFence fence;
@@ -217,6 +225,8 @@ struct Frame {
     VkDeviceSize vOff, iOff, uOff;
     VkDescriptorPool pool;
     std::vector<Garbage> garbage;
+    Buffer reads;                       // PIXEL_READS pixels, RGBA
+    std::vector<PixelRead> pixelReads;
 };
 
 struct PassKey {
@@ -272,7 +282,13 @@ VkDescriptorSet g_presentSet = VK_NULL_HANDLE;
 // recording state
 bool g_recording = false, g_inPass = false;
 PassKey g_passKey = {VK_NULL_HANDLE, VK_NULL_HANDLE};
-int g_passW = 0, g_passH = 0;
+int g_passW = 0, g_passH = 0;                 // the pass's area (from the target's corner)
+// The pass's first clear, made again over the part a pass grows into (pass_area_for_draw)
+struct PassClear {
+    bool color, depth;
+    float rgba[4], z;
+};
+PassClear g_passClear = {false, false, {0, 0, 0, 0}, 0};
 VkPipeline g_boundPipe = VK_NULL_HANDLE;
 VkDescriptorSet g_lastSet = VK_NULL_HANDLE;
 VkImageView g_lastViews[SAMPLER_SLOTS];
@@ -351,6 +367,18 @@ enum { GPU_TRACE_MAX = 400 };
 VkQueryPool g_queries = VK_NULL_HANDLE;
 double g_tickNs = 0;
 bool g_frameTimed[FRAMES], g_frameFlushed[FRAMES];
+// Effect lines (BOI360_PROFILE or BOI360_EFFECT_LOG): a program drawn after 30 frames without it starts an effect, and
+// 30 frames without it end it, logged with its frames and the GPU's work a frame meanwhile, so a pill's, a boss
+// attack's or a room's screen effect shows its cost in the console's log (the gpu trace lines catch one frame in 600)
+const int kEffectGap = 30;
+uint64_t g_effectMask = 0;                      // the programs drawn this frame (bit = GLVK_PROGRAMS index)
+uint64_t g_frameMask[FRAMES];                   // each frame slot's, for its GPU time
+struct EffectRun {
+    bool on;
+    uint32_t first, last, frames, timed;
+    double gpuMs;
+};
+EffectRun g_effects[64];
 double g_gpuMs = 0, g_gpuMax = 0;
 uint32_t g_gpuFrames = 0;
 bool g_gpuTraceNext = false;
@@ -388,6 +416,10 @@ int find_memory(uint32_t bits, VkMemoryPropertyFlags need, VkMemoryPropertyFlags
     return fallback;
 }
 
+bool reclaim_images();
+uint64_t g_readPixels = 0;                          // glReadPixels calls so far (the room lines)
+uint64_t g_readPixelsWaited = 0;                    // those that waited for the GPU
+
 bool make_buffer(Buffer& b, VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags want) {
     memset(&b, 0, sizeof(b));
     VkBufferCreateInfo bi;
@@ -405,7 +437,9 @@ bool make_buffer(Buffer& b, VkDeviceSize size, VkBufferUsageFlags usage, VkMemor
     ai.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
     ai.allocationSize = req.size;
     ai.memoryTypeIndex = (uint32_t)type;
-    if (type < 0 || vkAllocateMemory(g_dev, &ai, 0, &b.mem) != VK_SUCCESS) {
+    bool got = type >= 0 && vkAllocateMemory(g_dev, &ai, 0, &b.mem) == VK_SUCCESS;
+    if (!got && type >= 0 && reclaim_images()) got = vkAllocateMemory(g_dev, &ai, 0, &b.mem) == VK_SUCCESS;
+    if (!got) {
         recomp_log("gl_vk: no memory for a %u-byte buffer", (unsigned)size);
         vkDestroyBuffer(g_dev, b.buf, 0);
         b.buf = VK_NULL_HANDLE;
@@ -427,8 +461,6 @@ void free_buffer(Buffer& b) {
     if (b.mem) vkFreeMemory(g_dev, b.mem, 0);
     memset(&b, 0, sizeof(b));
 }
-
-bool reclaim_images();
 
 bool make_image(Image& im, int w, int h, VkFormat format, bool depth) {
     memset(&im, 0, sizeof(im));
@@ -718,7 +750,10 @@ void run_now(void (*fn)(VkCommandBuffer, void*), void* arg) {
     vkQueueWaitIdle(g_queue);
 }
 
-// uploads RGBA rows (GL order) into an image in SHADER_READ_ONLY layout, inside the frame's commands
+// uploads RGBA rows (GL order) into an image in SHADER_READ_ONLY layout, inside the frame's commands. An upload past
+// half the ring gets a buffer of its own; when there is no memory for one (console boot 18: the epilogue's 1024x1024
+// sheets, 4 MB each, with the heap fragmented), it goes through the ring in bands of rows, waiting for the GPU between
+// them, rather than being dropped (the cutscene showed its first frame only).
 void upload_rgba(Image& im, int x, int y, int w, int h, const uint8_t* rgba, bool fresh) {
     begin_recording();
     end_pass();
@@ -729,32 +764,51 @@ void upload_rgba(Image& im, int x, int y, int w, int h, const uint8_t* rgba, boo
     VkDeviceSize off = (f.uOff + 15) & ~(VkDeviceSize)15;
     Buffer big;
     memset(&big, 0, sizeof(big));
+    bool banded = false;
     if (off + bytes > f.upload.size) {
         if (bytes > f.upload.size / 2) {
-            if (!make_buffer(big, bytes, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_CACHED_BIT)) return;
-            src = &big;
-            off = 0;
+            static const bool bands = getenv("BOI360_UPLOAD_BANDS") != 0;    // the fallback, to check it on the PC
+            if (!bands && make_buffer(big, bytes, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_CACHED_BIT)) {
+                src = &big;
+                off = 0;
+            } else {
+                banded = true;
+                log_once("gl_vk: uploads without memory for a buffer of their own go through the ring in bands");
+            }
         } else {
             flush_wait();
             off = 0;
         }
     }
-    memcpy(src->map + off, rgba, (size_t)bytes);
-    if (src == &f.upload) f.uOff = off + bytes;
     barrier(im.image, false, fresh ? VK_IMAGE_LAYOUT_UNDEFINED : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
             VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, kAllAccess, VK_ACCESS_TRANSFER_WRITE_BIT, kAllGraphics,
             VK_PIPELINE_STAGE_TRANSFER_BIT);
     VkBufferImageCopy region;
     memset(&region, 0, sizeof(region));
-    region.bufferOffset = off;
     region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
     region.imageSubresource.layerCount = 1;
     region.imageOffset.x = x;
-    region.imageOffset.y = y;
     region.imageExtent.width = (uint32_t)w;
-    region.imageExtent.height = (uint32_t)h;
     region.imageExtent.depth = 1;
-    vkCmdCopyBufferToImage(f.cmd, src->buf, im.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+    const VkDeviceSize row = (VkDeviceSize)w * 4;
+    int band = banded ? (int)((f.upload.size / 2) / row) : h;
+    if (band < 1) band = 1;
+    for (int r = 0; r < h; r += band) {
+        int n = h - r < band ? h - r : band;
+        if (banded) {
+            off = (f.uOff + 15) & ~(VkDeviceSize)15;
+            if (off + n * row > f.upload.size) {
+                flush_wait();
+                off = 0;
+            }
+        }
+        memcpy(src->map + off, rgba + r * row, (size_t)(n * row));
+        if (src == &f.upload) f.uOff = off + n * row;
+        region.bufferOffset = off;
+        region.imageOffset.y = y + r;
+        region.imageExtent.height = (uint32_t)n;
+        vkCmdCopyBufferToImage(g_frames[g_frame].cmd, src->buf, im.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+    }
     barrier(im.image, false, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
             VK_ACCESS_TRANSFER_WRITE_BIT, kAllAccess, VK_PIPELINE_STAGE_TRANSFER_BIT, kAllGraphics);
     if (big.buf) {
@@ -858,6 +912,24 @@ bool current_target(Target& t) {
     return true;
 }
 
+// A pass covers what the target's draws reach rather than the whole target: the game draws its 960x540 picture in
+// 1024x1024 targets, and on the console a pass's clear and its copy out of eDRAM cost by area (boot 18: 1.33 ms for
+// each full-screen pass into 1024x1024). The area is the union of the viewports drawn into the target, on
+// vulkan4xenon's 8-pixel grid (an area off it loads the target); a target's first pass, and every pass under
+// BOI360_FULL_PASSES=1, covers it all. A draw past the area ends the pass and goes on in a wider one
+// (pass_area_for_draw), whose new part gets the pass's clear.
+const int kAreaGrid = 8;
+void pass_area_for_draw();
+
+void pass_area(const Target& t, int& w, int& h) {
+    static const bool full = getenv("BOI360_FULL_PASSES") != 0;
+    w = t.w;
+    h = t.h;
+    if (full || !t.color->drawnW) return;
+    if (t.color->drawnW < w) w = t.color->drawnW;
+    if (t.color->drawnH < h) h = t.color->drawnH;
+}
+
 // begins (or keeps) the pass on the bound framebuffer; a pass begun for a full clear skips the load
 bool ensure_pass(bool clearsColor, bool clearsDepth) {
     Target t;
@@ -892,17 +964,20 @@ bool ensure_pass(bool clearsColor, bool clearsDepth) {
     rp.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
     rp.renderPass = pass;
     rp.framebuffer = fb;
-    rp.renderArea.extent.width = (uint32_t)t.w;
-    rp.renderArea.extent.height = (uint32_t)t.h;
+    int aw, ah;
+    pass_area(t, aw, ah);
+    rp.renderArea.extent.width = (uint32_t)aw;
+    rp.renderArea.extent.height = (uint32_t)ah;
     vkCmdBeginRenderPass(g_frames[g_frame].cmd, &rp, VK_SUBPASS_CONTENTS_INLINE);
     g_inPass = true;
     g_passKey = key;
+    g_passClear.color = g_passClear.depth = false;
     ++g_counts.passes;
     if (tracing())
         recomp_log("trace: pass fbo %u, colour %dx%d (%s), depth %s (%s), area %dx%d", g_fbo, t.color->w, t.color->h,
-                   clearsColor ? "cleared" : "loaded", t.depth ? "yes" : "none", clearsDepth ? "cleared" : "loaded", t.w, t.h);
-    g_passW = t.w;
-    g_passH = t.h;
+                   clearsColor ? "cleared" : "loaded", t.depth ? "yes" : "none", clearsDepth ? "cleared" : "loaded", aw, ah);
+    g_passW = aw;
+    g_passH = ah;
     g_boundPipe = VK_NULL_HANDLE;
     return true;
 }
@@ -1211,6 +1286,7 @@ bool make_frames() {
         if (!make_buffer(f.vertices, VERTEX_RING, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, 0)) return false;
         if (!make_buffer(f.indices, INDEX_RING, VK_BUFFER_USAGE_INDEX_BUFFER_BIT, 0)) return false;
         if (!make_buffer(f.upload, UPLOAD_RING, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_CACHED_BIT)) return false;
+        make_buffer(f.reads, PIXEL_READS * 4, VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_HOST_CACHED_BIT);
         if (vkCreateDescriptorPool(g_dev, &dpi, 0, &f.pool) != VK_SUCCESS) return false;
         f.vOff = f.iOff = f.uOff = 0;
     }
@@ -1236,9 +1312,13 @@ bool make_output() {
         extent.height = 720;
     }
     g_swapExtent = extent;
-    // as few images as the display takes (vulkan4xenon: 2), so at most one finished frame waits to show: a pad read
-    // reaches the screen a frame sooner than with a third
-    uint32_t count = caps.minImageCount < 2 ? 2 : caps.minImageCount;
+    // three images: with two, a frame's work reached the GPU only once the one before it had shown (vulkan4xenon's
+    // acquire waits for that), so the game's part and the GPU's ran one after the other and a room at 8 + 12.7 ms
+    // missed a refresh in one frame of five (boot 18). A third lets the GPU work on one frame while the next is made,
+    // a frame's more delay only while the GPU is the limit. BOI360_SWAP_IMAGES=2 keeps the shorter pad-to-screen path.
+    static const uint32_t wanted = getenv("BOI360_SWAP_IMAGES") ? (uint32_t)atoi(getenv("BOI360_SWAP_IMAGES")) : 3;
+    uint32_t count = wanted < caps.minImageCount ? caps.minImageCount : wanted;
+    if (count < 2) count = 2;
     if (caps.maxImageCount && count > caps.maxImageCount) count = caps.maxImageCount;
     if (count > MAX_SWAP) count = MAX_SWAP;
     VkSwapchainCreateInfoKHR ci;
@@ -1759,6 +1839,7 @@ void draw(uint32_t mode, int count, uint32_t indexType, uint32_t indices, int fi
         }
     f = &g_frames[g_frame];
     if (f->vOff + vbytes > VERTEX_RING || f->iOff + ibytes > INDEX_RING) flush_wait();
+    pass_area_for_draw();
     if (!ensure_pass(false, false)) return;
     f = &g_frames[g_frame];
     // vertices, packed in the program's attribute order
@@ -1948,6 +2029,7 @@ void draw(uint32_t mode, int count, uint32_t indexType, uint32_t indices, int fi
         recomp_log("trace:   push%s", vals.c_str());
     }
     vkCmdDrawIndexed(cmd, (uint32_t)count, 1, 0, 0, 0);
+    if (p.desc && p.desc - GLVK_PROGRAMS < 64) g_effectMask |= 1ull << (p.desc - GLVK_PROGRAMS);
     if (g_gpuTraceSlot == g_frame) {
         char where[64];
         snprintf(where, sizeof(where), " into %dx%d", g_passW, g_passH);
@@ -1955,6 +2037,63 @@ void draw(uint32_t mode, int count, uint32_t indexType, uint32_t indices, int fi
     }
     f->vOff = (f->vOff + vbytes + 15) & ~(VkDeviceSize)15;
     f->iOff = (f->iOff + (wide ? 4 : 2) * (VkDeviceSize)count + 15) & ~(VkDeviceSize)15;
+}
+
+// grows the bound target's area to the viewport's reach; a pass on it already begun smaller ends, and the wider one
+// that follows loads what was drawn and clears its new part as the pass's first clear did
+void pass_area_for_draw() {
+    Target t;
+    if (!current_target(t) || g_viewport[2] <= 0 || g_viewport[3] <= 0) return;
+    int needW = g_viewport[0] + g_viewport[2], needH = g_viewport[1] + g_viewport[3];
+    needW = (needW + kAreaGrid - 1) / kAreaGrid * kAreaGrid;
+    needH = (needH + kAreaGrid - 1) / kAreaGrid * kAreaGrid;
+    if (needW > t.w) needW = t.w;
+    if (needH > t.h) needH = t.h;
+    Image& im = *t.color;
+    if (im.drawnW >= needW && im.drawnH >= needH) return;
+    bool first = !im.drawnW;
+    if (needW > im.drawnW) im.drawnW = needW;
+    if (needH > im.drawnH) im.drawnH = needH;
+    PassKey key = {t.color->view, t.depth ? t.depth->view : VK_NULL_HANDLE};
+    if (first || !g_inPass || !(g_passKey == key) || (g_passW >= im.drawnW && g_passH >= im.drawnH)) return;
+    int oldW = g_passW, oldH = g_passH;
+    PassClear cleared = g_passClear;
+    end_pass();
+    if (!ensure_pass(false, false)) return;
+    g_passClear = cleared;
+    VkClearAttachment att[2];
+    uint32_t n = 0;
+    if (cleared.color) {
+        att[n].aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        att[n].colorAttachment = 0;
+        memcpy(att[n].clearValue.color.float32, cleared.rgba, sizeof(cleared.rgba));
+        ++n;
+    }
+    if (cleared.depth && g_passKey.depth) {
+        att[n].aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT | (g_depthFormat == VK_FORMAT_D32_SFLOAT ? 0 : VK_IMAGE_ASPECT_STENCIL_BIT);
+        att[n].colorAttachment = 0;
+        att[n].clearValue.depthStencil.depth = cleared.z;
+        att[n].clearValue.depthStencil.stencil = 0;
+        ++n;
+    }
+    log_once("gl_vk: a pass grew past its target's drawn area (%dx%d to %dx%d)", oldW, oldH, g_passW, g_passH);
+    if (!n) return;
+    VkClearRect r[2];
+    memset(r, 0, sizeof(r));
+    uint32_t rects = 0;
+    if (g_passW > oldW) {                           // the new columns, all rows
+        r[rects].rect.offset.x = oldW;
+        r[rects].rect.extent.width = (uint32_t)(g_passW - oldW);
+        r[rects].rect.extent.height = (uint32_t)g_passH;
+        r[rects++].layerCount = 1;
+    }
+    if (g_passH > oldH) {                           // the new rows under the old columns
+        r[rects].rect.offset.y = oldH;
+        r[rects].rect.extent.width = (uint32_t)(oldW < g_passW ? oldW : g_passW);
+        r[rects].rect.extent.height = (uint32_t)(g_passH - oldH);
+        r[rects++].layerCount = 1;
+    }
+    if (rects) vkCmdClearAttachments(g_frames[g_frame].cmd, n, att, rects, r);
 }
 
 void clear(uint32_t mask) {
@@ -1988,6 +2127,14 @@ void clear(uint32_t mask) {
     r.rect.extent.height = (uint32_t)g_passH;
     r.layerCount = 1;
     vkCmdClearAttachments(g_frames[g_frame].cmd, n, att, 1, &r);
+    if (color) {
+        g_passClear.color = true;
+        memcpy(g_passClear.rgba, g_clearColor, sizeof(g_clearColor));
+    }
+    if (depth && g_passKey.depth) {
+        g_passClear.depth = true;
+        g_passClear.z = g_clearDepth;
+    }
 }
 
 bool read_image(Image& im, int x, int y, int w, int h, std::vector<uint8_t>& out);
@@ -2351,6 +2498,81 @@ void vk_glDeleteRenderbuffers(X86* c) {
     RET_STD(c, 2, 0);
 }
 
+// Single-pixel reads without waiting for the GPU. The game samples the screen under some entities (camouflage takes
+// the floor's colour) a few times a second, and each read made the GPU finish everything queued, mid-frame: 6-8% of
+// every room's frame on the console (boot 18), and the GPU's frame then no longer overlapped the next. Each read now
+// queues a copy of its pixel in the frame's commands, and is answered by the newest finished copy of that target
+// within 160 pixels and 60 frames (the game reads every ~10 frames, while a large room's camera scrolls): the colour
+// as the screen held it at an earlier read, which the game blends into a tint over many frames anyway. A read with
+// none near (the first) still waits. BOI360_SYNC_READS=1 waits always.
+struct PixelResult {
+    VkImage image;
+    int x, y;
+    uint32_t frame;
+    uint8_t rgba[4];
+};
+std::vector<PixelResult> g_pixelResults;            // the newest, at most 64
+
+void keep_pixel_result(VkImage image, int x, int y, const uint8_t* rgba) {
+    PixelResult r = {image, x, y, gl_frame_count(), {rgba[0], rgba[1], rgba[2], rgba[3]}};
+    for (size_t i = 0; i < g_pixelResults.size(); ++i)
+        if (g_pixelResults[i].image == image && g_pixelResults[i].x == x && g_pixelResults[i].y == y) {
+            g_pixelResults[i] = r;
+            return;
+        }
+    if (g_pixelResults.size() >= 64) g_pixelResults.erase(g_pixelResults.begin());
+    g_pixelResults.push_back(r);
+}
+
+void take_pixel_reads(Frame& f) {
+    for (size_t i = 0; i < f.pixelReads.size(); ++i)
+        keep_pixel_result(f.pixelReads[i].image, f.pixelReads[i].x, f.pixelReads[i].y, f.reads.map + 4 * i);
+    f.pixelReads.clear();
+}
+
+// queues a copy of the pixel and answers from the nearest recent one; false: none near
+bool read_pixel_queued(int x, int y, uint8_t* rgba) {
+    Target t;
+    if (!current_target(t) || x < 0 || y < 0 || x >= t.color->w || y >= t.color->h) return false;
+    Frame& f = g_frames[g_frame];
+    if (f.reads.map && f.pixelReads.size() < PIXEL_READS) {
+        begin_recording();
+        end_pass();
+        Image& im = *t.color;
+        barrier(im.image, false, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                kAllAccess, VK_ACCESS_TRANSFER_READ_BIT, kAllGraphics, VK_PIPELINE_STAGE_TRANSFER_BIT);
+        VkBufferImageCopy region;
+        memset(&region, 0, sizeof(region));
+        region.bufferOffset = 4 * f.pixelReads.size();
+        region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        region.imageSubresource.layerCount = 1;
+        region.imageOffset.x = x;
+        region.imageOffset.y = y;
+        region.imageExtent.width = region.imageExtent.height = region.imageExtent.depth = 1;
+        vkCmdCopyImageToBuffer(g_frames[g_frame].cmd, im.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, f.reads.buf, 1,
+                               &region);
+        barrier(im.image, false, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                VK_ACCESS_TRANSFER_READ_BIT, kAllAccess, VK_PIPELINE_STAGE_TRANSFER_BIT, kAllGraphics);
+        PixelRead r = {im.image, x, y};
+        f.pixelReads.push_back(r);
+    }
+    const PixelResult* best = 0;
+    int bestD = 161;
+    uint32_t now = gl_frame_count();
+    for (size_t i = 0; i < g_pixelResults.size(); ++i) {
+        const PixelResult& r = g_pixelResults[i];
+        if (r.image != t.color->image || now - r.frame > 60) continue;
+        int d = abs(r.x - x) + abs(r.y - y);
+        if (d < bestD) {
+            bestD = d;
+            best = &r;
+        }
+    }
+    if (!best) return false;
+    memcpy(rgba, best->rgba, 4);
+    return true;
+}
+
 // glReadPixels(x, y, w, h, format, type, pixels): from the bound framebuffer, GL rows
 void vk_glReadPixels(X86* c) {
     int x = (int)ARG(c, 0), y = (int)ARG(c, 1), w = (int)ARG(c, 2), h = (int)ARG(c, 3);
@@ -2362,14 +2584,32 @@ void vk_glReadPixels(X86* c) {
                    g_fbo, format, ret[0], ret[1], ret[2], ret[3], ret[4], ret[5]);
     }
     RET_STD(c, 7, 0);
+    ++g_readPixels;
+    static bool named = false;                      // the first caller, to tell what reads the GPU back
+    if (!named) {
+        named = true;
+        uint32_t ret[6] = {0, 0, 0, 0, 0, 0};
+        recomp_guest_returns(c, ret, 6);
+        recomp_log("gl_vk: the first glReadPixels: %d,%d %dx%d, fbo %u, from %08x %08x %08x %08x %08x %08x", x, y, w, h,
+                   g_fbo, ret[0], ret[1], ret[2], ret[3], ret[4], ret[5]);
+    }
     std::vector<uint8_t> px;
     if (type != GL_UNSIGNED_BYTE || (format != GL_RGBA && format != GL_RGB && format != GL_BGRA)) {
         log_once("glReadPixels format 0x%x type 0x%x", format, type);
         return;
     }
-    if (!read_color(x, y, w, h, px)) {
-        log_once("glReadPixels %d,%d %dx%d outside the framebuffer", x, y, w, h);
-        return;
+    static const bool sync = getenv("BOI360_SYNC_READS") != 0;
+    uint8_t one[4];
+    if (w == 1 && h == 1 && !sync && read_pixel_queued(x, y, one)) {
+        px.assign(one, one + 4);
+    } else {
+        if (!read_color(x, y, w, h, px)) {
+            log_once("glReadPixels %d,%d %dx%d outside the framebuffer", x, y, w, h);
+            return;
+        }
+        ++g_readPixelsWaited;
+        Target t;
+        if (w == 1 && h == 1 && current_target(t)) keep_pixel_result(t.color->image, x, y, &px[0]);
     }
     int comps = format == GL_RGB ? 3 : 4, pitch = (w * comps + 3) & ~3;
     for (int r = 0; r < h; ++r)
@@ -2441,20 +2681,26 @@ void vk_glGetProgramiv(X86* c) {
     RET_STD(c, 3, 0);
 }
 void vk_glUseProgram(X86* c) { g_program = ARG(c, 0); RET_STD(c, 1, 0); }
+// the guest's NUL-ended name at a against a program's: the game looks its attributes up by name around every draw
+// (1.6% of a console frame in a room of many objects, boot 18, each a host string made and freed)
+bool guest_name_is(uint32_t a, const std::string& name) {
+    if (!a || a + name.size() >= g_mem_size) return false;
+    return !memcmp(g_mem + a, name.data(), name.size()) && !g_mem[a + name.size()];
+}
 void vk_glGetAttribLocation(X86* c) {
     Program& p = g_programs[ARG(c, 0)];
-    std::string name = guest_str(ARG(c, 1));
+    uint32_t name = ARG(c, 1);
     int loc = -1;
     for (size_t i = 0; i < p.attrs.size(); ++i)
-        if (p.attrs[i].name == name) loc = p.attrs[i].loc;
+        if (guest_name_is(name, p.attrs[i].name)) loc = p.attrs[i].loc;
     RET_STD(c, 2, (uint32_t)loc);
 }
 void vk_glGetUniformLocation(X86* c) {
     Program& p = g_programs[ARG(c, 0)];
-    std::string name = guest_str(ARG(c, 1));
+    uint32_t name = ARG(c, 1);
     int loc = -1;
     for (size_t i = 0; i < p.uniforms.size(); ++i)
-        if (p.uniforms[i].name == name) loc = (int)i;
+        if (guest_name_is(name, p.uniforms[i].name)) loc = (int)i;
     RET_STD(c, 2, (uint32_t)loc);
 }
 Uniform* uniform_at(int loc) {
@@ -2608,11 +2854,17 @@ void next_frame() {
                                   VK_QUERY_RESULT_64_BIT) == VK_SUCCESS && t[1] >= t[0]) {
             double ms = (double)(t[1] - t[0]) * g_tickNs / 1e6;
             g_gpuMs += ms;
+            for (int i = 0; i < 64; ++i)
+                if ((g_frameMask[g_frame] >> i & 1) && g_effects[i].on) {
+                    g_effects[i].gpuMs += ms;
+                    ++g_effects[i].timed;
+                }
             if (ms > g_gpuMax) g_gpuMax = ms;
             ++g_gpuFrames;
         }
     }
     if (g_gpuTraceSlot == g_frame) gpu_trace_report();
+    take_pixel_reads(f);
     free_garbage(f);
     vkResetCommandBuffer(f.cmd, 0);
     vkResetDescriptorPool(g_dev, f.pool, 0);
@@ -2671,6 +2923,8 @@ void gl_vk_work(GlVkWork* w) {
     w->texBytes = g_texBytes;
     w->gpuMs = g_gpuMs;
     w->gpuFrames = g_gpuFrames;
+    w->readPixels = g_readPixels;
+    w->readPixelsWaited = g_readPixelsWaited;
 }
 double gl_vk_gpu_max_reset() {
     double m = g_gpuMax;
@@ -2795,8 +3049,39 @@ void gl_vk_frame_counts(char* buf, size_t size) {
              (unsigned)(g_ringHigh[2] >> 10));
 }
 
+void log_effect(int i) {
+    EffectRun& e = g_effects[i];
+    recomp_log("effect %s: frames %u to %u (drawn in %u), the GPU's work %.1f ms a frame (%u timed)",
+               GLVK_PROGRAMS[i].label, e.first, e.last, e.frames, e.timed ? e.gpuMs / e.timed : 0.0, e.timed);
+}
+
+void effects_frame() {
+    static const bool on = getenv("BOI360_PROFILE") || getenv("BOI360_EFFECT_LOG");
+    uint64_t mask = g_effectMask;
+    g_effectMask = 0;
+    g_frameMask[g_frame] = mask;
+    if (!on) return;
+    uint32_t now = gl_frame_count();
+    for (int i = 0; i < 64; ++i) {
+        EffectRun& e = g_effects[i];
+        if (mask >> i & 1) {
+            if (!e.on) {
+                memset(&e, 0, sizeof(e));
+                e.on = true;
+                e.first = now;
+            }
+            e.last = now;
+            ++e.frames;
+        } else if (e.on && now - e.last > (uint32_t)kEffectGap) {
+            if (e.first > 3) log_effect(i);         // not the programs drawn since the start
+            e.on = false;
+        }
+    }
+}
+
 void gl_vk_present() {
     if (!g_ready) return;
+    effects_frame();
     g_lastCounts = g_counts;
     memset(&g_counts, 0, sizeof(g_counts));
     begin_recording();

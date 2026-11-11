@@ -119,6 +119,9 @@ void gl_room_entered(const char* name);  // the game logged "Room type.variant(n
 int recomp_guest_returns(X86* c, uint32_t* out, int n);    // the innermost guest return addresses on c's stack
 void shims_lock_stats_dump(void (*line)(const char*));    // BOI360_PROFILE: contended critical sections (kernel32)
 double shims_lock_wait_ms();               // BOI360_PROFILE: ms all threads waited for critical sections so far
+void shims_thread_created(uint32_t handle);  // a guest thread's handle: a wait on it lasts until the thread returns
+void shims_thread_exited(uint32_t handle, uint32_t code);
+uint32_t shims_thread_exit_code(uint32_t handle);   // GetExitCodeThread: STILL_ACTIVE (259) until it returns
 bool recomp_is_main_cpu(X86* c);           // the game's main thread (the first guest thread)
 uint64_t shims_main_lock_enters();         // critical sections the main thread entered so far
 double shims_main_sleep_ms();              // ms the main thread spent in Sleep so far (the game's own frame pacing)

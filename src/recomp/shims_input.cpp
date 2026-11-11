@@ -2,6 +2,7 @@
 // COM object of ours that enumerates no devices (the game requires it to load). Test runs script the pad by
 // presented frame: BOI360_PAD="first:last:keys;..." with the keys of the Windows binary's scripts (docs).
 #include "runtime.h"
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 #include <string>
@@ -50,6 +51,30 @@ void key(char c, HostPad& p) {
     }
 }
 
+// The pads' sticks through a round dead zone: the game reads them raw through GLFW's XInput joysticks, so a stick
+// that drifts at rest walks Isaac slowly. BOI360_DEADZONE (percent of full tilt, default 24: XInput's own
+// XINPUT_GAMEPAD_LEFT_THUMB_DEADZONE, 7849) clears a stick inside it and scales the rest so full tilt stays full;
+// 0 passes them raw, 100 turns the sticks off (the d-pad still moves).
+void apply_deadzone(HostPad& p) {
+    static const int percent = getenv("BOI360_DEADZONE") ? atoi(getenv("BOI360_DEADZONE")) : 24;
+    if (percent <= 0) return;
+    const double dz = percent >= 100 ? 32768.0 : 32767.0 * percent / 100.0;
+    int16_t* sticks[2][2] = {{&p.lx, &p.ly}, {&p.rx, &p.ry}};
+    for (int s = 0; s < 2; ++s) {
+        double x = *sticks[s][0], y = *sticks[s][1];
+        double mag = sqrt(x * x + y * y);
+        if (mag <= dz) {
+            *sticks[s][0] = *sticks[s][1] = 0;
+            continue;
+        }
+        double out = (mag > 32767.0 ? 32767.0 : mag) - dz;
+        double scale = out / (32767.0 - dz) * 32767.0 / mag;
+        double nx = x * scale, ny = y * scale;
+        *sticks[s][0] = (int16_t)(nx > 32767.0 ? 32767 : nx < -32768.0 ? -32768 : nx);
+        *sticks[s][1] = (int16_t)(ny > 32767.0 ? 32767 : ny < -32768.0 ? -32768 : ny);
+    }
+}
+
 HostPad current_pad() {
     if (!g_scriptParsed) {
         g_scriptParsed = true;
@@ -75,6 +100,7 @@ HostPad current_pad() {
         memset(&q, 0, sizeof(q));
         p = g_hostPadSource(0, &q) ? q : p;
     }
+    apply_deadzone(p);
     if (!g_script.empty()) {
         p.connected = true;
         uint32_t f = gl_frame_count();
@@ -98,6 +124,7 @@ void xi_GetState(X86* c) {
     if (i != 0 && g_hostPadSource) {                    // co-op: the console's other pads
         memset(&p, 0, sizeof(p));
         if (i > 3 || !g_hostPadSource((int)i, &p)) p.connected = false;
+        else apply_deadzone(p);
     } else if (i != 0) {
         p.connected = false;
     }

@@ -45,6 +45,8 @@ struct GlVkWork {
     uint64_t texBytes;              // pixels glTexImage2D was given (as RGBA)
     double gpuMs;                   // the GPU's work on the frames timed (first to last command), and how many
     uint32_t gpuFrames;
+    uint64_t readPixels;            // glReadPixels calls
+    uint64_t readPixelsWaited;      // those that waited for the GPU
 };
 void gl_vk_work(GlVkWork* w);
 double gl_vk_gpu_max_reset();       // the longest frame of GPU work since the last call

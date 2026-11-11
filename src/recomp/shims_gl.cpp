@@ -326,7 +326,7 @@ void gl_room_entered(const char* name) {
 static void log_room() {
     RoomTimes& r = g_room;
     if (r.name.empty()) return;
-    char steady[640] = "";
+    char steady[1024] = "";
     if (r.frames) {
         GlVkWork w;
         memset(&w, 0, sizeof(w));
@@ -338,10 +338,13 @@ static void log_room() {
         char trace[48] = "";
         if (r.traced) snprintf(trace, sizeof(trace), ", gpu trace of frame %u", r.traced);
         snprintf(steady, sizeof(steady), "; then %u frames: game %.1f ms (%.1f of it the game's sleeps), present %.1f "
-                 "(frame max %.1f), %u over 17 ms, %u over 34; the GPU's work %.1f ms a frame (%u timed%s); %s; %.0f "
-                 "critical sections, %.0f allocations a frame (%.1f over 2 KB, %.0f free runs looked at each)",
-                 r.frames, r.game / r.frames, r.slept / r.frames, r.present / r.frames, r.frameMax, r.over17, r.over34,
-                 timed ? (w.gpuMs - r.work.gpuMs) / timed : 0.0, timed, trace, r.counts.c_str(),
+                 "(frame max %.1f), %u over 17 ms, %u over 34; the GPU's work %.1f ms a frame (%u timed%s); %s; %.1f "
+                 "read-backs (%.2f waited), %.1f ms waiting for the GPU mid-frame, %.0f critical sections, %.0f "
+                 "allocations a frame (%.1f over 2 KB, %.0f free runs looked at each)", r.frames, r.game / r.frames, r.slept / r.frames, r.present / r.frames, r.frameMax,
+                 r.over17, r.over34, timed ? (w.gpuMs - r.work.gpuMs) / timed : 0.0, timed, trace, r.counts.c_str(),
+                 (double)(w.readPixels - r.work.readPixels) / r.frames,
+                 (double)(w.readPixelsWaited - r.work.readPixelsWaited) / r.frames,
+                 (w.waitIdle - r.work.waitIdle) / r.frames,
                  (double)(shims_main_lock_enters() - r.enters) / r.frames, (double)(h.allocs - r.heap.allocs) / r.frames,
                  (double)big / r.frames, big ? (double)(h.scanned - r.heap.scanned) / big : 0.0);
     }

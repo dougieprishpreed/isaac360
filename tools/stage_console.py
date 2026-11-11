@@ -107,7 +107,10 @@ Files
   save\\              saves and the game's settings are written here
   boi360.log         written each session: copy it off before ejecting the drive
   boi360_args.txt    options: --mem MB (address space for the game); a line BOI360_DISPLAY=720p
-                     keeps the picture at 1280x720 when the console is set to 1080p
+                     keeps the picture at 1280x720 when the console is set to 1080p; a line
+                     BOI360_DEADZONE=N sets the sticks' dead zone in percent (default 24; 100
+                     turns the sticks off, the d-pad still moves); a line BOI360_SWAP_IMAGES=2
+                     shows each frame a refresh sooner where the game keeps up (default 3)
   licenses\\          licences of the toolchain the build uses
 
 Controls: the game's own controller layout (left stick moves, right stick fires).

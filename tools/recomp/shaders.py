@@ -297,6 +297,24 @@ REWRITES = [
         r'gradientSum\s*-=\s*(waterGradientLinear\([^;]*\))\s*;\s*\}'),
      r'{ vec2 boi_current = gradientSum * 0.5 - \1 - \2; '
      r'gradientSum = mix(gradientSum, boi_current, bvec2(CurrentDir0.x != 0.0 || CurrentDir0.y != 0.0)); }'),
+    # Each wave term's sine, cosine and power once, not once per component: the same operations in the same order on
+    # each value (xost does not share them: 358 lines for the six terms, the floors' water in Downpour and Dross)
+    ('resources/shaders/water_v2', re.compile(
+        r'return vec2\(\s*exponent \* d\.x \* amp \* pow\(0\.5 \* \(sin\(dot\(d, pos\) \* freq \+ time \* speed\) '
+        r'\+ 1\.0\), exponent - 1\.0\)\s*\* cos\(dot\(d, pos\) \* freq \+ time \* speed\),\s*'
+        r'exponent \* d\.y \* amp \* pow\(0\.5 \* \(sin\(dot\(d, pos\) \* freq \+ time \* speed\) \+ 1\.0\), '
+        r'exponent - 1\.0\)\s*\* cos\(dot\(d, pos\) \* freq \+ time \* speed\)\s*\);'),
+     r'float boi_a = dot(d, pos) * freq + time * speed; '
+     r'float boi_p = pow(0.5 * (sin(boi_a) + 1.0), exponent - 1.0); float boi_c = cos(boi_a); '
+     r'return vec2(exponent * d.x * amp * boi_p * boi_c, exponent * d.y * amp * boi_p * boi_c);'),
+    ('resources/shaders/water_v2', re.compile(
+        r'return vec2\(\s*exponent \* dir\.x \* amp \* pow\(0\.5 \* \(sin\(dot\(dir, pos\) \* freq \+ time \* '
+        r'spd\.x\) \+ 1\.0\), exponent - 1\.0\)\s*\* cos\(dot\(dir, pos\) \* freq \+ time \* spd\.x\),\s*'
+        r'exponent \* dir\.y \* amp \* pow\(0\.5 \* \(sin\(dot\(dir, pos\) \* freq \+ time \* spd\.y\) \+ 1\.0\), '
+        r'exponent - 1\.0\)\s*\* cos\(dot\(dir, pos\) \* freq \+ time \* spd\.y\)\s*\);'),
+     r'float boi_ax = dot(dir, pos) * freq + time * spd.x; float boi_ay = dot(dir, pos) * freq + time * spd.y; '
+     r'return vec2(exponent * dir.x * amp * pow(0.5 * (sin(boi_ax) + 1.0), exponent - 1.0) * cos(boi_ax), '
+     r'exponent * dir.y * amp * pow(0.5 * (sin(boi_ay) + 1.0), exponent - 1.0) * cos(boi_ay));'),
 ]
 
 
@@ -305,6 +323,45 @@ REWRITES = [
 # lines of it (222 ALU instructions, 45 of them moves, 29 registers); with it boot 16's frames were 20-32 ms, 16.7
 # without. Its twelve coordinates as vec4 pairs from one vec4 of offsets (each the same sum as the game's) take 263
 # (202, 28 moves). Packing the weights into vec4 lanes cost more moves than it saved (272).
+
+def bloom_fs():
+    """The game's bloom (every pill shows it for a second: 49 texels a pixel over the whole picture) with its loops
+    unrolled and each row's six coordinates made as three vec4 pairs from one vec4 of offsets, the squares summed
+    with one multiply-add each and scaled by the game's 0.05 once (its loop scales each: the same sum but for float
+    rounding): xost compiled the loops to 371 lines."""
+    out = [
+        '#ifndef GL_ES',
+        '#  define lowp',
+        '#endif',
+        '',
+        'varying lowp vec4 Color0;',
+        'varying vec2 TexCoord0;',
+        'varying float OutBloomAmount;',
+        'varying vec2 OutRatio;',
+        'uniform sampler2D Texture0;',
+        '',
+        'void main(void)',
+        '{',
+        '\tvec4 sum = vec4(0);',
+        '\tvec2 texcoord = vec2(TexCoord0);',
+        '\tgl_FragColor = Color0 * texture2D(Texture0, texcoord);',
+        '\tvec4 base = texcoord.xyxy;',
+        '\tvec4 ratio = OutRatio.xyxy;',
+        '\tvec4 a, b, c, col;',
+    ]
+    for i in range(-4, 4):
+        out.append('\ta = base + vec4(-3.0, %.1f, -2.0, %.1f) * ratio;' % (i, i))
+        out.append('\tb = base + vec4(-1.0, %.1f, 0.0, %.1f) * ratio;' % (i, i))
+        out.append('\tc = base + vec4(1.0, %.1f, 2.0, %.1f) * ratio;' % (i, i))
+        for v in ('a.xy', 'a.zw', 'b.xy', 'b.zw', 'c.xy', 'c.zw'):
+            out.append('\tcol = texture2D(Texture0, %s); sum += col * col;' % v)
+    out.append('\tgl_FragColor += sum * 0.05 * OutBloomAmount;')
+    out.append('}')
+    return '\n'.join(out) + '\n'
+
+
+BLOOM_FS = bloom_fs()
+
 REPLACE = {
     'resources/shaders/hq4x': '''varying vec2 TexCoord0;
 varying vec3 ScreenSizePow2Out;
@@ -379,6 +436,7 @@ void main(void)
 	gl_FragColor = vec4((w1*(i1+i3)+w2*(i2+i4)+w3*(s1+s3)+w4*(s2+s4)+c)/(2.0*(w1+w2+w3+w4)+1.0), 1.0);
 }
 ''',
+    'resources/shaders/bloom': BLOOM_FS,
 }
 
 

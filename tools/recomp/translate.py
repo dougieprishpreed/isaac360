@@ -67,6 +67,8 @@ HOST = {
     0x94f930: 'hle_lockobj_unlock',           # and unlock (this ecx): shims_kernel32.cpp
     0x407770: 'hle_refcount_add',             # the engine's reference count add-ref (this ecx)
     0x407710: 'hle_refcount_release',         # and release, unless it reaches 0: shims_kernel32.cpp
+    0x407790: 'hle_refcount_use',             # a count test then a virtual call on the object (this ecx)
+    0x959c30: 'hle_refcount_peek',            # a {pointer, count} pair's count read (cdecl)
 }
 
 M = ix.Mnemonic
