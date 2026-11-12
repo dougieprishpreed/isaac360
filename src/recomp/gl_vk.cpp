@@ -267,6 +267,7 @@ std::map<int, VkRenderPass> g_passes;              // colourLoad | depthLoad << 
 std::map<PipeKey, VkPipeline> g_pipelines;
 std::map<PassKey, VkFramebuffer> g_framebuffers;
 Image g_dummy;                                     // bound to sampler slots a program does not use
+Image g_black;                                     // bloom's rows when they could not be made (adds nothing)
 Image g_defColor, g_defDepth;                      // the default framebuffer
 Buffer g_readback;
 // output
@@ -278,6 +279,13 @@ VkImageView g_swapViews[MAX_SWAP];
 VkFramebuffer g_swapFbs[MAX_SWAP];
 VkSemaphore g_swapDone[MAX_SWAP];
 VkPipeline g_presentPipe = VK_NULL_HANDLE, g_presentCopyPipe = VK_NULL_HANDLE;
+// bloom's rows pass (bloom_rows; shaders.py bloom_fs): its pipeline, image and framebuffer, and the draw that reads it
+VkPipeline g_bloomRowsPipe = VK_NULL_HANDLE;
+Image g_bloomRows;
+VkFramebuffer g_bloomRowsFb = VK_NULL_HANDLE;
+const GlVkProgramDesc* g_bloomDesc = 0;
+VkImageView g_bloomView = VK_NULL_HANDLE;           // set for the bloom draw being recorded: its Texture1
+VkSampler g_bloomSampler = VK_NULL_HANDLE;
 bool g_presentWhole = false;                        // the display holds the frame a whole number of times
 Buffer g_presentQuad;
 VkDescriptorPool g_presentPool = VK_NULL_HANDLE;
@@ -293,6 +301,7 @@ struct PassClear {
     float rgba[4], z;
 };
 PassClear g_passClear = {false, false, {0, 0, 0, 0}, 0};
+uint32_t g_passDraws = 0;                           // draws in the pass being recorded
 VkPipeline g_boundPipe = VK_NULL_HANDLE;
 VkDescriptorSet g_lastSet = VK_NULL_HANDLE;
 VkImageView g_lastViews[SAMPLER_SLOTS];
@@ -976,6 +985,7 @@ bool ensure_pass(bool clearsColor, bool clearsDepth) {
     g_inPass = true;
     g_passKey = key;
     g_passClear.color = g_passClear.depth = false;
+    g_passDraws = 0;
     ++g_counts.passes;
     if (tracing())
         recomp_log("trace: pass fbo %u, colour %dx%d (%s), depth %s (%s), area %dx%d", g_fbo, t.color->w, t.color->h,
@@ -1105,6 +1115,8 @@ VkPipeline pipeline(const PipeKey& k, Program& p) {
 }
 
 // ---- device set-up ----------------------------------------------------------------------------------------
+VkPipeline quad_pipeline(const uint32_t* fsCode, size_t fsWords, VkRenderPass pass);
+
 bool make_device() {
     PFN_vkGetInstanceProcAddr gipa = g_hooks.getInstanceProcAddr;
 #define GLVK_LOAD_GLOBAL(name) name = (PFN_##name)gipa(VK_NULL_HANDLE, #name);
@@ -1262,6 +1274,8 @@ bool make_frames() {
     VkPushConstantRange presentPc = {VK_SHADER_STAGE_FRAGMENT_BIT, 0, 32};   // shaders.py PRESENT_FS
     pli.pPushConstantRanges = &presentPc;
     if (vkCreatePipelineLayout(g_dev, &pli, 0, &g_presentLayout) != VK_SUCCESS) return false;
+    g_bloomRowsPipe = quad_pipeline(GLVK_BLOOM_ROWS_FS, sizeof(GLVK_BLOOM_ROWS_FS) / 4,
+                                    render_pass(false, false, false, false));
     VkDescriptorPoolSize ps = {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, MAX_SETS * SAMPLER_SLOTS};
     VkDescriptorPoolCreateInfo dpi;
     memset(&dpi, 0, sizeof(dpi));
@@ -1299,11 +1313,96 @@ bool make_frames() {
         return false;
     // a 1x1 opaque white texture for sampler slots a program leaves empty
     make_image(g_dummy, 1, 1, (VkFormat)COLOR_FORMAT, false);
+    make_image(g_black, 1, 1, (VkFormat)COLOR_FORMAT, false);
     begin_recording();
-    const uint8_t white[4] = {255, 255, 255, 255};
+    const uint8_t white[4] = {255, 255, 255, 255}, black[4] = {0, 0, 0, 0};
     upload_rgba(g_dummy, 0, 0, 1, 1, white, true);
+    upload_rgba(g_black, 0, 0, 1, 1, black, true);
     flush_wait();
     return true;
+}
+
+// A quad pipeline on the present's layout (one sampler, 32 bytes of fragment push constants) with g_presentQuad's
+// vertices (position, uv): the present and bloom's rows. Made at the device's set-up as well as the output's, so
+// a run without a display (the PC's hidden tests) has bloom's rows too.
+VkPipeline quad_pipeline(const uint32_t* fsCode, size_t fsWords, VkRenderPass pass) {
+    if (!g_presentQuad.buf) {
+        // position, uv: the default framebuffer's row 0 is GL's bottom row
+        const float quad[24] = {-1, -1, 0, 1, 1, -1, 1, 1, 1, 1, 1, 0, -1, -1, 0, 1, 1, 1, 1, 0, -1, 1, 0, 0};
+        make_buffer(g_presentQuad, sizeof(quad), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, 0);
+        memcpy(g_presentQuad.map, quad, sizeof(quad));
+    }
+    VkShaderModule vs = make_module(GLVK_PRESENT_VS, sizeof(GLVK_PRESENT_VS) / 4);
+    VkShaderModule fs = make_module(fsCode, (uint32_t)fsWords);
+    VkPipelineShaderStageCreateInfo stages[2];
+    memset(stages, 0, sizeof(stages));
+    for (int i = 0; i < 2; ++i) {
+        stages[i].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        stages[i].stage = i == 0 ? VK_SHADER_STAGE_VERTEX_BIT : VK_SHADER_STAGE_FRAGMENT_BIT;
+        stages[i].module = i == 0 ? vs : fs;
+        stages[i].pName = "main";
+    }
+    VkVertexInputBindingDescription binding = {0, 16, VK_VERTEX_INPUT_RATE_VERTEX};
+    VkVertexInputAttributeDescription attrs[2] = {{0, 0, VK_FORMAT_R32G32_SFLOAT, 0}, {1, 0, VK_FORMAT_R32G32_SFLOAT, 8}};
+    VkPipelineVertexInputStateCreateInfo vin;
+    memset(&vin, 0, sizeof(vin));
+    vin.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+    vin.vertexBindingDescriptionCount = 1;
+    vin.pVertexBindingDescriptions = &binding;
+    vin.vertexAttributeDescriptionCount = 2;
+    vin.pVertexAttributeDescriptions = attrs;
+    VkPipelineInputAssemblyStateCreateInfo ia;
+    memset(&ia, 0, sizeof(ia));
+    ia.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+    ia.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    VkPipelineViewportStateCreateInfo vp;
+    memset(&vp, 0, sizeof(vp));
+    vp.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+    vp.viewportCount = 1;
+    vp.scissorCount = 1;
+    VkPipelineRasterizationStateCreateInfo rs;
+    memset(&rs, 0, sizeof(rs));
+    rs.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+    rs.polygonMode = VK_POLYGON_MODE_FILL;
+    rs.cullMode = VK_CULL_MODE_NONE;
+    rs.lineWidth = 1.0f;
+    VkPipelineMultisampleStateCreateInfo ms;
+    memset(&ms, 0, sizeof(ms));
+    ms.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+    ms.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+    VkPipelineColorBlendAttachmentState blend;
+    memset(&blend, 0, sizeof(blend));
+    blend.colorWriteMask = 0xf;
+    VkPipelineColorBlendStateCreateInfo cb;
+    memset(&cb, 0, sizeof(cb));
+    cb.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+    cb.attachmentCount = 1;
+    cb.pAttachments = &blend;
+    VkDynamicState dyn[2] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
+    VkPipelineDynamicStateCreateInfo ds;
+    memset(&ds, 0, sizeof(ds));
+    ds.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+    ds.dynamicStateCount = 2;
+    ds.pDynamicStates = dyn;
+    VkGraphicsPipelineCreateInfo gp;
+    memset(&gp, 0, sizeof(gp));
+    gp.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+    gp.stageCount = 2;
+    gp.pStages = stages;
+    gp.pVertexInputState = &vin;
+    gp.pInputAssemblyState = &ia;
+    gp.pViewportState = &vp;
+    gp.pRasterizationState = &rs;
+    gp.pMultisampleState = &ms;
+    gp.pColorBlendState = &cb;
+    gp.pDynamicState = &ds;
+    gp.layout = g_presentLayout;
+    gp.renderPass = pass;
+    VkPipeline pipe = VK_NULL_HANDLE;
+    vkCreateGraphicsPipelines(g_dev, VK_NULL_HANDLE, 1, &gp, 0, &pipe);
+    vkDestroyShaderModule(g_dev, vs, 0);
+    vkDestroyShaderModule(g_dev, fs, 0);
+    return pipe;
 }
 
 bool make_output() {
@@ -1375,85 +1474,10 @@ bool make_output() {
         si.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
         vkCreateSemaphore(g_dev, &si, 0, &g_swapDone[i]);
     }
-    // the present pipeline: a quad over the output, sampling the default framebuffer upside down
-    VkShaderModule vs = make_module(GLVK_PRESENT_VS, sizeof(GLVK_PRESENT_VS) / 4);
-    VkShaderModule fs = make_module(GLVK_PRESENT_FS, sizeof(GLVK_PRESENT_FS) / 4);
-    VkPipelineShaderStageCreateInfo stages[2];
-    memset(stages, 0, sizeof(stages));
-    for (int i = 0; i < 2; ++i) {
-        stages[i].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-        stages[i].stage = i == 0 ? VK_SHADER_STAGE_VERTEX_BIT : VK_SHADER_STAGE_FRAGMENT_BIT;
-        stages[i].module = i == 0 ? vs : fs;
-        stages[i].pName = "main";
-    }
-    VkVertexInputBindingDescription binding = {0, 16, VK_VERTEX_INPUT_RATE_VERTEX};
-    VkVertexInputAttributeDescription attrs[2] = {{0, 0, VK_FORMAT_R32G32_SFLOAT, 0}, {1, 0, VK_FORMAT_R32G32_SFLOAT, 8}};
-    VkPipelineVertexInputStateCreateInfo vin;
-    memset(&vin, 0, sizeof(vin));
-    vin.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-    vin.vertexBindingDescriptionCount = 1;
-    vin.pVertexBindingDescriptions = &binding;
-    vin.vertexAttributeDescriptionCount = 2;
-    vin.pVertexAttributeDescriptions = attrs;
-    VkPipelineInputAssemblyStateCreateInfo ia;
-    memset(&ia, 0, sizeof(ia));
-    ia.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
-    ia.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-    VkPipelineViewportStateCreateInfo vp;
-    memset(&vp, 0, sizeof(vp));
-    vp.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
-    vp.viewportCount = 1;
-    vp.scissorCount = 1;
-    VkPipelineRasterizationStateCreateInfo rs;
-    memset(&rs, 0, sizeof(rs));
-    rs.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
-    rs.polygonMode = VK_POLYGON_MODE_FILL;
-    rs.cullMode = VK_CULL_MODE_NONE;
-    rs.lineWidth = 1.0f;
-    VkPipelineMultisampleStateCreateInfo ms;
-    memset(&ms, 0, sizeof(ms));
-    ms.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
-    ms.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
-    VkPipelineColorBlendAttachmentState blend;
-    memset(&blend, 0, sizeof(blend));
-    blend.colorWriteMask = 0xf;
-    VkPipelineColorBlendStateCreateInfo cb;
-    memset(&cb, 0, sizeof(cb));
-    cb.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
-    cb.attachmentCount = 1;
-    cb.pAttachments = &blend;
-    VkDynamicState dyn[2] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
-    VkPipelineDynamicStateCreateInfo ds;
-    memset(&ds, 0, sizeof(ds));
-    ds.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
-    ds.dynamicStateCount = 2;
-    ds.pDynamicStates = dyn;
-    VkGraphicsPipelineCreateInfo gp;
-    memset(&gp, 0, sizeof(gp));
-    gp.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-    gp.stageCount = 2;
-    gp.pStages = stages;
-    gp.pVertexInputState = &vin;
-    gp.pInputAssemblyState = &ia;
-    gp.pViewportState = &vp;
-    gp.pRasterizationState = &rs;
-    gp.pMultisampleState = &ms;
-    gp.pColorBlendState = &cb;
-    gp.pDynamicState = &ds;
-    gp.layout = g_presentLayout;
-    gp.renderPass = pass;
-    vkCreateGraphicsPipelines(g_dev, VK_NULL_HANDLE, 1, &gp, 0, &g_presentPipe);
-    // and one nearest sample where the display holds the frame a whole number of times (shaders.py PRESENT_COPY_FS)
-    VkShaderModule copy = make_module(GLVK_PRESENT_COPY_FS, sizeof(GLVK_PRESENT_COPY_FS) / 4);
-    stages[1].module = copy;
-    vkCreateGraphicsPipelines(g_dev, VK_NULL_HANDLE, 1, &gp, 0, &g_presentCopyPipe);
-    vkDestroyShaderModule(g_dev, copy, 0);
-    vkDestroyShaderModule(g_dev, vs, 0);
-    vkDestroyShaderModule(g_dev, fs, 0);
-    // position, uv: the default framebuffer's row 0 is GL's bottom row
-    const float quad[24] = {-1, -1, 0, 1, 1, -1, 1, 1, 1, 1, 1, 0, -1, -1, 0, 1, 1, 1, 1, 0, -1, 1, 0, 0};
-    make_buffer(g_presentQuad, sizeof(quad), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, 0);
-    memcpy(g_presentQuad.map, quad, sizeof(quad));
+    // the present pipeline: a quad over the output, sampling the default framebuffer upside down; and one nearest
+    // sample where the display holds the frame a whole number of times (shaders.py PRESENT_COPY_FS)
+    g_presentPipe = quad_pipeline(GLVK_PRESENT_FS, sizeof(GLVK_PRESENT_FS) / 4, pass);
+    g_presentCopyPipe = quad_pipeline(GLVK_PRESENT_COPY_FS, sizeof(GLVK_PRESENT_COPY_FS) / 4, pass);
     VkDescriptorPoolSize ps = {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1};
     VkDescriptorPoolCreateInfo dpi;
     memset(&dpi, 0, sizeof(dpi));
@@ -1837,6 +1861,128 @@ float attr_component(const VertexArray& a, uint32_t base, int c) {
 
 int type_bytes(uint32_t t) { return t == GL_FLOAT || t == GL_UNSIGNED_INT ? 4 : t == GL_UNSIGNED_SHORT || t == GL_SHORT ? 2 : 1; }
 
+// Bloom's rows (shaders.py bloom_fs): before the game's bloom draw (one quad, Texture0 the scene), each texel's six
+// squares along its row go into g_bloomRows, an image of the scene's size, over the part of it the scene's passes
+// drew (all of it where the scene's texture repeats); the draw then reads them as its Texture1. The draw comes first
+// in a pass that holds only its clears, so that pass ends and the target's begins again with the same clears rather
+// than loading. Without the image the draw reads black: the scene without its bloom.
+void clear_again(const PassClear& cleared, const VkClearRect* rects, uint32_t n);
+
+void bloom_rows(Program& p, uint32_t first) {
+    g_bloomView = g_black.view;
+    g_bloomSampler = sampler_for(GL_NEAREST, GL_NEAREST, GL_CLAMP_TO_EDGE, GL_CLAMP_TO_EDGE);
+    float rx = 0;
+    for (size_t a = 0; a < p.attrs.size(); ++a)
+        if (p.attrs[a].name == "Ratio") {
+            const VertexArray& va = g_va[p.attrs[a].loc];
+            if (!va.enabled) break;
+            int stride = va.stride ? va.stride : va.size * type_bytes(va.type);
+            rx = attr_component(va, va.ptr + first * (uint32_t)stride, 0);
+        }
+    Texture* src = 0;
+    for (size_t u = 0; u < p.uniforms.size(); ++u)
+        if (p.uniforms[u].bytes < 0 && p.uniforms[u].offset == 0) {
+            uint32_t unit = (uint32_t)p.samplerUnit[0];
+            std::map<uint32_t, Texture>::iterator it = g_textures.find(unit < MAX_UNITS ? g_units[unit] : 0);
+            if (it != g_textures.end()) src = &it->second;
+        }
+    if (!src || !src->img.image || !g_bloomRowsPipe || !g_presentQuad.buf) {
+        log_once("gl_vk: bloom's rows not made (scene %d, pipeline %d, quad %d): the bloom draws without them",
+                 src && src->img.image ? 1 : 0, g_bloomRowsPipe ? 1 : 0, g_presentQuad.buf ? 1 : 0);
+        return;
+    }
+    Image& im = src->img;
+    log_once("gl_vk: bloom's rows from a %dx%d scene (drawn %dx%d), %g apart", im.w, im.h, im.drawnW, im.drawnH, rx);
+    if (!g_bloomRows.image || g_bloomRows.w != im.w || g_bloomRows.h != im.h) {
+        if (g_bloomRows.image) {
+            Frame& f = g_frames[g_frame];
+            Garbage g;
+            memset(&g, 0, sizeof(g));
+            g.image = g_bloomRows;
+            g.fb = g_bloomRowsFb;
+            f.garbage.push_back(g);
+            memset(&g_bloomRows, 0, sizeof(g_bloomRows));
+            g_bloomRowsFb = VK_NULL_HANDLE;
+        }
+        if (!make_image(g_bloomRows, im.w, im.h, (VkFormat)COLOR_FORMAT, false)) {
+            log_once("gl_vk: no memory for bloom's rows: the bloom draws without them");
+            return;
+        }
+        VkFramebufferCreateInfo fi;
+        memset(&fi, 0, sizeof(fi));
+        fi.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+        fi.renderPass = render_pass(false, false, false, false);
+        fi.attachmentCount = 1;
+        fi.pAttachments = &g_bloomRows.view;
+        fi.width = (uint32_t)im.w;
+        fi.height = (uint32_t)im.h;
+        fi.layers = 1;
+        vkCreateFramebuffer(g_dev, &fi, 0, &g_bloomRowsFb);
+    }
+    // the area: what the scene's passes drew, or all of it where a repeat could reach the rest
+    int aw = im.w, ah = im.h;
+    if (src->wrapS != GL_REPEAT && src->wrapT != GL_REPEAT && im.drawnW && im.drawnH) {
+        aw = im.drawnW;
+        ah = im.drawnH;
+    }
+    PassClear cleared = g_passClear;
+    bool reopen = g_inPass && !g_passDraws;
+    begin_recording();
+    end_pass();
+    Frame& f = g_frames[g_frame];
+    VkDescriptorSetAllocateInfo ai;
+    memset(&ai, 0, sizeof(ai));
+    ai.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    ai.descriptorPool = f.pool;
+    ai.descriptorSetCount = 1;
+    ai.pSetLayouts = &g_presentSetLayout;
+    VkDescriptorSet set = VK_NULL_HANDLE;
+    if (vkAllocateDescriptorSets(g_dev, &ai, &set) != VK_SUCCESS) return;
+    VkDescriptorImageInfo img = {sampler_for(src->minFilter, src->magFilter, src->wrapS, src->wrapT), im.view,
+                                 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+    VkWriteDescriptorSet wr;
+    memset(&wr, 0, sizeof(wr));
+    wr.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    wr.dstSet = set;
+    wr.descriptorCount = 1;
+    wr.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    wr.pImageInfo = &img;
+    vkUpdateDescriptorSets(g_dev, 1, &wr, 0, 0);
+    VkRenderPassBeginInfo rp;
+    memset(&rp, 0, sizeof(rp));
+    rp.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+    rp.renderPass = render_pass(false, false, false, false);
+    rp.framebuffer = g_bloomRowsFb;
+    rp.renderArea.extent.width = (uint32_t)aw;
+    rp.renderArea.extent.height = (uint32_t)ah;
+    vkCmdBeginRenderPass(f.cmd, &rp, VK_SUBPASS_CONTENTS_INLINE);
+    vkCmdBindPipeline(f.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, g_bloomRowsPipe);
+    vkCmdBindDescriptorSets(f.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, g_presentLayout, 0, 1, &set, 0, 0);
+    const float pc[8] = {1.0f / im.w, 1.0f / im.h, 0, 0, rx, 0, 0, 0};
+    vkCmdPushConstants(f.cmd, g_presentLayout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(pc), pc);
+    VkViewport vp = {0, 0, (float)aw, (float)ah, 0.0f, 1.0f};
+    VkRect2D sc = {{0, 0}, {(uint32_t)aw, (uint32_t)ah}};
+    vkCmdSetViewport(f.cmd, 0, 1, &vp);
+    vkCmdSetScissor(f.cmd, 0, 1, &sc);
+    VkDeviceSize off = 0;
+    vkCmdBindVertexBuffers(f.cmd, 0, 1, &g_presentQuad.buf, &off);
+    vkCmdDraw(f.cmd, 6, 1, 0, 0);
+    vkCmdEndRenderPass(f.cmd);
+    g_boundPipe = VK_NULL_HANDLE;
+    g_lastSet = VK_NULL_HANDLE;
+    if (g_gpuTraceSlot == g_frame) {
+        char where[64];
+        snprintf(where, sizeof(where), "bloom's rows into %dx%d", aw, ah);
+        gpu_stamp(where);
+    }
+    g_bloomView = g_bloomRows.view;
+    g_bloomSampler = sampler_for(GL_NEAREST, GL_NEAREST, src->wrapS, src->wrapT);
+    if (reopen && ensure_pass(cleared.color, cleared.depth)) {
+        g_passClear = cleared;
+        clear_again(cleared, 0, 0);
+    }
+}
+
 void draw(uint32_t mode, int count, uint32_t indexType, uint32_t indices, int first, bool indexed) {
     if (count <= 0 || !g_program) return;
     Program& p = g_programs[g_program];
@@ -1879,6 +2025,11 @@ void draw(uint32_t mode, int count, uint32_t indexType, uint32_t indices, int fi
         }
     f = &g_frames[g_frame];
     if (f->vOff + vbytes > VERTEX_RING || f->iOff + ibytes > INDEX_RING) flush_wait();
+    if (!g_bloomDesc)
+        for (size_t i = 0; i < sizeof(GLVK_PROGRAMS) / sizeof(GLVK_PROGRAMS[0]); ++i)
+            if (!strcmp(GLVK_PROGRAMS[i].label, "resources/shaders/bloom")) g_bloomDesc = &GLVK_PROGRAMS[i];
+    bool bloom = p.desc && p.desc == g_bloomDesc;
+    if (bloom) bloom_rows(p, lo);
     pass_area_for_draw();
     if (!ensure_pass(false, false)) return;
     f = &g_frames[g_frame];
@@ -1984,6 +2135,10 @@ void draw(uint32_t mode, int count, uint32_t indexType, uint32_t indices, int fi
         it->second.drawFrame = gl_frame_count();
         ++it->second.draws;
         samplers[binding] = sampler_for(it->second.minFilter, it->second.magFilter, it->second.wrapS, it->second.wrapT);
+        if (bloom && binding == 1) {
+            views[1] = g_bloomView;
+            samplers[1] = g_bloomSampler;
+        }
         if (tracing()) {
             char b[64];
             snprintf(b, sizeof(b), " %d:tex%u %dx%d%s", binding, tex, it->second.img.w, it->second.img.h,
@@ -2069,6 +2224,7 @@ void draw(uint32_t mode, int count, uint32_t indexType, uint32_t indices, int fi
         recomp_log("trace:   push%s", vals.c_str());
     }
     vkCmdDrawIndexed(cmd, (uint32_t)count, 1, 0, 0, 0);
+    ++g_passDraws;
     if (p.desc && p.desc - GLVK_PROGRAMS < 64) g_effectMask |= 1ull << (p.desc - GLVK_PROGRAMS);
     if (g_gpuTraceSlot == g_frame) {
         char where[64];
@@ -2079,12 +2235,40 @@ void draw(uint32_t mode, int count, uint32_t indexType, uint32_t indices, int fi
     f->iOff = (f->iOff + (wide ? 4 : 2) * (VkDeviceSize)count + 15) & ~(VkDeviceSize)15;
 }
 
+// a pass's first clear made again in the pass being recorded, over rects (none: its whole area)
+void clear_again(const PassClear& cleared, const VkClearRect* rects, uint32_t n) {
+    VkClearAttachment att[2];
+    uint32_t k = 0;
+    if (cleared.color) {
+        att[k].aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        att[k].colorAttachment = 0;
+        memcpy(att[k].clearValue.color.float32, cleared.rgba, sizeof(cleared.rgba));
+        ++k;
+    }
+    if (cleared.depth && g_passKey.depth) {
+        att[k].aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT | (g_depthFormat == VK_FORMAT_D32_SFLOAT ? 0 : VK_IMAGE_ASPECT_STENCIL_BIT);
+        att[k].colorAttachment = 0;
+        att[k].clearValue.depthStencil.depth = cleared.z;
+        att[k].clearValue.depthStencil.stencil = 0;
+        ++k;
+    }
+    if (!k) return;
+    VkClearRect whole;
+    memset(&whole, 0, sizeof(whole));
+    whole.rect.extent.width = (uint32_t)g_passW;
+    whole.rect.extent.height = (uint32_t)g_passH;
+    whole.layerCount = 1;
+    vkCmdClearAttachments(g_frames[g_frame].cmd, k, att, n ? n : 1, n ? rects : &whole);
+}
+
 // grows the bound target's area to the viewport's reach; a pass on it already begun smaller ends, and the wider one
 // that follows loads what was drawn and clears its new part as the pass's first clear did
 void pass_area_for_draw() {
     Target t;
     if (!current_target(t) || g_viewport[2] <= 0 || g_viewport[3] <= 0) return;
-    int needW = g_viewport[0] + g_viewport[2], needH = g_viewport[1] + g_viewport[3];
+    // 8 pixels past the viewport: the passes that sample a target read a few texels beyond the picture (hq4x one,
+    // bloom six), which must hold the pass's clear as when passes covered the whole target
+    int needW = g_viewport[0] + g_viewport[2] + kAreaGrid, needH = g_viewport[1] + g_viewport[3] + kAreaGrid;
     needW = (needW + kAreaGrid - 1) / kAreaGrid * kAreaGrid;
     needH = (needH + kAreaGrid - 1) / kAreaGrid * kAreaGrid;
     if (needW > t.w) needW = t.w;

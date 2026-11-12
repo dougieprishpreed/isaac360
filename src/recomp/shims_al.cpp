@@ -14,6 +14,8 @@
 #include <set>
 #include <math.h>
 #include <mutex>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <thread>
 #include <vector>
@@ -47,8 +49,11 @@ struct Source {
     float gain, pitch;
     float x, y, z;
     bool looping, relative;
+    bool streamed;               // the game queues buffers on it (music): a queue that runs dry is logged
     int state;
-    Source() : pos(0), gain(1), pitch(1), x(0), y(0), z(0), looping(false), relative(false), state(AL_INITIAL) {}
+    Source()
+        : pos(0), gain(1), pitch(1), x(0), y(0), z(0), looping(false), relative(false), streamed(false),
+          state(AL_INITIAL) {}
 };
 std::mutex g_lock;
 std::map<uint32_t, Buffer> g_buffers;
@@ -56,7 +61,58 @@ std::map<uint32_t, Source> g_sources;
 uint32_t g_nextId = 1;
 float g_listener[3];
 float g_listenerGain = 1.0f;
+float g_listenerAt[3] = {0, 0, -1}, g_listenerUp[3] = {0, 1, 0};   // OpenAL's default orientation
+
+// The game's OpenAL is OpenAL Soft 1.16.0 (its OpenAL32.dll), whose stereo output this follows: a mono source is
+// panned between speakers at -90 and +90 degrees by its direction from the listener, at constant power (cos and sin
+// of the angle between them: 0.707 each in front or behind), after inverse distance attenuation clamped at the
+// reference distance (1, the game's sources sit at distance 1); a stereo buffer's channels sit at -30 and +30
+// degrees on the same speakers (0.866 to their side, 0.5 to the other). The mixer gave a centred mono source its
+// full gain on both sides (3 dB above the PC's) and stereo no crossfeed. BOI360_VOLUME=percent scales the whole mix
+// (default 100).
+const float kPi = 3.14159265f;
+const float kStereoNear = 0.8660254f, kStereoFar = 0.5f;   // cos and sin of 30 degrees
+float g_master = 1.0f;
+
+void mono_gains(const Source& s, float gain, float* left, float* right) {
+    float d[3] = {s.x, s.y, s.z};
+    if (!s.relative)
+        for (int i = 0; i < 3; ++i) d[i] -= g_listener[i];
+    float dist = sqrtf(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+    float az = 0;
+    if (dist > 1e-6f) {
+        // into the listener's frame: right = at x up, up' = right x at, and OpenAL's front is -z
+        const float* at = g_listenerAt;
+        const float* up = g_listenerUp;
+        float r[3] = {at[1] * up[2] - at[2] * up[1], at[2] * up[0] - at[0] * up[2], at[0] * up[1] - at[1] * up[0]};
+        float rl = sqrtf(r[0] * r[0] + r[1] * r[1] + r[2] * r[2]);
+        float al = sqrtf(at[0] * at[0] + at[1] * at[1] + at[2] * at[2]);
+        if (rl > 1e-6f && al > 1e-6f) {
+            float x = (d[0] * r[0] + d[1] * r[1] + d[2] * r[2]) / rl;
+            float front = (d[0] * at[0] + d[1] * at[1] + d[2] * at[2]) / al;
+            az = atan2f(x, front);                      // 0 ahead, +pi/2 right, +-pi behind
+        }
+        if (dist > 1.0f) gain /= dist;                  // inverse distance, clamped at the reference distance 1
+    }
+    float t;                                            // 0 at the first speaker of the pair, 1 at the second
+    if (az >= -kPi / 2 && az <= kPi / 2) {
+        t = (az + kPi / 2) / kPi;                       // left (-90) to right (+90) through the front
+        *left = gain * cosf(t * kPi / 2);
+        *right = gain * sinf(t * kPi / 2);
+    } else {
+        float a = az < 0 ? az + 2 * kPi : az;           // right (+90) to left (270) through the back
+        t = (a - kPi / 2) / kPi;
+        *right = gain * cosf(t * kPi / 2);
+        *left = gain * sinf(t * kPi / 2);
+    }
+}
 std::atomic<bool> g_running(false);
+
+// BOI360_TRACE_AL=N: the first N source and listener settings the game makes, to compare with OpenAL's behaviour
+bool trace_al() {
+    static int left = getenv("BOI360_TRACE_AL") ? atoi(getenv("BOI360_TRACE_AL")) : 0;
+    return left > 0 && left-- > 0;
+}
 
 // Mixes one block of every playing source into acc (stereo floats). Each source runs a buffer at a time: the buffer
 // is looked up when the source moves to it, not for each sample (the console mixes under g_lock, which every AL call
@@ -65,11 +121,9 @@ void mix_sources(std::map<uint32_t, Source>& sources, float* acc, int frames) {
     for (std::map<uint32_t, Source>::iterator it = sources.begin(); it != sources.end(); ++it) {
         Source& s = it->second;
         if (s.state != AL_PLAYING) continue;
-        float pan = 0;
-        if (!s.relative) pan = s.x - g_listener[0];
-        else pan = s.x;
-        pan = pan < -1 ? -1 : pan > 1 ? 1 : pan;
-        float gl = s.gain * g_listenerGain * (pan > 0 ? 1 - pan : 1), gr = s.gain * g_listenerGain * (pan < 0 ? 1 + pan : 1);
+        float g = s.gain * g_listenerGain * g_master, gl, gr;
+        mono_gains(s, g, &gl, &gr);
+        float near = g * kStereoNear, far = g * kStereoFar;
         int i = 0;
         while (i < frames && s.state == AL_PLAYING) {
             if (s.queue.empty()) {
@@ -90,6 +144,12 @@ void mix_sources(std::map<uint32_t, Source>& sources, float* acc, int frames) {
                         // a finished queue keeps its buffers listed as processed until unqueued
                         if (s.queue.empty()) {
                             s.state = AL_STOPPED;
+                            static int logged = 0;
+                            if (s.streamed && logged < 100) {
+                                ++logged;
+                                recomp_log("al: streamed source %u played out its queue (%u processed)", it->first,
+                                           (unsigned)s.done.size());
+                            }
                             break;
                         }
                     } else {
@@ -104,8 +164,9 @@ void mix_sources(std::map<uint32_t, Source>& sources, float* acc, int frames) {
                 for (; i < frames; ++i) {
                     int at = (int)s.pos;
                     if (at >= n) break;
-                    acc[i * 2] += d[at * 2] * gl;
-                    acc[i * 2 + 1] += d[at * 2 + 1] * gr;
+                    float l = d[at * 2], r = d[at * 2 + 1];
+                    acc[i * 2] += l * near + r * far;
+                    acc[i * 2 + 1] += l * far + r * near;
                     s.pos += step;
                 }
             } else {
@@ -137,11 +198,24 @@ void mix(int16_t* out, int frames) {
 
 void mixer_thread(void*) {
     if (recomp_config().threadStarted) recomp_config().threadStarted("audio");
+    if (getenv("BOI360_VOLUME")) g_master = atoi(getenv("BOI360_VOLUME")) / 100.0f;
     std::vector<int16_t> block(1024 * 2);
     audio_out_open(kRate);
+    // BOI360_AUDIO_DUMP=path: the mix as a 44.1 kHz stereo WAV (header sizes left 0: read it as raw after 44 bytes)
+    FILE* dump = getenv("BOI360_AUDIO_DUMP") ? fopen(getenv("BOI360_AUDIO_DUMP"), "wb") : 0;
+    if (dump) {
+        static const uint8_t header[44] = {'R', 'I', 'F', 'F', 0, 0, 0, 0, 'W', 'A', 'V', 'E', 'f', 'm', 't', ' ', 16, 0, 0, 0,
+                                           1, 0, 2, 0, 0x44, 0xac, 0, 0, 0x10, 0xb1, 2, 0, 4, 0, 16, 0, 'd', 'a', 't', 'a',
+                                           0, 0, 0, 0};
+        fwrite(header, 1, sizeof(header), dump);
+    }
     auto next = std::chrono::steady_clock::now();
     while (g_running) {
         mix(&block[0], 1024);
+        if (dump) {
+            fwrite(&block[0], 2, block.size(), dump);   // little-endian on the PC, where dumps are taken
+            fflush(dump);
+        }
         audio_out_submit(&block[0], 1024);
         next += std::chrono::microseconds(1024 * 1000000LL / kRate);
         std::this_thread::sleep_until(next);
@@ -302,6 +376,7 @@ void a_alSourcei(X86* c) {
         if (v) s.queue.push_back(v);
     } else if (p == AL_LOOPING) s.looping = v != 0;
     else if (p == AL_SOURCE_RELATIVE) s.relative = v != 0;
+    if (p != AL_BUFFER && trace_al()) recomp_log("al: source %u int %x = %u", ARG(c, 0), p, v);
     RET_CDECL(c, 0);
 }
 void a_alSourcef(X86* c) {
@@ -312,11 +387,14 @@ void a_alSourcef(X86* c) {
     if (p == AL_GAIN) s.gain = v;
     else if (p == AL_PITCH) s.pitch = v > 0.01f ? v : 0.01f;
     else if (p == AL_SEC_OFFSET) s.pos = v * (s.queue.empty() ? kRate : g_buffers[s.queue.front()].rate);
+    if (trace_al()) recomp_log("al: source %u float %x = %g", ARG(c, 0), p, v);
     RET_CDECL(c, 0);
 }
 void a_alSource3f(X86* c) {
     std::lock_guard<std::mutex> l(g_lock);
     Source& s = g_sources[ARG(c, 0)];
+    if (trace_al())
+        recomp_log("al: source %u vec %x = %g %g %g", ARG(c, 0), ARG(c, 1), ARGF(c, 2), ARGF(c, 3), ARGF(c, 4));
     if (ARG(c, 1) == AL_POSITION) {
         s.x = ARGF(c, 2);
         s.y = ARGF(c, 3);
@@ -351,6 +429,17 @@ void a_alGetSourcef(X86* c) {
 void a_alSourcePlay(X86* c) {
     std::lock_guard<std::mutex> l(g_lock);
     Source& s = g_sources[ARG(c, 0)];
+    if (trace_al())
+        recomp_log("al: play %u (state %x, %u queued, %u done)", ARG(c, 0), s.state, (unsigned)s.queue.size(),
+                   (unsigned)s.done.size());
+    // The game starts each music stream by queueing a buffer and playing, then queueing three more and playing
+    // again. OpenAL restarts a playing source from its queue's start: on the PC a millisecond after it began,
+    // unheard; on the console the three decodes between take long enough that the opening plays twice (the user
+    // heard boss jingles and floor music repeat). A streamed source that plays goes on as it is.
+    if (s.streamed && s.state == AL_PLAYING) {
+        RET_CDECL(c, 0);
+        return;
+    }
     if (s.state != AL_PAUSED) s.pos = 0;
     s.state = s.queue.empty() ? AL_STOPPED : AL_PLAYING;
     RET_CDECL(c, 0);
@@ -358,6 +447,9 @@ void a_alSourcePlay(X86* c) {
 void a_alSourceStop(X86* c) {
     std::lock_guard<std::mutex> l(g_lock);
     Source& s = g_sources[ARG(c, 0)];
+    if (trace_al())
+        recomp_log("al: stop %u (state %x, %u queued, %u done)", ARG(c, 0), s.state, (unsigned)s.queue.size(),
+                   (unsigned)s.done.size());
     s.state = AL_STOPPED;
     while (!s.queue.empty()) {                  // a stopped source has played its whole queue
         s.done.push_back(s.queue.front());
@@ -377,6 +469,10 @@ void a_alSourceQueueBuffers(X86* c) {
     std::lock_guard<std::mutex> l(g_lock);
     Source& s = g_sources[ARG(c, 0)];
     for (uint32_t i = 0; i < ARG(c, 1); ++i) s.queue.push_back(RD32(ARG(c, 2) + 4 * i));
+    s.streamed = true;
+    if (trace_al())
+        recomp_log("al: queue %u +%u (state %x, %u queued, %u done)", ARG(c, 0), ARG(c, 1), s.state,
+                   (unsigned)s.queue.size(), (unsigned)s.done.size());
     RET_CDECL(c, 0);
 }
 // alSourceUnqueueBuffers(source, n, ids*): hands back processed buffers in order
@@ -388,9 +484,13 @@ void a_alSourceUnqueueBuffers(X86* c) {
         WR32(out + 4 * i, s.done.front());
         s.done.pop_front();
     }
+    if (trace_al())
+        recomp_log("al: unqueue %u -%u (state %x, %u queued, %u done)", ARG(c, 0), n, s.state,
+                   (unsigned)s.queue.size(), (unsigned)s.done.size());
     RET_CDECL(c, 0);
 }
 void a_alListener3f(X86* c) {
+    if (trace_al()) recomp_log("al: listener %x = %g %g %g", ARG(c, 0), ARGF(c, 1), ARGF(c, 2), ARGF(c, 3));
     if (ARG(c, 0) == AL_POSITION) {
         g_listener[0] = ARGF(c, 1);
         g_listener[1] = ARGF(c, 2);
@@ -398,7 +498,21 @@ void a_alListener3f(X86* c) {
     }
     RET_CDECL(c, 0);
 }
-void a_alListenerfv(X86* c) { RET_CDECL(c, 0); }
+// alListenerfv(param, values): the orientation (at, then up) turns the panning; the game's others are not used
+void a_alListenerfv(X86* c) {
+    uint32_t v = ARG(c, 1);
+    if (trace_al() && v)
+        recomp_log("al: listener vec %x = %g %g %g %g %g %g", ARG(c, 0), RDF(v), RDF(v + 4), RDF(v + 8), RDF(v + 12),
+                   RDF(v + 16), RDF(v + 20));
+    if (ARG(c, 0) == AL_ORIENTATION && v) {
+        std::lock_guard<std::mutex> l(g_lock);
+        for (int i = 0; i < 3; ++i) {
+            g_listenerAt[i] = RDF(v + 4 * i);
+            g_listenerUp[i] = RDF(v + 12 + 4 * i);
+        }
+    }
+    RET_CDECL(c, 0);
+}
 void a_alGetError(X86* c) { RET_CDECL(c, 0); }
 void a_alcOpenDevice(X86* c) { RET_CDECL(c, 0x7000); }
 void a_alcCloseDevice(X86* c) {

@@ -14,6 +14,7 @@
 #include <stdlib.h>
 #include <string>
 #include <string.h>
+#include <thread>
 #include <vector>
 
 bool gl_create_context();
@@ -480,6 +481,13 @@ void gl_present() {
         if (game + present > 17.5) ++t.over17;
         if (game + present > 34.0) ++t.over34;
         ++t.frames;
+        // BOI360_STALL_MS=N: a frame the PC finds slow (a load, a death, 25 ms of the game's part) waits N ms more,
+        // so the console's long load frames and what they do to streams and timers show on the PC
+        static const int stallMs = getenv("BOI360_STALL_MS") ? atoi(getenv("BOI360_STALL_MS")) : 0;
+        if (stallMs > 0 && game - slept > 25.0 && g_frames > 3) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(stallMs));
+            end = Clock::now();
+        }
         lastEnd = end;
         log_slow_frame(game, present);
         room_frame(game + present, game, present, slept);

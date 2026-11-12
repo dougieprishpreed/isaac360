@@ -17,6 +17,7 @@
 // host can't take stays with the game's decoder. BOI360_VORBIS_CHECK=1 runs the game's decoder as well and logs
 // how far the host's differs.
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include "runtime.h"
 #include <algorithm>
@@ -27,6 +28,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <thread>
 #include <vector>
 #if !defined(_WIN32)
 #include <fcntl.h>
@@ -733,6 +735,9 @@ struct CheckStats {
 // stb_vorbis_get_samples_short_interleaved(f in ecx, channels in edx, short* buffer, int num_shorts): frames read
 extern "C" int hle_vorbis_get_samples(X86* c) {
     if (t_bypass) return 0;
+    // BOI360_VORBIS_DELAY_MS=N: each read waits N ms first, the console's slower sound thread on the PC
+    static const int delayMs = getenv("BOI360_VORBIS_DELAY_MS") ? atoi(getenv("BOI360_VORBIS_DELAY_MS")) : 0;
+    if (delayMs > 0) std::this_thread::sleep_for(std::chrono::milliseconds(delayMs));
     uint32_t f = c->r[1], esp = c->r[4], buffer = RD32(esp + 4);
     int channels = (int)c->r[2], shorts = (int)RD32(esp + 8);
     if (!f || channels <= 0 || channels > 8 || shorts <= 0) return 0;
