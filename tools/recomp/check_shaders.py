@@ -3,11 +3,11 @@
     wsl -d CTR360-XSDK -- python3 tools/recomp/check_shaders.py [p05 ...]
 
 For each converted program (build/recomp/glsl/pNN.vert/.frag, kept by tools/recomp/shaders.py with
-BOI360_SHADER_GLSL=1), the fragment shader is compiled as the console build compiles it (xost through
+ISAAC360_SHADER_GLSL=1), the fragment shader is compiled as the console build compiles it (xost through
 vulkan4xenon's options, optimised) and run on xost's simulator (xenos-toolchain/xdis/simulate.py), which models the
 GPU's maths: single rounding, its sin/cos/rcp, NaN through selects, kills. The reference is tools/recomp/glsl_ref.py
 running the same GLSL with each operation rounded to 32-bit floats (a GPU's precision, not the console's quirks). Inputs are what the game draws with: per program, the push constants and vertices
-of real draws (BOI360_SHADER_SAMPLES, build/recomp/shader_samples.txt, from tools/recomp/coverage.py), the vertex
+of real draws (ISAAC360_SHADER_SAMPLES, build/recomp/shader_samples.txt, from tools/recomp/coverage.py), the vertex
 shader run on the reference for the varyings at each vertex, the triangles' centres and the edges' midpoints. Both
 sides sample one smooth texture function whose alpha reaches 0 and 1 in places.
 
@@ -24,7 +24,7 @@ import tempfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.join(ROOT, 'tools', 'recomp'))
-XOST = os.environ.get('XOST', '/opt/boi360-xsdk/deps/xsdk/xenos-toolchain')
+XOST = os.environ.get('XOST', '/opt/isaac360-xsdk/deps/xsdk/xenos-toolchain')
 GLSLANG = os.environ.get('GLSLANG', '/opt/ctr360-xsdk/glslang/build-host/StandAlone/glslang')
 sys.path.insert(0, XOST)
 

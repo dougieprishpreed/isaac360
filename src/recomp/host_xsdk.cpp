@@ -1,8 +1,8 @@
 // Console host of the recompiled game on the open xsdk (docs/RECOMP_PLAN.md). The title's folder is the current
 // directory, staged by tools/stage_console.py: game/ holds the user's game files (isaac-ng.exe, resources/ with the
 // converted sound archives), dlls/ the rebased runtime DLLs, save/ the game's saves and anything it writes beside
-// itself, boi360.log the log. Options from boi360_args.txt beside the XEX: --mem MB (guest address space), and
-// NAME=value settings the PC takes from the environment (BOI360_SHOTS=600,1200 etc.; screenshots land beside it).
+// itself, isaac360.log the log. Options from isaac360_args.txt beside the XEX: --mem MB (guest address space), and
+// NAME=value settings the PC takes from the environment (ISAAC360_SHOTS=600,1200 etc.; screenshots land beside it).
 //
 // * Guest memory is reserved whole and committed as the game's heap grows.
 // * The game draws through the GL-on-Vulkan layer (gl_vk.cpp) on vulkan4xenon's display: the output's own size 1:1
@@ -47,8 +47,8 @@ extern "C" size_t spire_big_bytes(void);            // src/platform/xsdk/big_all
 extern std::atomic<bool> g_quitRequested;           // shims_gl.cpp: the game thread quits at its frame's end
 extern void (*g_hostQuit)();
 
-#ifndef BOI_GIT_COMMIT
-#define BOI_GIT_COMMIT "unknown"
+#ifndef ISAAC_GIT_COMMIT
+#define ISAAC_GIT_COMMIT "unknown"
 #endif
 
 namespace {
@@ -249,7 +249,7 @@ void* Watchdog(void*) {
 }
 
 void ReadArgs(std::vector<std::string>& args) {
-    FILE* f = fopen("boi360_args.txt", "rb");
+    FILE* f = fopen("isaac360_args.txt", "rb");
     if (!f) return;
     char buf[2048];
     size_t n = fread(buf, 1, sizeof(buf) - 1, f);
@@ -267,13 +267,13 @@ void* GameMain(void*) {
     cfg.saveDir = "save";
     cfg.dllDir = "dlls";
     cfg.memSize = 320u << 20;                        // address space; only the heap the game uses is committed
-    cfg.logPath = "boi360.log";
+    cfg.logPath = "isaac360.log";
     cfg.reserveMemory = ReserveMemory;
     cfg.commitMemory = CommitMemory;
     cfg.threadStarted = ThreadStarted;
     std::vector<std::string> args;
     ReadArgs(args);
-    setenv("BOI360_OUT_DIR", ".", 1);
+    setenv("ISAAC360_OUT_DIR", ".", 1);
     for (size_t i = 0; i < args.size(); ++i) {
         size_t eq = args[i].find('=');
         if (args[i] == "--mem" && i + 1 < args.size()) cfg.memSize = (uint32_t)atoi(args[++i].c_str()) << 20;
@@ -286,10 +286,10 @@ void* GameMain(void*) {
     // that vulkan4xenon draws in bands). On a 1080p output the display's front buffer is 1920x1080 shown 1:1 and
     // the present pass (shaders.py PRESENT_FS) gives each pixel an exact 2x2, the PC's 1080p picture; elsewhere it
     // grows the picture to 1280x720, each output pixel the area-weighted average of the pixels under it, which the
-    // display scales to the output. Cutscenes draw at the window's size too. boi360_args.txt can say
-    // BOI360_WINDOW=1920x1080 or 1280x720, and BOI360_DISPLAY=720p for 1280x720 on every output (boot 14's picture).
-    setenv("BOI360_WINDOW", "960x540", 0);
-    const char* display = getenv("BOI360_DISPLAY");
+    // display scales to the output. Cutscenes draw at the window's size too. isaac360_args.txt can say
+    // ISAAC360_WINDOW=1920x1080 or 1280x720, and ISAAC360_DISPLAY=720p for 1280x720 on every output (boot 14's picture).
+    setenv("ISAAC360_WINDOW", "960x540", 0);
+    const char* display = getenv("ISAAC360_DISPLAY");
     v4x_set_display_output(!(display && !strcmp(display, "720p")));
 
     GlVkHooks hooks;

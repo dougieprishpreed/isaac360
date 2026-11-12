@@ -1,5 +1,5 @@
-#ifndef BOI360_PORT_APP_H
-#define BOI360_PORT_APP_H
+#ifndef ISAAC360_PORT_APP_H
+#define ISAAC360_PORT_APP_H
 // The game as both platforms run it (docs/XSDK_PLAN.md): frontend, session, autosave, music and the test
 // hooks, stepped at the original 30 Hz from one pad state. src/platform/win32 and src/platform/xsdk only
 // supply the window or display, the pad, the audio device, time and the folders.
@@ -22,7 +22,7 @@ struct PortPad {
     bool connected;
 };
 
-// Command-line options (the console reads them from boi360_args.txt beside the XEX).
+// Command-line options (the console reads them from isaac360_args.txt beside the XEX).
 struct PortAppOptions {
     unsigned int seed;              // 0: from the platform's entropy
     bool direct;                    // start a run at once instead of the title (tests)
@@ -37,7 +37,7 @@ struct PortAppOptions {
 
 struct PortPlatformInfo {
     const char* name;               // log prefix: "WIN" or "X360"
-    const char* dataRoot;           // where port_data mounts: game/, port/ or boi360.pak
+    const char* dataRoot;           // where port_data mounts: game/, port/ or isaac360.pak
     const char* saveDirectory;      // writable, ends with '/'
     const NativeAudioBackend* audio; // 0: software mixing only
     unsigned int entropy;           // seeds the menu RNG and runs without a seed

@@ -1,5 +1,5 @@
 @echo off
-rem Builds build\recomp\boi360_recomp.exe (x64, clang-cl, Ninja, two jobs). Run tools\recomp\translate.py first.
+rem Builds build\recomp\isaac360_recomp.exe (x64, clang-cl, Ninja, two jobs). Run tools\recomp\translate.py first.
 call "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvarsall.bat" x64 >nul 2>nul
 if errorlevel 1 exit /b 1
 set "PATH=C:\Program Files\LLVM\bin;%PATH%"

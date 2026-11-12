@@ -500,7 +500,7 @@ bool PortGameSession::SaveContinue(const char* path,PortNormalRuntime& runtime){
     if(!path||runtime.phase!=PNR_READY||runtime.playerDead||!runtime.world.Current())return false;
     FILE* f=fopen(path,"wb");
     if(!f)return false;
-    fprintf(f,"BOI360_C1\n");
+    fprintf(f,"ISAAC360_C1\n");
     fprintf(f,"%u %d %d %d %d\n",runtime.run.seeds.start,runtime.run.context.stage,
         frontend.characterPage,frontend.characterChoice,frontend.characterMode);
     fprintf(f,"%d %d %d %d %d %d %d\n",runtime.playerState.redHearts,runtime.playerState.maxRedHearts,
@@ -532,7 +532,7 @@ bool PortGameSession::ContinueSavedRun(const char* path,PortNormalRuntime& runti
     FILE* f=fopen(path,"rb");
     if(!f)return false;
     char header[16]={0};
-    if(!fgets(header,sizeof(header),f)||strncmp(header,"BOI360_C1",9)){fclose(f);return false;}
+    if(!fgets(header,sizeof(header),f)||strncmp(header,"ISAAC360_C1",9)){fclose(f);return false;}
     unsigned int seed=0;int stage=1,page=0,choice=1,mode=0;
     int hp=0,maxHp=0,soul=0,black=0,keys=0,bombs=0,coins=0;
     float px=320.0f,py=380.0f;int definition=-1,grid=-1,dimension=-1;

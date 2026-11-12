@@ -1,6 +1,6 @@
 ﻿# The Binding of Isaac Rebirth Complete Edition for Xbox 360
 
-`boi360` brings **The Binding of Isaac Rebirth Complete Edition** (the Windows Steam version, Repentance v1.7.5) to the **Xbox 360**. It runs your own copy of the game's program, `isaac-ng.exe`, translated to the console ahead of time: every function of the game, its Lua 5.3 library and its C++ runtime library becomes C, compiled for the console's PowerPC CPU with the open [xsdk](https://github.com/xenosworks/xsdk) toolchain. What the game asks of Windows (files, threads, OpenGL, OpenAL, XInput, Steam) is answered by the port; its OpenGL drawing runs on the console's GPU through [vulkan4xenon](https://github.com/xenosworks/vulkan4xenon).
+`isaac360` brings **The Binding of Isaac Rebirth Complete Edition** (the Windows Steam version, Repentance v1.7.5) to the **Xbox 360**. It runs your own copy of the game's program, `isaac-ng.exe`, translated to the console ahead of time: every function of the game, its Lua 5.3 library and its C++ runtime library becomes C, compiled for the console's PowerPC CPU with the open [xsdk](https://github.com/xenosworks/xsdk) toolchain. What the game asks of Windows (files, threads, OpenGL, OpenAL, XInput, Steam) is answered by the port; its OpenGL drawing runs on the console's GPU through [vulkan4xenon](https://github.com/xenosworks/vulkan4xenon).
 
 Because the game's own code runs, all of its content and behaviour comes along: every floor, item, enemy, boss, character, mode, cutscene and save. Nothing from the game is in this repository. You build the console files from your own copy of the game.
 
@@ -8,7 +8,7 @@ Because the game's own code runs, all of its content and behaviour comes along: 
 
 **Not yet playable on the console.** The port works on a PC, builds for the Xbox 360, and is in its first hardware tests.
 
-- **On a PC**, the same translated code runs as a Windows program (`boi360_recomp.exe`), drawing through the same Vulkan path the console uses:
+- **On a PC**, the same translated code runs as a Windows program (`isaac360_recomp.exe`), drawing through the same Vulkan path the console uses:
   - It plays the intro, menus and runs, and is driven by test scripts.
   - An automated run went through all 31 floor variants and the special rooms. It played 8 cutscenes, wrote options and save files, and fought 19 bosses from Larry Jr. to Mom. Mom's death played the ending and credits as in the original. None of it crashed.
 - **The console build** compiles: `default.xex` is about 97 MB. Three hardware boots so far, each a step further:
@@ -54,7 +54,7 @@ From the repository root:
    tools\.venv\Scripts\python tools\recomp\rebase.py C:\Windows\SysWOW64\msvcp140.dll 0x00CA0000
    ```
 
-2. Analyse and translate the three images. Run the pair of commands for each image: the game itself (no variables), then with `BOI360_IMAGE=build/recomp/dlls/lua5.3.3r.dll BOI360_TAG=lua`, then with `BOI360_IMAGE=build/recomp/dlls/msvcp140.dll BOI360_TAG=msvcp`:
+2. Analyse and translate the three images. Run the pair of commands for each image: the game itself (no variables), then with `ISAAC360_IMAGE=build/recomp/dlls/lua5.3.3r.dll ISAAC360_TAG=lua`, then with `ISAAC360_IMAGE=build/recomp/dlls/msvcp140.dll ISAAC360_TAG=msvcp`:
 
    ```powershell
    tools\.venv\Scripts\python tools\recomp\analyze.py
@@ -70,7 +70,7 @@ From the repository root:
    tools\.venv\Scripts\python tools\recomp\shaders.py
    ```
 
-4. The PC program, `build\recomp\boi360_recomp.exe`:
+4. The PC program, `build\recomp\isaac360_recomp.exe`:
 
    ```powershell
    cmd /c tools\recomp\build_win.cmd
@@ -91,7 +91,7 @@ From the repository root:
 7. Stage the folder for the USB drive:
 
    ```powershell
-   py -3 tools\stage_console.py --out E:\Apps\boi360
+   py -3 tools\stage_console.py --out E:\Apps\isaac360
    ```
 
 ## Playing on the console
@@ -103,22 +103,22 @@ The folder holds:
 - `game\` (your game files, with the converted sound archives and `sfx.pcm`)
 - `dlls\`
 - `save\` (saves and settings)
-- `boi360_args.txt`: `--mem MB` sets the game's address space; a line `BOI360_DISPLAY=720p` keeps the picture at 1280x720 on a 1080p console; a line `BOI360_DEADZONE=N` sets the sticks' dead zone in percent (default 24, XInput's own; 100 turns the sticks off and leaves the d-pad); a line `BOI360_SWAP_IMAGES=2` shows each frame one refresh sooner where the game keeps up (default 3, which lets the GPU work on one frame while the next is made)
+- `isaac360_args.txt`: `--mem MB` sets the game's address space; a line `ISAAC360_DISPLAY=720p` keeps the picture at 1280x720 on a 1080p console; a line `ISAAC360_DEADZONE=N` sets the sticks' dead zone in percent (default 24, XInput's own; 100 turns the sticks off and leaves the d-pad); a line `ISAAC360_SWAP_IMAGES=2` shows each frame one refresh sooner where the game keeps up (default 3, which lets the GPU work on one frame while the next is made)
 
 On a console set to 1080p the game shows a 1920x1080 picture with each of its pixels as an exact 2x2 block, as the PC version does at 1920x1080. On other video settings it draws 1280x720, which the console scales to the screen.
 
-Each session writes `boi360.log` and `default.log` beside the XEX. They show how far loading got and how much memory is free, so copy them off before ejecting the drive.
+Each session writes `isaac360.log` and `default.log` beside the XEX. They show how far loading got and how much memory is free, so copy them off before ejecting the drive.
 
 ## Testing on a PC
 
 The PC program runs hidden and muted for tests:
 
 ```powershell
-build\recomp\boi360_recomp.exe --hidden --vk --mem 320 --data-overlay build/console_data
+build\recomp\isaac360_recomp.exe --hidden --vk --mem 320 --data-overlay build/console_data
 ```
 
 - `--vk` draws through the console's Vulkan path, `--data-overlay` uses the console's sound archives and `--mem 320` gives it the console's memory size.
-- `BOI360_PAD` scripts the controller, `BOI360_SHOTS` saves frames and `BOI360_TRACE_FILES` and `BOI360_TRACE_PRINTF` log file opens and the game's own log lines.
+- `ISAAC360_PAD` scripts the controller, `ISAAC360_SHOTS` saves frames and `ISAAC360_TRACE_FILES` and `ISAAC360_TRACE_PRINTF` log file opens and the game's own log lines.
 - `py -3 tools\recomp\coverage.py` plays a run through every floor, boss room, special room and cutscene with the game's debug commands, hidden, and reports memory and errors.
 - `tools/recomp/check_shaders.py` (in WSL) runs each converted shader on the xenos toolchain's simulator against exact maths, on inputs recorded by `coverage.py`.
 

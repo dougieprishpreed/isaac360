@@ -39,7 +39,7 @@ namespace {
 struct CsSlot {
     std::atomic<uint32_t> key;
     GuestLock* m;
-    std::atomic<uint32_t> holder0, holder1;      // BOI360_PROFILE: the code that last entered it
+    std::atomic<uint32_t> holder0, holder1;      // ISAAC360_PROFILE: the code that last entered it
 };
 const uint32_t kCsSlots = 8192;                    // a power of two
 CsSlot g_csSlots[kCsSlots];
@@ -78,7 +78,7 @@ GuestLock* cs_of(uint32_t a) { return cs_slot(a)->m; }
 void k_InitializeCriticalSection(X86* c) { cs_of(ARG(c, 0)); RET_STD(c, 1, 0); }
 void k_InitializeCriticalSectionAndSpinCount(X86* c) { cs_of(ARG(c, 0)); RET_STD(c, 2, 1); }
 void k_DeleteCriticalSection(X86* c) { RET_STD(c, 1, 0); }
-// BOI360_PROFILE: each critical section another thread held when it was entered, with the time waited, the code
+// ISAAC360_PROFILE: each critical section another thread held when it was entered, with the time waited, the code
 // that waited and the code holding it (two return addresses each: the game enters through a wrapper, whose frame
 // pointer gives its caller)
 struct LockStats {
@@ -91,7 +91,7 @@ std::unordered_map<uint32_t, LockStats> g_lockStats;
 double g_lockWaitMs = 0;                            // all waits so far (the slow frame lines)
 int g_lockProfile = -1;                             // read at the first Enter, once the console's arguments are set
 
-// enters the section at a for c's thread; BOI360_PROFILE records a wait with where it came from (site: the return
+// enters the section at a for c's thread; ISAAC360_PROFILE records a wait with where it came from (site: the return
 // into the caller, and the caller's own from its ebp frame where that is on the stack)
 // critical sections the main thread entered (the room lines, shims_gl.cpp): one thread writes it, no atomic
 uint64_t g_mainEnters = 0;
@@ -99,7 +99,7 @@ uint64_t g_mainEnters = 0;
 void cs_enter(X86* c, uint32_t a, CsSlot* slot) {
     uint32_t me = guest_thread(c)->id;
     if (recomp_is_main_cpu(c)) ++g_mainEnters;
-    if (g_lockProfile < 0) g_lockProfile = getenv("BOI360_PROFILE") ? 1 : 0;
+    if (g_lockProfile < 0) g_lockProfile = getenv("ISAAC360_PROFILE") ? 1 : 0;
     if (!g_lockProfile) {
         guest_lock_enter(*slot->m, me);
         return;
@@ -348,7 +348,7 @@ void k_GetFullPathNameW(X86* c) {
 }
 void k_GetFileAttributesA(X86* c) {
     std::string p = host_path(guest_str(ARG(c, 0)));
-    if (getenv("BOI360_TRACE_FILES")) recomp_log("GetFileAttributesA %s", p.c_str());
+    if (getenv("ISAAC360_TRACE_FILES")) recomp_log("GetFileAttributesA %s", p.c_str());
 #if defined(_WIN32)
     DWORD a = GetFileAttributesA(p.c_str());
     RET_STD(c, 1, a);
@@ -426,7 +426,7 @@ void fill_find_data(uint32_t fd, const FindEntry& e) {
 void k_FindFirstFileW(X86* c) {
     std::u16string w = guest_wstr(ARG(c, 0));
     std::string pattern(w.begin(), w.end());
-    if (getenv("BOI360_TRACE_FILES")) recomp_log("FindFirstFileW %s", pattern.c_str());
+    if (getenv("ISAAC360_TRACE_FILES")) recomp_log("FindFirstFileW %s", pattern.c_str());
     for (size_t i = 0; i < pattern.size(); ++i)
         if (pattern[i] == '\\') pattern[i] = '/';
     size_t slash = pattern.find_last_of('/');
@@ -642,7 +642,7 @@ void shims_lock_stats_dump(void (*line)(const char*)) {
     }
 }
 
-// BOI360_BENCH: a critical section entered and left on a host mutex, a GuestLock, through the game's imports (as
+// ISAAC360_BENCH: a critical section entered and left on a host mutex, a GuestLock, through the game's imports (as
 // the lock wrapper calls them, its frame pointer set), and the game's add-ref (0x407770: its lock object's lock and
 // unlock, each a virtual call into a wrapper around the section), ~2,000 a frame on the menu. scratch: 128 bytes of
 // guest stack the bench clears after.
@@ -683,7 +683,7 @@ void shims_bench_locks(X86* c, uint32_t scratch) {
     const uint32_t esp = c->r[4], ebp = c->r[5];
     c->r[5] = esp + 0x10;
     double shims[2];
-    int profile = g_lockProfile < 0 ? (getenv("BOI360_PROFILE") ? 1 : 0) : g_lockProfile;
+    int profile = g_lockProfile < 0 ? (getenv("ISAAC360_PROFILE") ? 1 : 0) : g_lockProfile;
     for (int p = 0; p < 2; ++p) {
         g_lockProfile = p;
         t0 = Clock::now();

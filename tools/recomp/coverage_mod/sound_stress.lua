@@ -3,7 +3,7 @@
 -- music changes every 20 updates (played or crossfaded), a cutscene with its soundtrack plays every 900 updates and
 -- the run restarts every 1800, so the main thread adds and removes sound channels and opens music and video streams
 -- while the game's sound thread updates them, far more often than play does. Progress lines ("cov:") reach the host log.
-local mod = RegisterMod("boi360 sound stress", 1)
+local mod = RegisterMod("isaac360 sound stress", 1)
 
 -- the cutscenes that return to the run (8 and the endings go on to the credits and the menus)
 local CUTSCENES = {1, 2, 3}

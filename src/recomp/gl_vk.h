@@ -1,7 +1,7 @@
 // The game's OpenGL drawn with Vulkan (gl_vk.cpp): the console's renderer through vulkan4xenon, and on the PC
-// (BOI360_GL=vk) the same code checked against the host driver's pass-through.
-#ifndef BOI360_RECOMP_GL_VK_H
-#define BOI360_RECOMP_GL_VK_H
+// (ISAAC360_GL=vk) the same code checked against the host driver's pass-through.
+#ifndef ISAAC360_RECOMP_GL_VK_H
+#define ISAAC360_RECOMP_GL_VK_H
 #ifndef VK_NO_PROTOTYPES
 #define VK_NO_PROTOTYPES
 #endif
@@ -50,10 +50,10 @@ struct GlVkWork {
 };
 void gl_vk_work(GlVkWork* w);
 double gl_vk_gpu_max_reset();       // the longest frame of GPU work since the last call
-void gl_vk_gpu_trace_next();        // BOI360_PROFILE: stamp the next frame's draws one by one (gpu trace lines)
+void gl_vk_gpu_trace_next();        // ISAAC360_PROFILE: stamp the next frame's draws one by one (gpu trace lines)
 uint64_t gl_vk_packed_bytes();      // host memory held by packed texture pixels (gl_vk.cpp, lazy textures)
 void gl_vk_write_texture_list();    // build/recomp/textures.txt
-void gl_vk_write_stats();           // build/recomp/gl_stats.txt (BOI360_GL_STATS)
+void gl_vk_write_stats();           // build/recomp/gl_stats.txt (ISAAC360_GL_STATS)
 ShimFn gl_vk_shim(const std::string& name);
 bool gl_vk_create_context();
 void gl_vk_present();

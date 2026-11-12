@@ -6,7 +6,7 @@
 // fields go into a cache, packed (lz.h). A later load of the same file sets the same fields, fills a buffer from the
 // game's own allocator and calls the hand-off and the finishing virtual as the game's code does, without opening,
 // reading or decoding the file. Palette images (whose palette goes to another virtual) are left to the game.
-// BOI360_IMAGE_CACHE=MB sets the cache's size (default 24; 0 turns it off). BOI360_IMAGE_CHECK=1 decodes every
+// ISAAC360_IMAGE_CACHE=MB sets the cache's size (default 24; 0 turns it off). ISAAC360_IMAGE_CHECK=1 decodes every
 // load as the game does and compares a cached file's pixels and fields with the fresh decode (logged when they differ).
 #include "runtime.h"
 #include "lz.h"
@@ -37,7 +37,7 @@ bool g_replaying = false;
 uint64_t g_hits = 0, g_misses = 0, g_hitBytes = 0;
 
 size_t budget() {
-    static const long mb = getenv("BOI360_IMAGE_CACHE") ? atol(getenv("BOI360_IMAGE_CACHE")) : 24;
+    static const long mb = getenv("ISAAC360_IMAGE_CACHE") ? atol(getenv("ISAAC360_IMAGE_CACHE")) : 24;
     return mb > 0 ? (size_t)mb << 20 : 0;
 }
 
@@ -76,7 +76,7 @@ extern "C" int hle_image_load(X86* c) {
     {
         std::lock_guard<std::mutex> l(g_lock);
         std::unordered_map<std::string, CachedImage>::iterator it = g_cache.find(key);
-        if (g_check < 0) g_check = getenv("BOI360_IMAGE_CHECK") ? 1 : 0;
+        if (g_check < 0) g_check = getenv("ISAAC360_IMAGE_CHECK") ? 1 : 0;
         if (it == g_cache.end() || g_check) {
             g_loading[self] = key;
             ++g_misses;

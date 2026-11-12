@@ -1,7 +1,7 @@
 // Host side of the recompiled game (docs/RECOMP_PLAN.md): guest memory and images, heap, threads, dispatch,
 // imports. Shims (src/recomp/shims_*.cpp) use these helpers to read their arguments from the guest stack.
-#ifndef BOI360_RECOMP_RUNTIME_H
-#define BOI360_RECOMP_RUNTIME_H
+#ifndef ISAAC360_RECOMP_RUNTIME_H
+#define ISAAC360_RECOMP_RUNTIME_H
 #include "x86.h"
 #include <string>
 #include <vector>
@@ -51,7 +51,7 @@ struct GuestHeapStats {
     uint32_t freeRuns;                        // free runs over 2 KB now
 };
 void guest_heap_stats(GuestHeapStats* out);
-// BOI360_HEAP_CHECK=1 (runtime.cpp): guard bytes, freed blocks filled and held back; the shims say where a block
+// ISAAC360_HEAP_CHECK=1 (runtime.cpp): guard bytes, freed blocks filled and held back; the shims say where a block
 // was made or freed ("made from", "freed from") for its reports
 bool guest_heap_checking();
 void guest_heap_note(uint32_t p, const char* what, const std::string& where);
@@ -110,15 +110,15 @@ std::string recomp_host_path(const std::string& guestPath, bool write);   // wri
 bool recomp_host_exists(const std::string& hostPath, bool* isDir);
 std::vector<std::string> recomp_host_dirs(const std::string& guestDir);   // host folders behind one guest folder
 void recomp_sample_threads(void (*line)(const char*));   // each guest thread's shim and stack (watchdog)
-void recomp_profile_start();             // BOI360_PROFILE: sample the main guest thread (runtime.cpp)
+void recomp_profile_start();             // ISAAC360_PROFILE: sample the main guest thread (runtime.cpp)
 void recomp_profile_dump(void (*line)(const char*));   // the samples since the last dump, most frequent first
-void recomp_profile_frame(bool slow);    // BOI360_PROFILE=slow: a frame ended; its samples count if it was slow
-bool recomp_profile_by_room();           // BOI360_PROFILE=room: samples logged per room (shims_gl.cpp)
+void recomp_profile_frame(bool slow);    // ISAAC360_PROFILE=slow: a frame ended; its samples count if it was slow
+bool recomp_profile_by_room();           // ISAAC360_PROFILE=room: samples logged per room (shims_gl.cpp)
 void recomp_profile_clear();             // drops the samples since the last dump
 void gl_room_entered(const char* name);  // the game logged "Room type.variant(name)" (shims_crt.cpp)
 int recomp_guest_returns(X86* c, uint32_t* out, int n);    // the innermost guest return addresses on c's stack
-void shims_lock_stats_dump(void (*line)(const char*));    // BOI360_PROFILE: contended critical sections (kernel32)
-double shims_lock_wait_ms();               // BOI360_PROFILE: ms all threads waited for critical sections so far
+void shims_lock_stats_dump(void (*line)(const char*));    // ISAAC360_PROFILE: contended critical sections (kernel32)
+double shims_lock_wait_ms();               // ISAAC360_PROFILE: ms all threads waited for critical sections so far
 void shims_thread_created(uint32_t handle);  // a guest thread's handle: a wait on it lasts until the thread returns
 void shims_thread_exited(uint32_t handle, uint32_t code);
 uint32_t shims_thread_exit_code(uint32_t handle);   // GetExitCodeThread: STILL_ACTIVE (259) until it returns
@@ -127,7 +127,7 @@ void hle_image_trim_low();                 // the console short of memory: the i
 bool recomp_is_main_cpu(X86* c);           // the game's main thread (the first guest thread)
 uint64_t shims_main_lock_enters();         // critical sections the main thread entered so far
 double shims_main_sleep_ms();              // ms the main thread spent in Sleep so far (the game's own frame pacing)
-// where diagnostics go (screenshots, texture lists): BOI360_OUT_DIR, the console sets it beside the XEX
+// where diagnostics go (screenshots, texture lists): ISAAC360_OUT_DIR, the console sets it beside the XEX
 std::string recomp_out_dir();
 
 #endif

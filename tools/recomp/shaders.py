@@ -6,7 +6,7 @@ program the game can link is converted here, and the layer finds it again by the
 the game hands glShaderSource.
 
 Sources: the archive files named in evidence/packages/*.json (x.vs pairs with x.fs in the same folder), plus the
-built-in ones captured by a run with BOI360_DUMP_SHADERS=1 (build/recomp/shaders/NNN.glsl and programs.txt, one
+built-in ones captured by a run with ISAAC360_DUMP_SHADERS=1 (build/recomp/shaders/NNN.glsl and programs.txt, one
 linked program a line).
 
 Conversion, per program (vertex + fragment):
@@ -38,7 +38,7 @@ DUMPS = os.path.join(ROOT, 'build', 'recomp', 'shaders')
 OUT = os.path.join(ROOT, 'build', 'recomp', 'gl_shaders.inc')
 SPV_DIR = os.path.join(ROOT, 'build', 'recomp', 'spv')
 GLSLANG = os.environ.get('GLSLANG', '/opt/ctr360-xsdk/glslang/build-host/StandAlone/glslang')
-DISTRO = os.environ.get('BOI360_WSL_DISTRO', 'CTR360-XSDK')
+DISTRO = os.environ.get('ISAAC360_WSL_DISTRO', 'CTR360-XSDK')
 
 DECL = re.compile(r'^[ \t]*(attribute|varying|uniform)[ \t]+(?:(?:lowp|mediump|highp)[ \t]+)?(\w+)[ \t]+([\w \t,\[\]]+?)[ \t]*;[^\n]*$', re.M)
 SIZES = {'float': (4, 4, 1), 'vec2': (8, 8, 2), 'vec3': (12, 16, 3), 'vec4': (16, 16, 4), 'mat4': (64, 16, 16),
@@ -247,7 +247,7 @@ def convert_fragment(src, vs_vary, uniforms, samplers, label=''):
 # grows by 4/3 to 1280x720 with every pixel the same size and only the edges between pixels blended, where nearest
 # pixels or one bilinear tap of a doubled frame give some pixels one column and others two. A footprint narrower
 # than a texel crosses at most one texel edge, so one bilinear tap, placed by the share of each side, is the
-# average. BOI360_PRESENT_FILTER=doubled (gl_vk.cpp) gives console boot 11's look instead: the frame doubled with
+# average. ISAAC360_PRESENT_FILTER=doubled (gl_vk.cpp) gives console boot 11's look instead: the frame doubled with
 # nearest pixels, then one bilinear tap (what a 1920x1080 window gave). Both are worked out, one is kept (no branch).
 # size: the frame's width and height, 1 / those; step.xy: texels an output pixel spans (under 1 here); step.z: 1
 # for doubled
@@ -506,7 +506,7 @@ def compile_spv(glsl, stage, tmp, tag):
     src = os.path.join(tmp, tag + '.' + stage)
     dst = src + '.spv'
     open(src, 'wb').write(glsl.encode())
-    if os.environ.get('BOI360_SHADER_GLSL'):        # keep the converted sources (build/recomp/glsl) to read
+    if os.environ.get('ISAAC360_SHADER_GLSL'):        # keep the converted sources (build/recomp/glsl) to read
         keep = os.path.join(ROOT, 'build', 'recomp', 'glsl')
         os.makedirs(keep, exist_ok=True)
         open(os.path.join(keep, tag + '.' + stage), 'wb').write(glsl.encode())
@@ -541,7 +541,7 @@ def sources():
                 rd = lambda i: open(os.path.join(DUMPS, i + '.glsl'), 'rb').read()
                 progs.append(('dump/' + '+'.join(ids), rd(ids[0]), rd(ids[1])))
     else:
-        print('note: no', os.path.relpath(listing, ROOT), '(run the game once with BOI360_DUMP_SHADERS=1 for the built-in shaders)')
+        print('note: no', os.path.relpath(listing, ROOT), '(run the game once with ISAAC360_DUMP_SHADERS=1 for the built-in shaders)')
     unique, seen = [], set()
     for label, vs, fs in progs:
         key = (fnv64(vs), fnv64(fs))

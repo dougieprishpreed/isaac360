@@ -1,6 +1,6 @@
 // Pads for the recompiled game: XInput 1.4/1.3 (loaded by name) reports the platform's pad, DirectInput 8 is a
 // COM object of ours that enumerates no devices (the game requires it to load). Test runs script the pad by
-// presented frame: BOI360_PAD="first:last:keys;..." with the keys of the Windows binary's scripts (docs).
+// presented frame: ISAAC360_PAD="first:last:keys;..." with the keys of the Windows binary's scripts (docs).
 #include "runtime.h"
 #include <math.h>
 #include <stdlib.h>
@@ -52,11 +52,11 @@ void key(char c, HostPad& p) {
 }
 
 // The pads' sticks through a round dead zone: the game reads them raw through GLFW's XInput joysticks, so a stick
-// that drifts at rest walks Isaac slowly. BOI360_DEADZONE (percent of full tilt, default 24: XInput's own
+// that drifts at rest walks Isaac slowly. ISAAC360_DEADZONE (percent of full tilt, default 24: XInput's own
 // XINPUT_GAMEPAD_LEFT_THUMB_DEADZONE, 7849) clears a stick inside it and scales the rest so full tilt stays full;
 // 0 passes them raw, 100 turns the sticks off (the d-pad still moves).
 void apply_deadzone(HostPad& p) {
-    static const int percent = getenv("BOI360_DEADZONE") ? atoi(getenv("BOI360_DEADZONE")) : 24;
+    static const int percent = getenv("ISAAC360_DEADZONE") ? atoi(getenv("ISAAC360_DEADZONE")) : 24;
     if (percent <= 0) return;
     const double dz = percent >= 100 ? 32768.0 : 32767.0 * percent / 100.0;
     int16_t* sticks[2][2] = {{&p.lx, &p.ly}, {&p.rx, &p.ry}};
@@ -78,7 +78,7 @@ void apply_deadzone(HostPad& p) {
 HostPad current_pad() {
     if (!g_scriptParsed) {
         g_scriptParsed = true;
-        const char* s = getenv("BOI360_PAD");
+        const char* s = getenv("ISAAC360_PAD");
         for (const char* p = s; p && *p;) {
             Seg g;
             memset(&g.pad, 0, sizeof(g.pad));

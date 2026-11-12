@@ -68,9 +68,9 @@ void u_RegisterClassA(X86* c) { g_wndProc = RD32(ARG(c, 0) + 4); RET_STD(c, 1, 0
 void u_RegisterClassExA(X86* c) { g_wndProc = RD32(ARG(c, 0) + 8); RET_STD(c, 1, 0xc001); }
 void u_CreateWindowExA(X86* c) {
     recomp_log("CreateWindowExA '%s' %dx%d", guest_str(ARG(c, 2)).c_str(), (int)ARG(c, 6), (int)ARG(c, 7));
-    // BOI360_WINDOW=WxH (the console: 960x540, host_xsdk.cpp) keeps the client area at that size whatever the game
+    // ISAAC360_WINDOW=WxH (the console: 960x540, host_xsdk.cpp) keeps the client area at that size whatever the game
     // asks for; the present pass brings the frame to the output's size
-    static const char* fixed = getenv("BOI360_WINDOW");
+    static const char* fixed = getenv("ISAAC360_WINDOW");
     if (fixed && sscanf(fixed, "%dx%d", &g_clientW, &g_clientH) == 2) {
     } else if ((int)ARG(c, 6) > 0 && (int)ARG(c, 7) > 0) {
         g_clientW = (int)ARG(c, 6);

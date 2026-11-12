@@ -68,7 +68,7 @@ float g_listenerAt[3] = {0, 0, -1}, g_listenerUp[3] = {0, 1, 0};   // OpenAL's d
 // of the angle between them: 0.707 each in front or behind), after inverse distance attenuation clamped at the
 // reference distance (1, the game's sources sit at distance 1); a stereo buffer's channels sit at -30 and +30
 // degrees on the same speakers (0.866 to their side, 0.5 to the other). The mixer gave a centred mono source its
-// full gain on both sides (3 dB above the PC's) and stereo no crossfeed. BOI360_VOLUME=percent scales the whole mix
+// full gain on both sides (3 dB above the PC's) and stereo no crossfeed. ISAAC360_VOLUME=percent scales the whole mix
 // (default 100).
 const float kPi = 3.14159265f;
 const float kStereoNear = 0.8660254f, kStereoFar = 0.5f;   // cos and sin of 30 degrees
@@ -108,9 +108,9 @@ void mono_gains(const Source& s, float gain, float* left, float* right) {
 }
 std::atomic<bool> g_running(false);
 
-// BOI360_TRACE_AL=N: the first N source and listener settings the game makes, to compare with OpenAL's behaviour
+// ISAAC360_TRACE_AL=N: the first N source and listener settings the game makes, to compare with OpenAL's behaviour
 bool trace_al() {
-    static int left = getenv("BOI360_TRACE_AL") ? atoi(getenv("BOI360_TRACE_AL")) : 0;
+    static int left = getenv("ISAAC360_TRACE_AL") ? atoi(getenv("ISAAC360_TRACE_AL")) : 0;
     return left > 0 && left-- > 0;
 }
 
@@ -198,11 +198,11 @@ void mix(int16_t* out, int frames) {
 
 void mixer_thread(void*) {
     if (recomp_config().threadStarted) recomp_config().threadStarted("audio");
-    if (getenv("BOI360_VOLUME")) g_master = atoi(getenv("BOI360_VOLUME")) / 100.0f;
+    if (getenv("ISAAC360_VOLUME")) g_master = atoi(getenv("ISAAC360_VOLUME")) / 100.0f;
     std::vector<int16_t> block(1024 * 2);
     audio_out_open(kRate);
-    // BOI360_AUDIO_DUMP=path: the mix as a 44.1 kHz stereo WAV (header sizes left 0: read it as raw after 44 bytes)
-    FILE* dump = getenv("BOI360_AUDIO_DUMP") ? fopen(getenv("BOI360_AUDIO_DUMP"), "wb") : 0;
+    // ISAAC360_AUDIO_DUMP=path: the mix as a 44.1 kHz stereo WAV (header sizes left 0: read it as raw after 44 bytes)
+    FILE* dump = getenv("ISAAC360_AUDIO_DUMP") ? fopen(getenv("ISAAC360_AUDIO_DUMP"), "wb") : 0;
     if (dump) {
         static const uint8_t header[44] = {'R', 'I', 'F', 'F', 0, 0, 0, 0, 'W', 'A', 'V', 'E', 'f', 'm', 't', ' ', 16, 0, 0, 0,
                                            1, 0, 2, 0, 0x44, 0xac, 0, 0, 0x10, 0xb1, 2, 0, 4, 0, 16, 0, 'd', 'a', 't', 'a',
@@ -249,7 +249,7 @@ void a_alDeleteSources(X86* c) {
 // The console's archives hold each effect's WAV with a "data" chunk that only says where its samples are:
 // "B3RF", u32 offset, u32 bytes into resources/packed/sfx.pcm, the original 16-bit samples as the game ships them
 // (tools/recomp/console_sfx.py). Their samples (243 MB) stay on the drive until a sound plays: a loader thread
-// reads an effect when the game first plays it, and the recently played stay in memory up to BOI360_SFX_CACHE MB
+// reads an effect when the game first plays it, and the recently played stay in memory up to ISAAC360_SFX_CACHE MB
 // (8; one played again after it went is read again). A source playing an effect still on its way waits for it
 // rather than playing silence.
 std::mutex g_fxLock;
@@ -259,7 +259,7 @@ std::list<uint32_t> g_fxRecent;                     // most recently used first
 uint64_t g_fxBytes = 0;
 std::deque<std::pair<uint32_t, uint32_t> > g_fxQueue;   // (offset, bytes) to read
 std::set<uint32_t> g_fxQueued;
-uint64_t g_fxLimit = (uint64_t)(getenv("BOI360_SFX_CACHE") ? atoi(getenv("BOI360_SFX_CACHE")) : 8) << 20;
+uint64_t g_fxLimit = (uint64_t)(getenv("ISAAC360_SFX_CACHE") ? atoi(getenv("ISAAC360_SFX_CACHE")) : 8) << 20;
 bool g_fxLoader = false;
 
 void fx_loader(void*);

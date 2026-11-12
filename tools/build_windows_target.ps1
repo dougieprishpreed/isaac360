@@ -5,7 +5,7 @@ Set-Location -LiteralPath $projectRoot
 $blocking=Get-Process -Name 'normal_flow_check','gameplay_smoke' -ErrorAction SilentlyContinue | Where-Object {
     if($_.ProcessName -eq 'cl'){$compilerPath=$_.Path;!$compilerPath -or $compilerPath -notmatch '\\Microsoft Visual Studio\\2022\\'}
     elseif($_.ProcessName -eq 'MSBuild'){$buildPath=$_.Path;!$buildPath -or $buildPath -notmatch '\\dotnet\\'}
-    elseif($_.ProcessName -like 'xenia*'){$emulatorPath=$_.Path;!$emulatorPath -or $emulatorPath -like '*\boi360\*'}
+    elseif($_.ProcessName -like 'xenia*'){$emulatorPath=$_.Path;!$emulatorPath -or $emulatorPath -like '*\isaac360\*'}
     else {$true}
 }
 if($blocking){throw 'Stop the other port build/test worker first.'}
@@ -23,5 +23,5 @@ try {
     if($LASTEXITCODE -ne 0){throw 'Windows target configure failed.'}
     & cmake --build build/win --config Release -- /m:1 /v:minimal 2>&1 | Tee-Object -Append build/windows/build.log
     if($LASTEXITCODE -ne 0){throw 'Windows target build failed.'}
-    Get-FileHash -LiteralPath 'build/windows/boi360.exe' -Algorithm SHA256
+    Get-FileHash -LiteralPath 'build/windows/isaac360.exe' -Algorithm SHA256
 } finally {$worker.ProcessorAffinity=$old}

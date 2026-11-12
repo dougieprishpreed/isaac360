@@ -8,7 +8,7 @@ $blocking=Get-Process -Name 'xenia*','MSBuild','cl','normal_flow_check','gamepla
     #stop the user's unrelated work or mistake them for port workers.
     if($_.ProcessName -eq 'cl'){$compilerPath=$_.Path;!$compilerPath -or $compilerPath -notmatch '\\Microsoft Visual Studio\\2022\\'}
     elseif($_.ProcessName -eq 'MSBuild'){$buildPath=$_.Path;!$buildPath -or $buildPath -notmatch '\\dotnet\\'}
-    elseif($_.ProcessName -like 'xenia*'){$emulatorPath=$_.Path;!$emulatorPath -or $emulatorPath -like '*\boi360\*'}
+    elseif($_.ProcessName -like 'xenia*'){$emulatorPath=$_.Path;!$emulatorPath -or $emulatorPath -like '*\isaac360\*'}
     else {$true}
 }
 if($blocking){throw 'Stop the other port build/test/emulator worker first.'}

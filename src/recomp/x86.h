@@ -1,8 +1,8 @@
 /* Guest CPU model for the recompiled isaac-ng.exe (docs/RECOMP_PLAN.md).
  * Generated functions (build/recomp/out) include this. Guest memory is little-endian at g_mem + address; the
  * console (big-endian) byte-swaps on each access, the PC reads directly. */
-#ifndef BOI360_X86_H
-#define BOI360_X86_H
+#ifndef ISAAC360_X86_H
+#define ISAAC360_X86_H
 #include <stdint.h>
 #include <string.h>
 #include <math.h>
@@ -117,15 +117,15 @@ void x86_unimpl(X86* c, uint32_t eip, const char* what) __attribute__((noreturn)
 void x86_bad_jump(X86* c, uint32_t eip, uint32_t target) __attribute__((noreturn));
 void x86_unreachable(X86* c, uint32_t eip) __attribute__((noreturn));
 void x86_import(X86* c, uint32_t slot);                  /* call through an IAT slot */
-/* BOI360_REGCHECK translations: a function returned with a register it is taken to preserve changed (regflow.py) */
+/* ISAAC360_REGCHECK translations: a function returned with a register it is taken to preserve changed (regflow.py) */
 void x86_regcheck(X86* c, uint32_t fn, uint32_t eip, int reg, uint32_t entry, uint32_t now);
-/* BOI360_REGCHECK=1 translations: after a call, esp outside the thread's stack (the call at eip came back wrong) */
+/* ISAAC360_REGCHECK=1 translations: after a call, esp outside the thread's stack (the call at eip came back wrong) */
 void x86_espcheck(X86* c, uint32_t esp, uint32_t eip);
 void x86_cpuid(X86* c);
 /* around each lock-prefixed instruction: one lock for all guest atomics, with full barriers */
 void x86_lock(void);
 void x86_unlock(void);
-void x86_trace_enter(X86* c, uint32_t fn);         /* BOI360_TRACE_FUNCS builds */
+void x86_trace_enter(X86* c, uint32_t fn);         /* ISAAC360_TRACE_FUNCS builds */
 void x86_trace_leave(X86* c, uint32_t fn, uint32_t eax);
 uint32_t x86_div_check(X86* c, uint32_t eip);
 /* float -> int32 as x86 converts: out of range and NaN give 0x80000000 */

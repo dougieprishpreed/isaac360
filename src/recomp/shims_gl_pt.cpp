@@ -1,7 +1,7 @@
 // Windows only: the game's OpenGL calls passed straight to the host driver (generated thunks, gl_passthrough.inc),
 // to validate the recompiled game's rendering before the console's GL-on-Vulkan layer (docs/RECOMP_PLAN.md).
 // The context lives on a window of ours that is placed off-screen and shown without activation, so test runs
-// never take the keyboard focus. BOI360_SHOTS="frame,frame,..." saves those frames to build/recomp/shot_N.bmp.
+// never take the keyboard focus. ISAAC360_SHOTS="frame,frame,..." saves those frames to build/recomp/shot_N.bmp.
 #if defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -76,7 +76,7 @@ uint32_t gl_guest_ptr(const void* p, const char* fn) {
 #include "gl_passthrough.inc"
 #undef GL_PT
 
-// BOI360_DUMP_SHADERS: which dumped sources each program links (build/recomp/shaders/programs.txt)
+// ISAAC360_DUMP_SHADERS: which dumped sources each program links (build/recomp/shaders/programs.txt)
 std::map<uint32_t, int> g_shaderDump;
 std::map<uint32_t, std::vector<int> > g_programShaders;
 void attach_shader(X86* c) {
@@ -84,7 +84,7 @@ void attach_shader(X86* c) {
     pt_glAttachShader(c);
 }
 void link_program(X86* c) {
-    if (getenv("BOI360_DUMP_SHADERS")) {
+    if (getenv("ISAAC360_DUMP_SHADERS")) {
         FILE* f = fopen("build/recomp/shaders/programs.txt", "a");
         if (f) {
             std::vector<int>& s = g_programShaders[ARG(c, 0)];
@@ -117,7 +117,7 @@ void shader_source(X86* c) {
         ptrs[i] = src[i].c_str();
         ln[i] = (GLint)src[i].size();
     }
-    if (getenv("BOI360_DUMP_SHADERS")) {
+    if (getenv("ISAAC360_DUMP_SHADERS")) {
         // each source the game compiles, for the console's offline shader conversion (tools/recomp/shaders.py)
         static int n = 0;
         CreateDirectoryA("build/recomp/shaders", 0);
@@ -149,10 +149,10 @@ bool gl_pt_create_context_impl() {
     wc.style = CS_OWNDC;
     wc.lpfnWndProc = wndproc;
     wc.hInstance = GetModuleHandleA(0);
-    wc.lpszClassName = "boi360recomp";
+    wc.lpszClassName = "isaac360recomp";
     RegisterClassA(&wc);
-    bool hidden = getenv("BOI360_HIDDEN") != 0;
-    g_wnd = CreateWindowExA(hidden ? WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE : 0, "boi360recomp", "The Binding of Isaac: Rebirth",
+    bool hidden = getenv("ISAAC360_HIDDEN") != 0;
+    g_wnd = CreateWindowExA(hidden ? WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE : 0, "isaac360recomp", "The Binding of Isaac: Rebirth",
                             hidden ? WS_POPUP : WS_OVERLAPPEDWINDOW, hidden ? -32000 : CW_USEDEFAULT, hidden ? -32000 : CW_USEDEFAULT,
                             1280, 720, 0, 0, wc.hInstance, 0);
     if (!g_wnd) return false;
@@ -172,7 +172,7 @@ bool gl_pt_create_context_impl() {
     SetPixelFormat(g_dc, pf, &pfd);
     g_rc = wglCreateContext(g_dc);
     if (!g_rc || !wglMakeCurrent(g_dc, g_rc)) return false;
-    const char* shots = getenv("BOI360_SHOTS");
+    const char* shots = getenv("ISAAC360_SHOTS");
     for (const char* p = shots; p && *p;) {
         g_shots.insert(atoi(p));
         while (*p && *p != ',') ++p;

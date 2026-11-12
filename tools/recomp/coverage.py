@@ -5,7 +5,7 @@ overlay copy of the game's resources/scripts/main.lua,
 which walks a run through every floor and its variants, boss and special rooms and cutscenes with the game's debug
 commands; a pad script starts the run from the menus. The run uses the console's data (build/console_data) and its
 guest memory size, so the heap and image totals in the frame lines are the console's budget. Also records the shader
-inputs tools/recomp/check_shaders.py replays (BOI360_SHADER_SAMPLES).
+inputs tools/recomp/check_shaders.py replays (ISAAC360_SHADER_SAMPLES).
 
     py -3 tools/recomp/coverage.py [--minutes 25] [--mem 320] [--shots 900]
 
@@ -22,7 +22,7 @@ import sys
 import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-EXE = os.path.join(ROOT, 'build', 'recomp', 'boi360_recomp.exe')
+EXE = os.path.join(ROOT, 'build', 'recomp', 'isaac360_recomp.exe')
 SAVE = os.path.join(ROOT, 'build', 'recomp', 'save_cov')
 LOG = os.path.join(ROOT, 'build', 'recomp', 'cov.log')
 SHOTS = os.path.join(ROOT, 'build', 'recomp', 'cov_shots')
@@ -37,7 +37,7 @@ def main():
     ap.add_argument('--shots', type=int, default=900, help='a screenshot every N frames (0: none)')
     ap.add_argument('--mod', default='main', help='the script in tools/recomp/coverage_mod: main (the walk) or '
                     'sound_stress (sound channels, music, cutscenes and restarts against the sound thread)')
-    ap.add_argument('--heap-check', action='store_true', help='BOI360_HEAP_CHECK=1: guard bytes and held frees')
+    ap.add_argument('--heap-check', action='store_true', help='ISAAC360_HEAP_CHECK=1: guard bytes and held frees')
     args = ap.parse_args()
     if os.path.isdir(SAVE):
         shutil.rmtree(SAVE)
@@ -52,12 +52,12 @@ def main():
         os.remove(old)
     # the game writes log.txt only when it exits cleanly: its lines (and the script's "cov:") come from the printf
     # trace in the host log
-    env = dict(os.environ, BOI360_PAD=MENU_PAD, BOI360_SHADER_SAMPLES='1', BOI360_GL_STATS='1',
-               BOI360_TRACE_PRINTF='400000', BOI360_TRACE_PRINTF_ONLY='cov:,ERROR,Error,error,warn,Lua,ASSERT')
+    env = dict(os.environ, ISAAC360_PAD=MENU_PAD, ISAAC360_SHADER_SAMPLES='1', ISAAC360_GL_STATS='1',
+               ISAAC360_TRACE_PRINTF='400000', ISAAC360_TRACE_PRINTF_ONLY='cov:,ERROR,Error,error,warn,Lua,ASSERT')
     if args.shots:
-        env['BOI360_SHOTS'] = ','.join(str(f) for f in range(args.shots, 200000, args.shots))
+        env['ISAAC360_SHOTS'] = ','.join(str(f) for f in range(args.shots, 200000, args.shots))
     if args.heap_check:
-        env['BOI360_HEAP_CHECK'] = '1'
+        env['ISAAC360_HEAP_CHECK'] = '1'
     cmd = [EXE, '--hidden', '--vk', '--mem', str(args.mem), '--data-overlay', 'build/console_data',
            '--save', 'build/recomp/save_cov', '--log', 'build/recomp/cov.log']
     t0 = time.time()

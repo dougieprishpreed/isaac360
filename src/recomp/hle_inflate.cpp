@@ -1,9 +1,9 @@
 // libpng's zlib inflate on the host (translate.py HOST). isaac-ng.exe links zlib 1.1.x for libpng, and its inflate
 // (0x9af810: the stream in ecx, the flush folded in, plain ret) was a fifth of a door's frame on the PC, translated
-// (BOI360_PROFILE=slow: F_9c32e0, F_9c2a50, F_9c23f0, F_9af290). Here miniz's tinfl decodes each stream into a 32 KB
+// (ISAAC360_PROFILE=slow: F_9c32e0, F_9c2a50, F_9c23f0, F_9af290). Here miniz's tinfl decodes each stream into a 32 KB
 // window and copies out as miniz's mz_inflate does; deflate's output is fixed by its input, so the bytes are the
 // same. A stream starts again where its totals are both 0 (inflateInit and inflateReset zero them); inflateEnd
-// (0x9af540) lets the host's state go before the game's own end runs. BOI360_INFLATE_CHECK=1 runs the game's inflate
+// (0x9af540) lets the host's state go before the game's own end runs. ISAAC360_INFLATE_CHECK=1 runs the game's inflate
 // and feeds the host's the same input beside it, logging output that differs.
 #include "runtime.h"
 #include <stdlib.h>
@@ -89,7 +89,7 @@ int inflate_host(Inflater& s, const uint8_t*& in, uint32_t& availIn, uint8_t*& o
     return moved ? Z_OK : Z_BUF_ERROR;
 }
 
-// BOI360_INFLATE_CHECK: the game's inflate runs; the host's decodes the input it took, and their output is compared
+// ISAAC360_INFLATE_CHECK: the game's inflate runs; the host's decodes the input it took, and their output is compared
 void check(X86* c, uint32_t strm) {
     uint32_t nextIn = RD32(strm + NEXT_IN), totalIn = RD32(strm + TOTAL_IN);
     uint32_t nextOut = RD32(strm + NEXT_OUT), totalOut = RD32(strm + TOTAL_OUT);
@@ -135,7 +135,7 @@ extern "C" int hle_inflate(X86* c) {
     if (g_inCheck) return 0;
     uint32_t strm = c->r[1], esp = c->r[4];
     if (!strm || !RD32(strm + 0x1c) || !RD32(strm + NEXT_IN)) return 0;     // the game's own Z_STREAM_ERROR
-    if (g_check < 0) g_check = getenv("BOI360_INFLATE_CHECK") ? 1 : 0;
+    if (g_check < 0) g_check = getenv("ISAAC360_INFLATE_CHECK") ? 1 : 0;
     if (g_check) {
         check(c, strm);
         c->r[4] = esp + 4;

@@ -41,7 +41,7 @@ enum { GL_VENDOR = 0x1F00, GL_RENDERER = 0x1F01, GL_VERSION = 0x1F02, GL_EXTENSI
 
 void glGetString_(X86* c) {
     uint32_t name = ARG(c, 0);
-    const char* s = name == GL_VENDOR ? "boi360" : name == GL_RENDERER ? "vulkan4xenon" : name == GL_VERSION ? "2.1"
+    const char* s = name == GL_VENDOR ? "isaac360" : name == GL_RENDERER ? "vulkan4xenon" : name == GL_VERSION ? "2.1"
                   : name == GL_SHADING_LANGUAGE_VERSION ? "1.20" : name == GL_EXTENSIONS ? "GL_ARB_framebuffer_object GL_EXT_framebuffer_object" : "";
     RET_STD(c, 1, guest_const_str(s));
 }
@@ -100,7 +100,7 @@ void gl_pt_make_current();
 void gl_pt_present();
 #endif
 
-// BOI360_TRACE_GL=1: count the GL calls the game makes (written to build/recomp/gl_calls.txt at each 600th frame)
+// ISAAC360_TRACE_GL=1: count the GL calls the game makes (written to build/recomp/gl_calls.txt at each 600th frame)
 // and the distinct values of the arguments that are not pointers (build/recomp/gl_args.txt), "-" skipping one
 std::map<std::string, ShimFn> g_glReal;
 std::map<std::string, uint64_t> g_glCounts;
@@ -166,12 +166,12 @@ uint32_t gl_get_proc(const std::string& name) {
     std::map<std::string, ShimFn>::iterator it = g_gl.find(name);
     ShimFn fn = it != g_gl.end() ? it->second : gl_trap;
     if (gl_vk_enabled()) {
-        if (ShimFn vk = gl_vk_shim(name)) fn = vk;      // the console's renderer (BOI360_GL=vk on the PC)
+        if (ShimFn vk = gl_vk_shim(name)) fn = vk;      // the console's renderer (ISAAC360_GL=vk on the PC)
     }
 #if defined(_WIN32)
     else if (ShimFn pt = gl_pt_shim(name)) fn = pt;     // the host driver (validation path)
 #endif
-    static bool count = getenv("BOI360_TRACE_GL") != 0;
+    static bool count = getenv("ISAAC360_TRACE_GL") != 0;
     if (count && fn != gl_trap) {
         g_glReal[name] = fn;
         fn = gl_counting;
@@ -227,14 +227,14 @@ static void write_bmp(const std::string& path, const std::vector<uint8_t>& px, i
     recomp_log("screenshot %s", path.c_str());
 }
 
-// BOI360_SHOTS="frame,frame,..." on the Vulkan path: the default framebuffer to <out>/shot_N.bmp, and with
-// BOI360_SHOT_TARGETS each texture the game renders to as shot_N_tex<name>.bmp (recomp_out_dir)
+// ISAAC360_SHOTS="frame,frame,..." on the Vulkan path: the default framebuffer to <out>/shot_N.bmp, and with
+// ISAAC360_SHOT_TARGETS each texture the game renders to as shot_N_tex<name>.bmp (recomp_out_dir)
 void gl_vk_shot(uint32_t frame) {
     static std::set<uint32_t> shots;
     static bool parsed = false;
     if (!parsed) {
         parsed = true;
-        for (const char* p = getenv("BOI360_SHOTS"); p && *p;) {
+        for (const char* p = getenv("ISAAC360_SHOTS"); p && *p;) {
             shots.insert((uint32_t)atoi(p));
             while (*p && *p != ',') ++p;
             if (*p == ',') ++p;
@@ -248,7 +248,7 @@ void gl_vk_shot(uint32_t frame) {
         sprintf(name, "/shot_%05u.bmp", frame);
         write_bmp(recomp_out_dir() + name, px, w, h);
     }
-    static bool targets = getenv("BOI360_SHOT_TARGETS") != 0;
+    static bool targets = getenv("ISAAC360_SHOT_TARGETS") != 0;
     if (!targets) return;
     std::vector<uint32_t> names = gl_vk_targets();
     for (size_t i = 0; i < names.size(); ++i)
@@ -290,7 +290,7 @@ static void log_times() {
                t.frame / t.frames, t.frameMax, t.game / t.frames, t.gameMax, t.slept / t.frames, t.present / t.frames, t.presentMax, t.over17,
                t.frames, t.over34, (w.waitAcquire - t.work.waitAcquire) / t.frames, (w.waitFence - t.work.waitFence) / t.frames,
                (w.waitIdle - t.work.waitIdle) / t.frames, gpu);
-    static bool profiling = getenv("BOI360_PROFILE") != 0;
+    static bool profiling = getenv("ISAAC360_PROFILE") != 0;
     if (profiling && gl_vk_enabled()) gl_vk_gpu_trace_next();
     memset(&t, 0, sizeof(t));
     t.work = w;
@@ -298,8 +298,8 @@ static void log_times() {
 
 // Each room the game enters (its log line, shims_crt.cpp) gets a line when the game leaves it: its first 30 frames
 // (the door's or load's cost) apart from the rest, whose times, slow frames and GPU work are a room's steady cost to
-// compare between builds. With BOI360_PROFILE the room's 60th steady frame gets a gpu trace (its draws one by one);
-// BOI360_PROFILE=room logs the samples of rooms held 240 frames or more there.
+// compare between builds. With ISAAC360_PROFILE the room's 60th steady frame gets a gpu trace (its draws one by one);
+// ISAAC360_PROFILE=room logs the samples of rooms held 240 frames or more there.
 struct RoomTimes {
     std::string name, counts;                       // counts: its 60th frame after the first 30's
     uint32_t frames, entryFrames, over17, over34;
@@ -393,7 +393,7 @@ static void room_frame(double ms, double game, double present, double slept) {
         char counts[160];
         gl_vk_frame_counts(counts, sizeof(counts));
         r.counts = counts;
-        static bool profiling = getenv("BOI360_PROFILE") != 0;
+        static bool profiling = getenv("ISAAC360_PROFILE") != 0;
         if (profiling) {
             gl_vk_gpu_trace_next();
             r.traced = g_frames + 1;
@@ -407,12 +407,12 @@ static void room_frame(double ms, double game, double present, double slept) {
     if (ms > 34.0) ++r.over34;
 }
 
-// a frame over 50 ms (BOI360_SLOW_MS; up to 12 each 600 frames): what it did, to tell loading from waiting
+// a frame over 50 ms (ISAAC360_SLOW_MS; up to 12 each 600 frames): what it did, to tell loading from waiting
 static void log_slow_frame(double game, double present) {
     static uint64_t lastBytes = 0, lastDiskBytes = 0;
     static GlVkWork last;
     static double lastLocks = 0, lastDisk = 0;
-    static bool profiling = getenv("BOI360_PROFILE") != 0;
+    static bool profiling = getenv("ISAAC360_PROFILE") != 0;
     double diskMs = vf_disk_ms();
     uint64_t opens, bytes, disk;
     vf_stats(&opens, &bytes, &disk);
@@ -420,7 +420,7 @@ static void log_slow_frame(double game, double present) {
     memset(&w, 0, sizeof(w));
     if (gl_vk_enabled()) gl_vk_work(&w);
     double locks = profiling ? shims_lock_wait_ms() : 0;
-    static double slowMs = getenv("BOI360_SLOW_MS") ? atof(getenv("BOI360_SLOW_MS")) : 50.0;
+    static double slowMs = getenv("ISAAC360_SLOW_MS") ? atof(getenv("ISAAC360_SLOW_MS")) : 50.0;
     if (profiling) recomp_profile_frame(game + present > slowMs && g_frames > 3);
     if (game + present > slowMs && g_frames > 3 && g_times.slowLogged < 12) {
         ++g_times.slowLogged;
@@ -442,14 +442,14 @@ static void log_slow_frame(double game, double present) {
 void gl_present() {
     static Clock::time_point lastEnd = Clock::now();
     Clock::time_point start = Clock::now();
-    static uint32_t profileFrame = getenv("BOI360_HEAP_PROFILE") ? (uint32_t)atoi(getenv("BOI360_HEAP_PROFILE")) : 0;
+    static uint32_t profileFrame = getenv("ISAAC360_HEAP_PROFILE") ? (uint32_t)atoi(getenv("ISAAC360_HEAP_PROFILE")) : 0;
     if (profileFrame && g_frames == profileFrame) heap_profile_dump();
-    // BOI360_TEX_LIST="frame,frame,...": the live textures at those frames (build/recomp/textures_N.txt)
+    // ISAAC360_TEX_LIST="frame,frame,...": the live textures at those frames (build/recomp/textures_N.txt)
     static std::set<uint32_t> texFrames;
     static bool texParsed = false;
     if (!texParsed) {
         texParsed = true;
-        for (const char* p = getenv("BOI360_TEX_LIST"); p && *p;) {
+        for (const char* p = getenv("ISAAC360_TEX_LIST"); p && *p;) {
             texFrames.insert((uint32_t)atoi(p));
             while (*p && *p != ',') ++p;
             if (*p == ',') ++p;
@@ -481,9 +481,9 @@ void gl_present() {
         if (game + present > 17.5) ++t.over17;
         if (game + present > 34.0) ++t.over34;
         ++t.frames;
-        // BOI360_STALL_MS=N: a frame the PC finds slow (a load, a death, 25 ms of the game's part) waits N ms more,
+        // ISAAC360_STALL_MS=N: a frame the PC finds slow (a load, a death, 25 ms of the game's part) waits N ms more,
         // so the console's long load frames and what they do to streams and timers show on the PC
-        static const int stallMs = getenv("BOI360_STALL_MS") ? atoi(getenv("BOI360_STALL_MS")) : 0;
+        static const int stallMs = getenv("ISAAC360_STALL_MS") ? atoi(getenv("ISAAC360_STALL_MS")) : 0;
         if (stallMs > 0 && game - slept > 25.0 && g_frames > 3) {
             std::this_thread::sleep_for(std::chrono::milliseconds(stallMs));
             end = Clock::now();
@@ -526,14 +526,14 @@ void gl_present() {
         recomp_log("frame %u at %.1f s, heap %u MB, images %u MB (+%u MB packed)%s%s%s", g_frames, t,
                    guest_heap_used() >> 20, (unsigned)(gl_vk_image_bytes() >> 20), (unsigned)(gl_vk_packed_bytes() >> 20),
                    free, counts, mem);
-        static bool traceReads = getenv("BOI360_TRACE_READS") != 0;
+        static bool traceReads = getenv("ISAAC360_TRACE_READS") != 0;
         if (traceReads) vf_dump_readers(log_line);
         if (!g_glCounts.empty()) gl_write_counts();
         if (gl_vk_enabled()) gl_vk_write_stats();
         if (g_frames % 600 == 0) {
             log_times();
             if (!recomp_profile_by_room()) recomp_profile_dump(log_line);
-            static bool profiling = getenv("BOI360_PROFILE") != 0;
+            static bool profiling = getenv("ISAAC360_PROFILE") != 0;
             if (profiling) shims_lock_stats_dump(log_line);
         }
     }

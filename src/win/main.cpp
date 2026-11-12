@@ -63,9 +63,9 @@ static bool LoadFileBytes(const char* path,unsigned char** data,unsigned int* si
     if(fread(p,1,n,f)!=(size_t)n){delete[] p;fclose(f);return false;}fclose(f);*data=p;*size=(unsigned int)n;return true;
 }
 static bool CreateHiddenWindow(bool hidden){
-    WNDCLASSA wc;ZeroMemory(&wc,sizeof(wc));wc.lpfnWndProc=DefWindowProcA;wc.hInstance=GetModuleHandleA(0);wc.lpszClassName="Boi360WindowsTarget";
+    WNDCLASSA wc;ZeroMemory(&wc,sizeof(wc));wc.lpfnWndProc=DefWindowProcA;wc.hInstance=GetModuleHandleA(0);wc.lpszClassName="Isaac360WindowsTarget";
     if(!RegisterClassA(&wc)&&GetLastError()!=ERROR_CLASS_ALREADY_EXISTS)return false;
-    gWindow=CreateWindowExA(0,"Boi360WindowsTarget","boi360 Windows target",WS_POPUP,0,0,kWidth,kHeight,0,0,wc.hInstance,0);
+    gWindow=CreateWindowExA(0,"Isaac360WindowsTarget","isaac360 Windows target",WS_POPUP,0,0,kWidth,kHeight,0,0,wc.hInstance,0);
     if(!gWindow)return false;
     //A D3D9 window must be shown for reliable presentation. Keep automated
     //runs off-screen and non-activating so they never steal keyboard focus.

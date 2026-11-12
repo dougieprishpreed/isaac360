@@ -1,6 +1,6 @@
 // A guest CRITICAL_SECTION on the host: its owner's thread id and a waiter bit in one word, so an uncontended enter
 // and leave are one compare-and-swap each. The console's host mutex took 326 ns an enter and leave and an atomic
-// swap 98 (BOI360_BENCH, boot 13), and the engine's reference counting locks ~2,300 times a frame. A contended
+// swap 98 (ISAAC360_BENCH, boot 13), and the engine's reference counting locks ~2,300 times a frame. A contended
 // enter sleeps on a condition variable; the leave that finds the waiter bit wakes the waiters.
 #pragma once
 #include <stdint.h>

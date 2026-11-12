@@ -172,8 +172,8 @@ bool SpriteVk::MakeInstance() {
     VkApplicationInfo app;
     memset(&app, 0, sizeof(app));
     app.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
-    app.pApplicationName = "boi360";
-    app.pEngineName = "boi360";
+    app.pApplicationName = "isaac360";
+    app.pEngineName = "isaac360";
     app.apiVersion = VK_API_VERSION_1_0;
     const char* exts[2];
     u32 extCount = 0;

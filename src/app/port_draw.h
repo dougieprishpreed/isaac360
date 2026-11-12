@@ -1,5 +1,5 @@
-#ifndef BOI360_PORT_DRAW_H
-#define BOI360_PORT_DRAW_H
+#ifndef ISAAC360_PORT_DRAW_H
+#define ISAAC360_PORT_DRAW_H
 // One frame's sprites as the shared presentation (presentation.cpp) builds them, in draw order, for the one
 // renderer (src/render/sprite_vk.cpp) on Windows and the console. Positions are output pixels (1280x720),
 // texture coordinates normalised. Colours are R, G, B, A bytes in memory order, so they mean the same on the

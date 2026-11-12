@@ -1,5 +1,5 @@
 // The game's OpenGL on Vulkan (gl_vk.h, docs/RECOMP_PLAN.md "GL on vulkan4xenon"). The game's GL use is small
-// and fixed (measured with BOI360_TRACE_GL): client-side float arrays drawn with glDrawElements(GL_TRIANGLES,
+// and fixed (measured with ISAAC360_TRACE_GL): client-side float arrays drawn with glDrawElements(GL_TRIANGLES,
 // u16), RGB/RGBA8 textures, one framebuffer object whose colour texture changes and whose depth is a 1024x1024
 // renderbuffer, 1x1 glReadPixels, blending, culling, a depth test and the alpha test switched on once.
 //
@@ -342,7 +342,7 @@ void ring_high(VkDeviceSize v, VkDeviceSize i, VkDeviceSize u) {
     if (i > g_ringHigh[1]) g_ringHigh[1] = i;
     if (u > g_ringHigh[2]) g_ringHigh[2] = u;
 }
-// BOI360_GL_STATS: per program, the z its vertices span and the states it draws with (build/recomp/gl_stats.txt)
+// ISAAC360_GL_STATS: per program, the z its vertices span and the states it draws with (build/recomp/gl_stats.txt)
 struct ProgramStats {
     float zmin, zmax;
     uint64_t draws;
@@ -351,13 +351,13 @@ struct ProgramStats {
 };
 bool g_stats = false;
 std::map<std::string, ProgramStats> g_programStats;
-// BOI360_SHADER_SAMPLES: per program, the push constants and first vertices of a few draws, the inputs
+// ISAAC360_SHADER_SAMPLES: per program, the push constants and first vertices of a few draws, the inputs
 // tools/recomp/check_shaders.py runs the console's shaders on (build/recomp/shader_samples.txt)
 struct ShaderSample {
     std::vector<float> push, verts;     // verts: up to 6 packed vertices of the draw's first triangles
 };
 bool g_samples = false;
-uint32_t g_samplesFrom = 0;           // BOI360_SHADER_SAMPLES=N: from frame N (an effect a script starts later)
+uint32_t g_samplesFrom = 0;           // ISAAC360_SHADER_SAMPLES=N: from frame N (an effect a script starts later)
 std::map<int, std::vector<ShaderSample> > g_shaderSamples;
 enum { SAMPLE_DRAWS = 24, SAMPLE_VERTS = 6 };
 std::set<float> g_clearDepths;
@@ -366,21 +366,21 @@ struct FrameCounts {
     uint32_t passes, draws, depthClears;
 };
 FrameCounts g_counts, g_lastCounts;
-// BOI360_TRACE_FRAME=N,M,...: each pass, clear and draw of those frames in the log (program, target, states,
+// ISAAC360_TRACE_FRAME=N,M,...: each pass, clear and draw of those frames in the log (program, target, states,
 // textures, the first vertex and the push constants)
 std::set<uint32_t> g_traceFrames;
 bool tracing() { return !g_traceFrames.empty() && g_traceFrames.count(gl_frame_count()); }
 
 // GPU time: a time stamp at each frame's first command and its last (a frame is one submit at its end, so the two
 // bound the GPU's work on it); a frame that also submitted mid-way (read-backs, full rings) is left out, its span
-// holding the CPU's waits. With BOI360_PROFILE every 600th frame's draws are stamped one by one too, each after
+// holding the CPU's waits. With ISAAC360_PROFILE every 600th frame's draws are stamped one by one too, each after
 // the GPU finished what came before, and the frame's GPU time by program and target size is logged once its fence
 // has passed (gl_vk_gpu_trace_next). Query slots: two a frame, then the trace's.
 enum { GPU_TRACE_MAX = 400 };
 VkQueryPool g_queries = VK_NULL_HANDLE;
 double g_tickNs = 0;
 bool g_frameTimed[FRAMES], g_frameFlushed[FRAMES];
-// Effect lines (BOI360_PROFILE or BOI360_EFFECT_LOG): a program drawn after 30 frames without it starts an effect, and
+// Effect lines (ISAAC360_PROFILE or ISAAC360_EFFECT_LOG): a program drawn after 30 frames without it starts an effect, and
 // 30 frames without it end it, logged with its frames and the GPU's work a frame meanwhile, so a pill's, a boss
 // attack's or a room's screen effect shows its cost in the console's log (the gpu trace lines catch one frame in 600)
 const int kEffectGap = 30;
@@ -780,7 +780,7 @@ void upload_rgba(Image& im, int x, int y, int w, int h, const uint8_t* rgba, boo
     bool banded = false;
     if (off + bytes > f.upload.size) {
         if (bytes > f.upload.size / 2) {
-            static const bool bands = getenv("BOI360_UPLOAD_BANDS") != 0;    // the fallback, to check it on the PC
+            static const bool bands = getenv("ISAAC360_UPLOAD_BANDS") != 0;    // the fallback, to check it on the PC
             if (!bands && make_buffer(big, bytes, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_CACHED_BIT)) {
                 src = &big;
                 off = 0;
@@ -929,13 +929,13 @@ bool current_target(Target& t) {
 // 1024x1024 targets, and on the console a pass's clear and its copy out of eDRAM cost by area (boot 18: 1.33 ms for
 // each full-screen pass into 1024x1024). The area is the union of the viewports drawn into the target, on
 // vulkan4xenon's 8-pixel grid (an area off it loads the target); a target's first pass, and every pass under
-// BOI360_FULL_PASSES=1, covers it all. A draw past the area ends the pass and goes on in a wider one
+// ISAAC360_FULL_PASSES=1, covers it all. A draw past the area ends the pass and goes on in a wider one
 // (pass_area_for_draw), whose new part gets the pass's clear.
 const int kAreaGrid = 8;
 void pass_area_for_draw();
 
 void pass_area(const Target& t, int& w, int& h) {
-    static const bool full = getenv("BOI360_FULL_PASSES") != 0;
+    static const bool full = getenv("ISAAC360_FULL_PASSES") != 0;
     w = t.w;
     h = t.h;
     if (full || !t.color->drawnW) return;
@@ -1125,8 +1125,8 @@ bool make_device() {
     VkApplicationInfo app;
     memset(&app, 0, sizeof(app));
     app.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
-    app.pApplicationName = "boi360";
-    app.pEngineName = "boi360";
+    app.pApplicationName = "isaac360";
+    app.pEngineName = "isaac360";
     app.apiVersion = VK_API_VERSION_1_0;
     const char* exts[2];
     uint32_t extCount = 0;
@@ -1418,8 +1418,8 @@ bool make_output() {
     // three images: with two, a frame's work reached the GPU only once the one before it had shown (vulkan4xenon's
     // acquire waits for that), so the game's part and the GPU's ran one after the other and a room at 8 + 12.7 ms
     // missed a refresh in one frame of five (boot 18). A third lets the GPU work on one frame while the next is made,
-    // a frame's more delay only while the GPU is the limit. BOI360_SWAP_IMAGES=2 keeps the shorter pad-to-screen path.
-    static const uint32_t wanted = getenv("BOI360_SWAP_IMAGES") ? (uint32_t)atoi(getenv("BOI360_SWAP_IMAGES")) : 3;
+    // a frame's more delay only while the GPU is the limit. ISAAC360_SWAP_IMAGES=2 keeps the shorter pad-to-screen path.
+    static const uint32_t wanted = getenv("ISAAC360_SWAP_IMAGES") ? (uint32_t)atoi(getenv("ISAAC360_SWAP_IMAGES")) : 3;
     uint32_t count = wanted < caps.minImageCount ? caps.minImageCount : wanted;
     if (count < 2) count = 2;
     if (caps.maxImageCount && count > caps.maxImageCount) count = caps.maxImageCount;
@@ -1591,7 +1591,7 @@ int program_index(uint32_t name) {
 // ---- packed textures -------------------------------------------------------------------------------------
 bool g_lazyTextures = true;
 uint64_t g_packedBytes = 0;                        // the compressed pixels held (frame log)
-// images above this total make the least recently drawn packed textures give their images back (BOI360_TEX_BUDGET MB)
+// images above this total make the least recently drawn packed textures give their images back (ISAAC360_TEX_BUDGET MB)
 uint64_t g_textureBudget = 96ull << 20;
 
 // The packer thread compresses what glTexImage2D gave (a room's 5-14 MB took the game's thread ~10 ms on the PC,
@@ -2419,7 +2419,7 @@ void vk_glGetString(X86* c) {
     uint32_t name = ARG(c, 0);
     std::string ext;
     for (int i = 0; i < kExtensionCount; ++i) ext += std::string(i ? " " : "") + kExtensions[i];
-    const char* s = name == GL_VENDOR ? "boi360" : name == GL_RENDERER ? "vulkan4xenon" : name == GL_VERSION ? "4.6.0 boi360"
+    const char* s = name == GL_VENDOR ? "isaac360" : name == GL_RENDERER ? "vulkan4xenon" : name == GL_VERSION ? "4.6.0 isaac360"
                   : name == GL_SHADING_LANGUAGE_VERSION ? "4.60" : name == GL_EXTENSIONS ? ext.c_str() : "";
     RET_STD(c, 1, guest_const_str(s));
 }
@@ -2737,7 +2737,7 @@ void vk_glDeleteRenderbuffers(X86* c) {
 // queues a copy of its pixel in the frame's commands, and is answered by the newest finished copy of that target
 // within 160 pixels and 60 frames (the game reads every ~10 frames, while a large room's camera scrolls): the colour
 // as the screen held it at an earlier read, which the game blends into a tint over many frames anyway. A read with
-// none near (the first) still waits. BOI360_SYNC_READS=1 waits always.
+// none near (the first) still waits. ISAAC360_SYNC_READS=1 waits always.
 struct PixelResult {
     VkImage image;
     int x, y;
@@ -2831,7 +2831,7 @@ void vk_glReadPixels(X86* c) {
         log_once("glReadPixels format 0x%x type 0x%x", format, type);
         return;
     }
-    static const bool sync = getenv("BOI360_SYNC_READS") != 0;
+    static const bool sync = getenv("ISAAC360_SYNC_READS") != 0;
     uint8_t one[4];
     if (w == 1 && h == 1 && !sync && read_pixel_queued(x, y, one)) {
         px.assign(one, one + 4);
@@ -3126,18 +3126,18 @@ void next_frame() {
 void gl_vk_configure(const GlVkHooks& hooks) {
     g_hooks = hooks;
     g_enabled = hooks.getInstanceProcAddr != 0;
-    // settings from the environment, read here: the console sets them from boi360_args.txt after static start-up
+    // settings from the environment, read here: the console sets them from isaac360_args.txt after static start-up
     const char* v;
-    g_stats = getenv("BOI360_GL_STATS") != 0;
-    g_samples = (v = getenv("BOI360_SHADER_SAMPLES")) != 0;
+    g_stats = getenv("ISAAC360_GL_STATS") != 0;
+    g_samples = (v = getenv("ISAAC360_SHADER_SAMPLES")) != 0;
     g_samplesFrom = v ? (uint32_t)atoi(v) : 0;
-    for (const char* t = getenv("BOI360_TRACE_FRAME"); t && *t;) {
+    for (const char* t = getenv("ISAAC360_TRACE_FRAME"); t && *t;) {
         g_traceFrames.insert((uint32_t)atoi(t));
         while (*t && *t != ',') ++t;
         if (*t == ',') ++t;
     }
-    g_lazyTextures = !(v = getenv("BOI360_TEX_LAZY")) || atoi(v) != 0;
-    g_textureBudget = (uint64_t)((v = getenv("BOI360_TEX_BUDGET")) ? atoi(v) : 96) << 20;
+    g_lazyTextures = !(v = getenv("ISAAC360_TEX_LAZY")) || atoi(v) != 0;
+    g_textureBudget = (uint64_t)((v = getenv("ISAAC360_TEX_BUDGET")) ? atoi(v) : 96) << 20;
 }
 
 bool gl_vk_enabled() { return g_enabled; }
@@ -3200,7 +3200,7 @@ void gl_vk_write_stats() {
     fclose(f);
 }
 
-// BOI360_TEX_LIST: the live textures (name, size, format of the last upload) to build/recomp/textures.txt
+// ISAAC360_TEX_LIST: the live textures (name, size, format of the last upload) to build/recomp/textures.txt
 void gl_vk_write_texture_list() {
     char path[64];
     sprintf(path, "/textures_%05u.txt", gl_frame_count());
@@ -3289,7 +3289,7 @@ void log_effect(int i) {
 }
 
 void effects_frame() {
-    static const bool on = getenv("BOI360_PROFILE") || getenv("BOI360_EFFECT_LOG");
+    static const bool on = getenv("ISAAC360_PROFILE") || getenv("ISAAC360_EFFECT_LOG");
     uint64_t mask = g_effectMask;
     g_effectMask = 0;
     g_frameMask[g_frame] = mask;
@@ -3359,9 +3359,9 @@ void gl_vk_present() {
         }
         vkCmdBindPipeline(f.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, g_presentWhole ? g_presentCopyPipe : g_presentPipe);
         vkCmdBindDescriptorSets(f.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, g_presentLayout, 0, 1, &g_presentSet, 0, 0);
-        // each output pixel the area-weighted average of the frame's pixels under it, or BOI360_PRESENT_FILTER=doubled
+        // each output pixel the area-weighted average of the frame's pixels under it, or ISAAC360_PRESENT_FILTER=doubled
         // (shaders.py PRESENT_FS)
-        static const float doubled = getenv("BOI360_PRESENT_FILTER") && !strcmp(getenv("BOI360_PRESENT_FILTER"), "doubled")
+        static const float doubled = getenv("ISAAC360_PRESENT_FILTER") && !strcmp(getenv("ISAAC360_PRESENT_FILTER"), "doubled")
                                          ? 1.0f : 0.0f;
         const float pc[8] = {(float)g_defColor.w, (float)g_defColor.h, 1.0f / g_defColor.w, 1.0f / g_defColor.h,
                              g_defColor.w / vp.width, g_defColor.h / vp.height, doubled, 0.0f};

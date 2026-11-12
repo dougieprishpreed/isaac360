@@ -130,7 +130,7 @@ std::string recomp_host_path(const std::string& p, bool write) {
 std::string recomp_host_path(const std::string& p) { return recomp_host_path(p, false); }
 
 std::string recomp_out_dir() {
-    const char* d = getenv("BOI360_OUT_DIR");
+    const char* d = getenv("ISAAC360_OUT_DIR");
     return d && *d ? d : "build/recomp";
 }
 
@@ -313,7 +313,7 @@ std::map<uint32_t, uint32_t> g_freeBig;                      // address -> size 
 uint32_t g_used = 0;
 const uint32_t kMagic = 0x48454150;                          // 'HEAP'
 
-// BOI360_HEAP_CHECK=1, a debug heap for overruns and use after free (the races a guest thread can make): each block
+// ISAAC360_HEAP_CHECK=1, a debug heap for overruns and use after free (the races a guest thread can make): each block
 // keeps 16 more bytes, and the bytes past its requested size (to its end) hold 0xFD until it is freed and checked;
 // a freed block is filled with 0xDD and held back from reuse until 32 MB of later frees have passed, then checked
 // again before it goes back. Each failure is logged with where the block was made and freed (shims_crt.cpp).
@@ -389,7 +389,7 @@ static std::string heap_site(uint32_t block) {
     return it == g_heapSites.end() ? std::string("made from an unknown site") : it->second;
 }
 
-// BOI360_HEAP_CHECK: the fill of the oldest held blocks, then their release (the heap lock held)
+// ISAAC360_HEAP_CHECK: the fill of the oldest held blocks, then their release (the heap lock held)
 static void release_held(uint32_t keep) {
     while (g_heldBytes > keep && !g_held.empty()) {
         HeldBlock h = g_held.front();
@@ -410,7 +410,7 @@ static void release_held(uint32_t keep) {
 }
 
 bool guest_heap_checking() {
-    if (g_heapCheck < 0) g_heapCheck = getenv("BOI360_HEAP_CHECK") && atoi(getenv("BOI360_HEAP_CHECK")) ? 1 : 0;
+    if (g_heapCheck < 0) g_heapCheck = getenv("ISAAC360_HEAP_CHECK") && atoi(getenv("ISAAC360_HEAP_CHECK")) ? 1 : 0;
     return g_heapCheck != 0;
 }
 
@@ -472,7 +472,7 @@ uint32_t guest_malloc(uint32_t size) {
     return block + 16;
 }
 
-// the requested size under BOI360_HEAP_CHECK (its 0xFD bytes follow it), else the block's whole size
+// the requested size under ISAAC360_HEAP_CHECK (its 0xFD bytes follow it), else the block's whole size
 uint32_t guest_block_size(uint32_t p) { return p ? RD32(p - 16 + (g_heapCheck ? 8 : 0)) : 0; }
 uint32_t guest_heap_used() { return g_used; }
 uint32_t guest_heap_top() { return g_heapTop; }
@@ -739,7 +739,7 @@ void recomp_sample_threads(void (*line)(const char*)) {
     }
 }
 
-// BOI360_PROFILE=1: a host thread samples every guest thread each millisecond, as the watchdog does: the shim it is
+// ISAAC360_PROFILE=1: a host thread samples every guest thread each millisecond, as the watchdog does: the shim it is
 // in and the guest code that called it, or in game code the innermost return address on its stack (the call site
 // of the function running, as of its last call). recomp_profile_dump logs each thread's most frequent and starts
 // again; tools/recomp/profile_report.py names the functions behind the addresses.
@@ -753,7 +753,7 @@ struct ProfileKey {
         return at < o.at;
     }
 };
-// BOI360_PROFILE=slow keeps only the samples of frames that turn out slow (recomp_profile_frame: the slow frame
+// ISAAC360_PROFILE=slow keeps only the samples of frames that turn out slow (recomp_profile_frame: the slow frame
 // lines' test), to see what a door's or a load's frame does; the main thread's samples also count every guest
 // return address on its stack once ("incl" lines: a function's share with all it calls).
 static std::mutex g_profileLock;
@@ -761,7 +761,7 @@ static std::map<ProfileKey, uint32_t> g_profileCounts, g_frameCounts;
 static std::map<uint32_t, uint32_t> g_profileIncl, g_frameIncl;
 static uint32_t g_profileSamples[kSampledThreads], g_frameSamples[kSampledThreads];
 static bool g_profileSlow = false;
-// BOI360_PROFILE=room samples everything as =1 but logs each room's samples when the game leaves it (shims_gl.cpp's
+// ISAAC360_PROFILE=room samples everything as =1 but logs each room's samples when the game leaves it (shims_gl.cpp's
 // room lines), with the main thread's inclusive shares, instead of each 600 frames
 static bool g_profileRoom = false;
 
@@ -811,7 +811,7 @@ static void profile_thread(void*) {
 }
 
 void recomp_profile_start() {
-    const char* mode = getenv("BOI360_PROFILE");
+    const char* mode = getenv("ISAAC360_PROFILE");
     if (!mode) return;
     g_profileSlow = !strcmp(mode, "slow");
     g_profileRoom = !strcmp(mode, "room");
@@ -929,7 +929,7 @@ void x86_call(X86* c, uint32_t target) {
     e->fn(c);
 }
 
-// BOI360_BENCH=1: what the translated code's own forms cost on this host, timed before the game starts (the
+// ISAAC360_BENCH=1: what the translated code's own forms cost on this host, timed before the game starts (the
 // console's in-order core stalls when a load reads what a store just wrote; the PC forwards it). Each case runs
 // the form as translate.py writes it.
 #if defined(_MSC_VER)
@@ -1314,7 +1314,7 @@ int recomp_run(const RecompConfig& cfg) {
     t_cpu = c;
     sample_register(c, "main");
     recomp_profile_start();
-    if (getenv("BOI360_BENCH")) recomp_bench(c);
+    if (getenv("ISAAC360_BENCH")) recomp_bench(c);
     for (size_t i = 1; i < g_images.size(); ++i) {           // DllMain(hinst, DLL_PROCESS_ATTACH, 0)
         uint32_t args[3] = {g_images[i].base, 1, 0};
         uint32_t ok = guest_call(c, g_images[i].entry, 3, args, true);

@@ -1,6 +1,6 @@
 // The console's entry point on the open xsdk (docs/XSDK_PLAN.md). The title's folder is the current directory:
-// boi360.pak holds the data (tools/stage_console.py), saves go to save/, the log to boi360.log. Options come
-// from boi360_args.txt beside the XEX (whitespace-separated, as on the PC's command line).
+// isaac360.pak holds the data (tools/stage_console.py), saves go to save/, the log to isaac360.log. Options come
+// from isaac360_args.txt beside the XEX (whitespace-separated, as on the PC's command line).
 // The display is vulkan4xenon's one 1280x720 mode; FIFO presents pace the loop at 60 Hz and the game ticks at
 // its original 30. Back + Start held for two seconds returns to the dashboard. xsdk has no fault handler: a
 // watchdog thread logs where the game stood when frames stop.
@@ -22,8 +22,8 @@ extern "C" VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetInstanceProcAddr(VkInst
 const NativeAudioBackend* NativeXsdkAudioBackend();
 void NativeXsdkAudioStop();
 
-#ifndef BOI_GIT_COMMIT
-#define BOI_GIT_COMMIT "unknown"
+#ifndef ISAAC_GIT_COMMIT
+#define ISAAC_GIT_COMMIT "unknown"
 #endif
 
 // The console's one display at its one mode (vulkan4xenon docs/SUPPORT.md, "Display and swapchain").
@@ -58,7 +58,7 @@ static VkResult CreateSurface(VkInstance instance, PFN_vkGetInstanceProcAddr gip
 }
 
 static void ReadArgs(std::vector<std::string>& args) {
-    FILE* f = fopen("boi360_args.txt", "rb");
+    FILE* f = fopen("isaac360_args.txt", "rb");
     if (!f) return;
     char buf[2048];
     size_t n = fread(buf, 1, sizeof(buf) - 1, f);
@@ -137,10 +137,10 @@ int main() {
 
 static void* GameMain(void*) {
     xsdk_thread_move(0);
-    PortLogOpen("boi360.log", "X360");
-    PortLog("boi360 (xSDK) %s", BOI_GIT_COMMIT);
+    PortLogOpen("isaac360.log", "X360");
+    PortLog("isaac360 (xSDK) %s", ISAAC_GIT_COMMIT);
     std::vector<std::string> args;
-    args.push_back("boi360");
+    args.push_back("isaac360");
     ReadArgs(args);
     std::vector<char*> argv;
     for (size_t i = 0; i < args.size(); ++i) argv.push_back(&args[i][0]);

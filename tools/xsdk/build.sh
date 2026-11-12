@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Builds the console's default.xex with the open xsdk toolchain (Linux, or WSL on Windows).
 # Defaults: the CTR360-XSDK distro's shared checkouts in /opt/ctr360-xsdk (read only: their libraries must be
-# built already), boi360's own output in /opt/boi360-xsdk.
+# built already), isaac360's own output in /opt/isaac360-xsdk.
 #
 #   [XSDK=... VULKAN4XENON=... GLSLANG=... XSDK_TOOLCHAIN=... JOBS=2] tools/xsdk/build.sh
 #
@@ -15,7 +15,7 @@ XSDK="${XSDK:-$DEPS/xsdk}"
 VULKAN4XENON="${VULKAN4XENON:-$DEPS/vulkan4xenon}"
 GLSLANG="${GLSLANG:-$DEPS/glslang/build-host/StandAlone/glslang}"
 XSDK_TOOLCHAIN="${XSDK_TOOLCHAIN:-$DEPS/toolchain}"
-OUT="${BOI_XSDK_BUILD:-/opt/boi360-xsdk/output}"
+OUT="${ISAAC_XSDK_BUILD:-/opt/isaac360-xsdk/output}"
 JOBS="${JOBS:-2}"
 mkdir -p "$OUT"
 for f in "$XSDK/build/libxsdk.a" "$XSDK/build/host/libxsc.so" "$VULKAN4XENON/build/libvulkan4xenon.a" "$GLSLANG" \
@@ -47,10 +47,10 @@ fi
 
 cmake -S "$ROOT/tools/xsdk" -B "$OUT/cmake" -G Ninja \
   -DCMAKE_TOOLCHAIN_FILE="$XSDK/cmake/xsdk.cmake" -DXSDK_TOOLCHAIN="$XSDK_TOOLCHAIN" -DCMAKE_BUILD_TYPE=Release \
-  -DVULKAN4XENON="$VULKAN4XENON" -DBOI_SHADERS="$SH" -DBOI_GIT_COMMIT="$COMMIT"
+  -DVULKAN4XENON="$VULKAN4XENON" -DBOI_SHADERS="$SH" -DISAAC_GIT_COMMIT="$COMMIT"
 cmake --build "$OUT/cmake" -j"$JOBS"
 
-cp "$OUT/cmake/boi360.xex" "$OUT/default.xex"
+cp "$OUT/cmake/isaac360.xex" "$OUT/default.xex"
 DST="$ROOT/build/console"
 mkdir -p "$DST/xex" "$DST/licenses"
 cp "$OUT/default.xex" "$DST/xex/default.xex"

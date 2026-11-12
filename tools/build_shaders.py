@@ -19,7 +19,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SHADERS = os.path.join(ROOT, 'src', 'render', 'shaders')
 OUT = os.path.join(SHADERS, 'spirv.inc')
 GLSLANG = os.environ.get('GLSLANG', '/opt/ctr360-xsdk/glslang/build-host/StandAlone/glslang')
-DISTRO = os.environ.get('BOI360_WSL_DISTRO', 'CTR360-XSDK')
+DISTRO = os.environ.get('ISAAC360_WSL_DISTRO', 'CTR360-XSDK')
 
 
 def wsl_path(p):

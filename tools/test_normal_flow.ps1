@@ -4,7 +4,7 @@ $projectRoot=(Resolve-Path (Join-Path $PSScriptRoot '..')).Path;Set-Location -Li
 $portWorkers=Get-Process -Name 'xenia*','MSBuild','cl','normal_flow_check' -ErrorAction SilentlyContinue | Where-Object {
     # Explicit IDs may exclude only processes whose project/parent tree has
     # been inspected and verified to belong to an unrelated workspace.
-    -not (($_.ProcessName -in @('cl','MSBuild') -and $_.Id -in $VerifiedExternalWorkerIds) -or ($_.ProcessName -eq 'MSBuild' -and $_.Path -like '*\dotnet\sdk\*\MSBuild.exe') -or ($_.ProcessName -eq 'cl' -and $_.Path -like '*\Microsoft Visual Studio\2022\*') -or ($_.ProcessName -like 'xenia*' -and $_.Path -and $_.Path -notlike '*\boi360\*'))
+    -not (($_.ProcessName -in @('cl','MSBuild') -and $_.Id -in $VerifiedExternalWorkerIds) -or ($_.ProcessName -eq 'MSBuild' -and $_.Path -like '*\dotnet\sdk\*\MSBuild.exe') -or ($_.ProcessName -eq 'cl' -and $_.Path -like '*\Microsoft Visual Studio\2022\*') -or ($_.ProcessName -like 'xenia*' -and $_.Path -and $_.Path -notlike '*\isaac360\*'))
 }
 if($portWorkers) {throw 'Stop other port build/test workers first.'}
 $worker=[Diagnostics.Process]::GetCurrentProcess();$oldAffinity=$worker.ProcessorAffinity;$mask=$oldAffinity.ToInt64()

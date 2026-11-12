@@ -675,8 +675,8 @@ VOID __cdecl main() {
     //Console-writable local save root. e:\ is the normal writable console
     //storage; a devkit/emulator without e:\ falls back to its game:// scratch.
     bool saveBound=false;
-    if(CreateDirectoryA("e:\\boi360",0)||GetLastError()==ERROR_ALREADY_EXISTS)
-        saveBound=gUi.BindSaveDirectory("e:\\boi360\\");
+    if(CreateDirectoryA("e:\\isaac360",0)||GetLastError()==ERROR_ALREADY_EXISTS)
+        saveBound=gUi.BindSaveDirectory("e:\\isaac360\\");
     if(!saveBound){
         CreateDirectoryA("game:\\profile",0);
         saveBound=gUi.BindSaveDirectory("game:\\profile\\");

@@ -9,10 +9,10 @@ everything), and the game's runtime DLLs rebased (tools/recomp/rebase.py). Layou
   game/resources/...     resources/packed/*.a (four converted), packed/sfx.pcm and resources/scripts/
   dlls/                  lua5.3.3r.dll and msvcp140.dll, rebased
   save/                  the game's saves and anything it writes beside itself
-  boi360_args.txt        options (--mem MB: the guest address space; NAME=value: a setting the PC takes from
-                         the environment, e.g. BOI360_SHOTS=600,1200 for screenshots beside the XEX)
+  isaac360_args.txt        options (--mem MB: the guest address space; NAME=value: a setting the PC takes from
+                         the environment, e.g. ISAAC360_SHOTS=600,1200 for screenshots beside the XEX)
 
-    py -3 tools/stage_console.py [--xex build/console/recomp/default.xex] [--out build/console/boi360]
+    py -3 tools/stage_console.py [--xex build/console/recomp/default.xex] [--out build/console/isaac360]
 
 Copy the output folder to the console's drive and start default.xex from the dashboard of a console that runs
 homebrew (such as with ABadAvatar). Never share the output: it is made from your copy of the game.
@@ -62,11 +62,11 @@ def stage_game(out):
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
     ap.add_argument('--xex', default=os.path.join(ROOT, 'build', 'console', 'recomp', 'default.xex'))
-    ap.add_argument('--out', default=os.path.join(ROOT, 'build', 'console', 'boi360'))
+    ap.add_argument('--out', default=os.path.join(ROOT, 'build', 'console', 'isaac360'))
     args = ap.parse_args()
     os.makedirs(args.out, exist_ok=True)
     # what the hand port's staging left there
-    for old in ('boi360.pak',):
+    for old in ('isaac360.pak',):
         if os.path.isfile(os.path.join(args.out, old)):
             os.remove(os.path.join(args.out, old))
     count, copied, total = stage_game(args.out)
@@ -85,7 +85,7 @@ def main():
     if os.path.isdir(licenses):
         shutil.copytree(licenses, os.path.join(args.out, 'licenses'), dirs_exist_ok=True)
     os.makedirs(os.path.join(args.out, 'save'), exist_ok=True)
-    args_file = os.path.join(args.out, 'boi360_args.txt')
+    args_file = os.path.join(args.out, 'isaac360_args.txt')
     if not os.path.isfile(args_file):
         with open(args_file, 'w', newline='\r\n') as f:
             f.write('--mem 320\n')
@@ -94,9 +94,9 @@ def main():
     print('staged', os.path.abspath(args.out))
 
 
-README = '''The Binding of Isaac: Rebirth Complete Edition for Xbox 360 (boi360) - console test build
+README = '''The Binding of Isaac: Rebirth Complete Edition for Xbox 360 (isaac360) - console test build
 
-Copy this whole folder to the console's drive (for example E:\\Games\\boi360) and start
+Copy this whole folder to the console's drive (for example E:\\Games\\isaac360) and start
 default.xex from the dashboard of a console that runs homebrew (such as with ABadAvatar).
 
 Files
@@ -105,11 +105,11 @@ Files
                      hold sound effects are converted for the console's memory
   dlls\\              the game's runtime libraries, prepared for the console
   save\\              saves and the game's settings are written here
-  boi360.log         written each session: copy it off before ejecting the drive
-  boi360_args.txt    options: --mem MB (address space for the game); a line BOI360_DISPLAY=720p
+  isaac360.log         written each session: copy it off before ejecting the drive
+  isaac360_args.txt    options: --mem MB (address space for the game); a line ISAAC360_DISPLAY=720p
                      keeps the picture at 1280x720 when the console is set to 1080p; a line
-                     BOI360_DEADZONE=N sets the sticks' dead zone in percent (default 24; 100
-                     turns the sticks off, the d-pad still moves); a line BOI360_SWAP_IMAGES=2
+                     ISAAC360_DEADZONE=N sets the sticks' dead zone in percent (default 24; 100
+                     turns the sticks off, the d-pad still moves); a line ISAAC360_SWAP_IMAGES=2
                      shows each frame a refresh sooner where the game keeps up (default 3)
   licenses\\          licences of the toolchain the build uses
 

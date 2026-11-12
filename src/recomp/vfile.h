@@ -2,8 +2,8 @@
 // for every entry it reads, 22,500 opens during start-up; an open on the console's USB costs ~110 ms. So
 // read-only binary opens of game data share one reader per file, opened once and read in 256 KB blocks (the
 // USB's good request size), each stream keeping its own position. Everything else is a plain host file.
-#ifndef BOI360_RECOMP_VFILE_H
-#define BOI360_RECOMP_VFILE_H
+#ifndef ISAAC360_RECOMP_VFILE_H
+#define ISAAC360_RECOMP_VFILE_H
 #include <stdint.h>
 #include <stdio.h>
 #include <string>
@@ -39,7 +39,7 @@ double vf_disk_ms();
 // called now and then (the end of every 60th frame): the least recently read blocks past the cache's budget go,
 // and blocks no read touched in the last idleCalls calls
 void vf_trim(uint32_t idleCalls);
-// per shared reader: reads, bytes the game read, bytes read from the drive (BOI360_TRACE_READS)
+// per shared reader: reads, bytes the game read, bytes read from the drive (ISAAC360_TRACE_READS)
 void vf_dump_readers(void (*line)(const char*));
 
 #endif

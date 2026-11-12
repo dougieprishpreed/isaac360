@@ -1,7 +1,7 @@
 -- PC coverage runs of the recompiled game (tools/recomp/coverage.py): a test-only script, appended to an overlay
 -- copy of resources/scripts/main.lua in a throwaway save folder, that walks a run through every floor and its variants,
 -- boss rooms, item rooms and cutscenes with the game's debug commands. Progress lines ("cov:") reach the host log.
-local mod = RegisterMod("boi360 coverage", 1)
+local mod = RegisterMod("isaac360 coverage", 1)
 
 local STAGES = {"1", "1a", "1b", "1c", "1d", "2", "2c", "3", "3a", "3b", "3c", "3d", "4c", "5", "5a", "5b", "5c",
                 "5d", "6", "7", "7a", "7b", "7c", "8", "9", "10", "10a", "11", "11a", "12", "13"}

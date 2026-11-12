@@ -121,7 +121,7 @@ bool PortDataMount(const char* root) {
     for (size_t i = 0; i < gRoot.size(); ++i)
         if (gRoot[i] == '\\') gRoot[i] = '/';
     if (!gRoot.empty() && gRoot[gRoot.size() - 1] != '/') gRoot += '/';
-    gPacked = OpenPack(gRoot + "boi360.pak");
+    gPacked = OpenPack(gRoot + "isaac360.pak");
     if (!gPacked) ClosePack();
     return true;
 }

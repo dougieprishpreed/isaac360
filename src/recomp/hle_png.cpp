@@ -1,7 +1,7 @@
 // libpng's row unfiltering on the host (translate.py HOST). isaac-ng.exe decodes its textures with libpng, and
 // png_read_filter_row (0x9b2b60) undoes each row's filter a byte at a time, Paeth with its branches and Sub and Up
 // through SSE: translated, over the 5-14 MB of pixels a room loads, a large part of the console's pause at a door.
-// The filters are the PNG specification's, so the bytes are the same; BOI360_PNG_CHECK=1 runs the game's as well
+// The filters are the PNG specification's, so the bytes are the same; ISAAC360_PNG_CHECK=1 runs the game's as well
 // and logs any row that differs.
 #include "runtime.h"
 #include <stdlib.h>
@@ -57,7 +57,7 @@ extern "C" int hle_png_filter_row(X86* c) {
     if (!bpp || row >= g_mem_size || prevRow >= g_mem_size || n > g_mem_size - row || n > g_mem_size - prevRow)
         return 0;
     if (bpp > n) bpp = n;
-    if (g_check < 0) g_check = getenv("BOI360_PNG_CHECK") ? 1 : 0;
+    if (g_check < 0) g_check = getenv("ISAAC360_PNG_CHECK") ? 1 : 0;
     if (g_check) {
         // the host's on a copy, the game's on the row, compared
         std::vector<uint8_t> mine(g_mem + row, g_mem + row + n);

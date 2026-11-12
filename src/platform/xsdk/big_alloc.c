@@ -30,7 +30,7 @@ void* __real_calloc(size_t n, size_t size);
 
 /* the live big blocks by address: open addressing with linear probing, the
    kernel's regions starting on 64 KB boundaries */
-/* boi360: 64 KB, the archive readers' block size; at 256 KB their blocks and
+/* isaac360: 64 KB, the archive readers' block size; at 256 KB their blocks and
    the smaller textures' pixels came from newlib's heap, and the menu's host
    heap stood at 116 MB in boot 12 against 53 MB in boot 11 */
 enum { BIG = 64 * 1024, SLOTS = 4096, MAX_BIG = SLOTS * 3 / 4 };

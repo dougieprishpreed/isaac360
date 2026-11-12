@@ -20,10 +20,10 @@ import iced_x86 as ix
 import pefile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-# BOI360_IMAGE / BOI360_TAG select another game binary (the Lua DLL as rebase.py rebased it:
+# ISAAC360_IMAGE / ISAAC360_TAG select another game binary (the Lua DLL as rebase.py rebased it:
 # build/recomp/dlls/lua5.3.3r.dll, tag lua)
-TAG = os.environ.get('BOI360_TAG', '')
-EXE = os.path.join(ROOT, os.environ.get('BOI360_IMAGE', os.path.join('game', 'isaac-ng.exe')))
+TAG = os.environ.get('ISAAC360_TAG', '')
+EXE = os.path.join(ROOT, os.environ.get('ISAAC360_IMAGE', os.path.join('game', 'isaac-ng.exe')))
 OUT = os.path.join(ROOT, 'build', 'recomp', TAG) if TAG else os.path.join(ROOT, 'build', 'recomp')
 
 # Imports that never return: decoding stops after a call to them.
@@ -91,11 +91,11 @@ def imported_names(images, dll):
 def seeds(img):
     pe = img.pe
     out = {img.base + pe.OPTIONAL_HEADER.AddressOfEntryPoint: 'entry'}
-    # BOI360_EXPORTS_FROM=image,image...: only the exports those images import are roots (msvcp140.dll: the game
+    # ISAAC360_EXPORTS_FROM=image,image...: only the exports those images import are roots (msvcp140.dll: the game
     # takes 34 of its 1,124, and the console holds every function translated)
     used = None
-    if os.environ.get('BOI360_EXPORTS_FROM'):
-        used = imported_names(os.environ['BOI360_EXPORTS_FROM'].split(','), os.path.basename(EXE))
+    if os.environ.get('ISAAC360_EXPORTS_FROM'):
+        used = imported_names(os.environ['ISAAC360_EXPORTS_FROM'].split(','), os.path.basename(EXE))
     if hasattr(pe, 'DIRECTORY_ENTRY_EXPORT'):
         for e in pe.DIRECTORY_ENTRY_EXPORT.symbols:
             va = img.base + e.address
@@ -308,7 +308,7 @@ def main():
                 and not from_data(s)]
         if not drop:
             break
-        if os.environ.get('BOI360_ANALYZE_DEBUG'):
+        if os.environ.get('ISAAC360_ANALYZE_DEBUG'):
             for s in drop:
                 print('drop %08x: bad at %s' % (s, ' '.join('%08x' % b for b in funcs[s]['bad'][:4])))
         for s in drop:

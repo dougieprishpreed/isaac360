@@ -1,5 +1,5 @@
-#ifndef BOI360_SPRITE_VK_H
-#define BOI360_SPRITE_VK_H
+#ifndef ISAAC360_SPRITE_VK_H
+#define ISAAC360_SPRITE_VK_H
 // The one renderer (docs/XSDK_PLAN.md): Vulkan, kept to what vulkan4xenon supports, so the Windows binary and
 // the console draw a PortDrawList the same way. The platform hands it the Vulkan loader and, unless headless,
 // a surface; headless runs draw only the frames a test reads back.

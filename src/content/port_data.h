@@ -1,8 +1,8 @@
-#ifndef BOI360_PORT_DATA_H
-#define BOI360_PORT_DATA_H
+#ifndef ISAAC360_PORT_DATA_H
+#define ISAAC360_PORT_DATA_H
 // Every file the game reads at run time goes through here (docs/XSDK_PLAN.md, "Data").
 // * Names are relative to the data root, with '/': "game/file_index.bin", "port/audio/...".
-// * The Windows binary reads loose files under its root (runtime/). The console reads one pack, boi360.pak
+// * The Windows binary reads loose files under its root (runtime/). The console reads one pack, isaac360.pak
 //   (tools/stage_console.py), opened once: on its USB drive every file open costs ~110 ms and stdio refills
 //   1 KB per request, so loose files and fread would make room loads and sounds stall.
 // * A pack is read with positioned reads in 256 KB pieces and never past 2 GB (xsdk's off_t is 32-bit).
@@ -11,7 +11,7 @@
 #include <string>
 #include <vector>
 
-// Mounts the data root. A root holding boi360.pak reads from the pack, otherwise from loose files.
+// Mounts the data root. A root holding isaac360.pak reads from the pack, otherwise from loose files.
 bool PortDataMount(const char* root);
 bool PortDataPacked();
 const std::string& PortDataRoot();

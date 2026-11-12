@@ -47,7 +47,7 @@ void s_fopen(X86* c) {
         return;
     }
     uint32_t g = guest_calloc(1, 32);
-    static int trace = getenv("BOI360_TRACE_FILES") ? 1 : 0;
+    static int trace = getenv("ISAAC360_TRACE_FILES") ? 1 : 0;
     if (trace) recomp_log("fopen %s (%s) -> %08x", path.c_str(), mode.c_str(), g);
     std::lock_guard<std::mutex> l(g_fileLock);
     g_files[g] = f;
@@ -184,15 +184,15 @@ std::string format_guest(const std::string& fmt, uint32_t va) {
 void s_vsprintf(X86* c) {
     uint32_t buf = ARG(c, 2), count = ARG(c, 3);
     std::string s = format_guest(guest_str(ARG(c, 4)), ARG(c, 6));
-    // BOI360_TRACE_PRINTF=1 logs the first 3000 strings, =N the first N; BOI360_TRACE_PRINTF_ONLY="a,b" only those
+    // ISAAC360_TRACE_PRINTF=1 logs the first 3000 strings, =N the first N; ISAAC360_TRACE_PRINTF_ONLY="a,b" only those
     // holding one of the words (a whole run's game log lines without its file lookups)
-    static int trace = getenv("BOI360_TRACE_PRINTF") ? (atoi(getenv("BOI360_TRACE_PRINTF")) > 1 ? atoi(getenv("BOI360_TRACE_PRINTF")) : 3000) : 0;
+    static int trace = getenv("ISAAC360_TRACE_PRINTF") ? (atoi(getenv("ISAAC360_TRACE_PRINTF")) > 1 ? atoi(getenv("ISAAC360_TRACE_PRINTF")) : 3000) : 0;
     static int traced = 0;
     static std::vector<std::string> only;
     static bool onlyParsed = false;
     if (!onlyParsed) {
         onlyParsed = true;
-        std::string list = getenv("BOI360_TRACE_PRINTF_ONLY") ? getenv("BOI360_TRACE_PRINTF_ONLY") : "";
+        std::string list = getenv("ISAAC360_TRACE_PRINTF_ONLY") ? getenv("ISAAC360_TRACE_PRINTF_ONLY") : "";
         for (size_t at = 0; at < list.size();) {
             size_t comma = list.find(',', at);
             if (comma == std::string::npos) comma = list.size();
@@ -287,9 +287,9 @@ void s_vsscanf(X86* c) {
 void big_alloc_log(X86* c, uint32_t size) {
     if (size >= (4u << 20)) recomp_log("alloc %u KB from %08x (heap %u MB)", size >> 10, RD32(c->r[4]), guest_heap_used() >> 20);
 }
-// BOI360_HEAP_PROFILE=frame: live heap bytes by allocation site (the first three return addresses in
+// ISAAC360_HEAP_PROFILE=frame: live heap bytes by allocation site (the first three return addresses in
 // isaac-ng.exe found on the stack), written to build/recomp/heap_profile.txt at that presented frame
-bool g_heapProfile = getenv("BOI360_HEAP_PROFILE") != 0;
+bool g_heapProfile = getenv("ISAAC360_HEAP_PROFILE") != 0;
 std::map<uint32_t, std::pair<std::string, uint32_t> > g_live;
 std::mutex g_liveLock;
 // the first three return addresses in isaac-ng.exe on c's stack
@@ -559,7 +559,7 @@ void s_getenv(X86* c) {
 }
 void s_access(X86* c) {
     std::string p = host_path(guest_str(ARG(c, 0)));
-    if (getenv("BOI360_TRACE_FILES")) recomp_log("_access %s", p.c_str());
+    if (getenv("ISAAC360_TRACE_FILES")) recomp_log("_access %s", p.c_str());
     RET_CDECL(c, recomp_host_exists(p, 0) ? 0 : (uint32_t)-1);
 }
 void s_remove(X86* c) {

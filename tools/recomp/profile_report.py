@@ -1,13 +1,13 @@
-"""Names the functions behind a BOI360_PROFILE log's samples (docs/RECOMP_PLAN.md).
+"""Names the functions behind a ISAAC360_PROFILE log's samples (docs/RECOMP_PLAN.md).
 
 The profiler (runtime.cpp) samples every guest thread each millisecond: the shim it is in and the guest code that
 called it, or in game code the innermost return address on its stack. A return address follows the call of the
 function that was running, so each is shown as that callee and the function holding the call site. The log's
 blocks (one each 600 frames) are averaged per thread, from --from-block on. The "locks:" lines (contended critical
-sections, kernel32 shims) are summed, their waiting and holding code named the same way. A BOI360_PROFILE=slow log
+sections, kernel32 shims) are summed, their waiting and holding code named the same way. A ISAAC360_PROFILE=slow log
 (only slow frames' samples) adds the main thread's inclusive shares: each call on the stack, with all it calls.
 
-    tools/.venv/Scripts/python tools/recomp/profile_report.py work/console09/boi360.log [--from-block N] [--top 30]
+    tools/.venv/Scripts/python tools/recomp/profile_report.py work/console09/isaac360.log [--from-block N] [--top 30]
 """
 import argparse
 import bisect
@@ -87,7 +87,7 @@ def main():
     blocks = defaultdict(int)                 # thread -> blocks seen from --from-block
     seen = defaultdict(int)                   # thread -> blocks seen
     shares = defaultdict(Counter)             # thread -> key -> summed share
-    incl = Counter()                          # BOI360_PROFILE=slow: return address -> summed inclusive share
+    incl = Counter()                          # ISAAC360_PROFILE=slow: return address -> summed inclusive share
     game = defaultdict(float)
     locks = {}
     for line in open(args.log, errors='replace'):

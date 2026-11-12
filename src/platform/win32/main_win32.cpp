@@ -2,8 +2,8 @@
 // same Vulkan renderer. Test runs are headless (--hidden: no window at all, so nothing can take the keyboard
 // focus), muted and driven by --script; results come from build/windows/port.log and --shot-file frames.
 //
-//   boi360.exe                                   title menu, keyboard or controller, sound on
-//   boi360.exe --direct --seed 12352 --hidden --fast --frames 300 --script "0:70:W" --shot-frame 68
+//   isaac360.exe                                   title menu, keyboard or controller, sound on
+//   isaac360.exe --direct --seed 12352 --hidden --fast --frames 300 --script "0:70:W" --shot-frame 68
 //
 // Keyboard: WASD move, arrows fire, X bomb, Z item / menu accept, C card, V drop / menu back, Enter accept,
 // Esc back, Space start. A controller works too (XInput).
@@ -62,12 +62,12 @@ static bool CreateGameWindow() {
     wc.lpfnWndProc = WindowProc;
     wc.hInstance = GetModuleHandleA(0);
     wc.hCursor = LoadCursor(0, IDC_ARROW);
-    wc.lpszClassName = "Boi360Window";
+    wc.lpszClassName = "Isaac360Window";
     if (!RegisterClassA(&wc) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) return false;
     RECT r = {0, 0, kWidth, kHeight};
     const DWORD style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
     AdjustWindowRect(&r, style, FALSE);
-    gWindow = CreateWindowExA(0, "Boi360Window", "The Binding of Isaac: Rebirth", style, CW_USEDEFAULT, CW_USEDEFAULT,
+    gWindow = CreateWindowExA(0, "Isaac360Window", "The Binding of Isaac: Rebirth", style, CW_USEDEFAULT, CW_USEDEFAULT,
                               r.right - r.left, r.bottom - r.top, 0, 0, wc.hInstance, 0);
     if (!gWindow) return false;
     ShowWindow(gWindow, SW_SHOWNORMAL);
@@ -156,7 +156,7 @@ int main(int argc, char** argv) {
     bool hidden = false, fast = false, mute = false, validate = false;
     std::vector<int> shotFrames;
     std::string shotFile = "build/windows/frame.bmp";
-    std::string dataRoot = "runtime/";          // --data build/console/boi360 reads the console's pack
+    std::string dataRoot = "runtime/";          // --data build/console/isaac360 reads the console's pack
     for (int i = 1; i < argc; ++i) {
         if (!strcmp(argv[i], "--hidden")) hidden = true;
         else if (!strcmp(argv[i], "--fast")) fast = true;
@@ -166,7 +166,7 @@ int main(int argc, char** argv) {
         else if (!strcmp(argv[i], "--shot-file") && i + 1 < argc) shotFile = argv[++i];
         else if (!strcmp(argv[i], "--data") && i + 1 < argc) dataRoot = argv[++i];
     }
-    if (getenv("BOI360_MUTE")) mute = true;
+    if (getenv("ISAAC360_MUTE")) mute = true;
     CreateDirectoryA("build", 0);
     CreateDirectoryA("build\\windows", 0);
     CreateDirectoryA("build\\windows\\profile", 0);

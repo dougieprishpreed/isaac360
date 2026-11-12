@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Builds the console's default.xex of the recompiled game (docs/RECOMP_PLAN.md) with the open xsdk toolchain
-# (WSL on Windows). Defaults: boi360's own xsdk and vulkan4xenon checkouts in /opt/boi360-xsdk/deps, patched and
+# (WSL on Windows). Defaults: isaac360's own xsdk and vulkan4xenon checkouts in /opt/isaac360-xsdk/deps, patched and
 # built by tools/xsdk/deps.sh first; the toolchain and glslang from the CTR360-XSDK distro's shared /opt/ctr360-xsdk
-# (read only); the output in /opt/boi360-xsdk/recomp.
+# (read only); the output in /opt/isaac360-xsdk/recomp.
 #
 #   [XSDK=... VULKAN4XENON=... GLSLANG=... XSDK_TOOLCHAIN=... JOBS=2 GEN_OPT=-O2] tools/xsdk/build_recomp.sh
 #
@@ -12,15 +12,15 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 DEPS=/opt/ctr360-xsdk
-XSDK="${XSDK:-/opt/boi360-xsdk/deps/xsdk}"
-VULKAN4XENON="${VULKAN4XENON:-/opt/boi360-xsdk/deps/vulkan4xenon}"
+XSDK="${XSDK:-/opt/isaac360-xsdk/deps/xsdk}"
+VULKAN4XENON="${VULKAN4XENON:-/opt/isaac360-xsdk/deps/vulkan4xenon}"
 GLSLANG="${GLSLANG:-$DEPS/glslang/build-host/StandAlone/glslang}"
 XSDK_TOOLCHAIN="${XSDK_TOOLCHAIN:-$DEPS/toolchain}"
-OUT="${BOI_XSDK_BUILD:-/opt/boi360-xsdk/recomp}"
+OUT="${ISAAC_XSDK_BUILD:-/opt/isaac360-xsdk/recomp}"
 JOBS="${JOBS:-2}"
 GEN_OPT="${GEN_OPT:--O2}"
 mkdir -p "$OUT"
-# the display-output patches (tools/xsdk/patches) go on boi360's own checkouts
+# the display-output patches (tools/xsdk/patches) go on isaac360's own checkouts
 if [ "$(dirname "$XSDK")" = "$(dirname "$VULKAN4XENON")" ] && [ "$(dirname "$XSDK")" != "$DEPS" ]; then
   DEPS="$(dirname "$XSDK")" TOOLCHAIN="$XSDK_TOOLCHAIN/bin/powerpc-xsdk-elf-" JOBS="$JOBS" bash "$ROOT/tools/xsdk/deps.sh"
 fi
@@ -52,10 +52,10 @@ COMMIT="$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || true)"
 
 cmake -S "$ROOT/tools/xsdk/recomp" -B "$OUT/cmake" -G Ninja \
   -DCMAKE_TOOLCHAIN_FILE="$XSDK/cmake/xsdk.cmake" -DXSDK_TOOLCHAIN="$XSDK_TOOLCHAIN" -DCMAKE_BUILD_TYPE=Release \
-  -DVULKAN4XENON="$VULKAN4XENON" -DBOI_SHADERS="$SH" -DBOI_GIT_COMMIT="$COMMIT" -DBOI_GEN_OPT="$GEN_OPT"
+  -DVULKAN4XENON="$VULKAN4XENON" -DBOI_SHADERS="$SH" -DISAAC_GIT_COMMIT="$COMMIT" -DBOI_GEN_OPT="$GEN_OPT"
 cmake --build "$OUT/cmake" -j"$JOBS"
 
-cp "$OUT/cmake/boi360.xex" "$OUT/default.xex"
+cp "$OUT/cmake/isaac360.xex" "$OUT/default.xex"
 DST="$ROOT/build/console/recomp"
 mkdir -p "$DST/licenses"
 cp "$OUT/default.xex" "$DST/default.xex"

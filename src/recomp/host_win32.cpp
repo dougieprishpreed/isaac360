@@ -1,7 +1,7 @@
 // Windows host of the recompiled game (docs/RECOMP_PLAN.md): runs the translated isaac-ng.exe from the user's
-// game folder. Test runs stay hidden and muted (the platform shims honour BOI360_HIDDEN / BOI360_MUTE).
-//   boi360_recomp.exe [--game game] [--mem 512] [--log build/recomp/run.log] [--hidden] [--vk]
-// --vk (or BOI360_GL=vk) draws through the console's GL-on-Vulkan layer (gl_vk.cpp, headless) instead of
+// game folder. Test runs stay hidden and muted (the platform shims honour ISAAC360_HIDDEN / ISAAC360_MUTE).
+//   isaac360_recomp.exe [--game game] [--mem 512] [--log build/recomp/run.log] [--hidden] [--vk]
+// --vk (or ISAAC360_GL=vk) draws through the console's GL-on-Vulkan layer (gl_vk.cpp, headless) instead of
 // passing GL to the host driver.
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -15,7 +15,7 @@
 void shims_register_all();
 
 // audio output: test runs are muted (the mixer still runs in real time); TODO waveOut for interactive runs.
-// BOI360_AUDIO_DUMP=path.wav keeps what the mixer puts out (16-bit stereo) for checks.
+// ISAAC360_AUDIO_DUMP=path.wav keeps what the mixer puts out (16-bit stereo) for checks.
 static FILE* g_audioDump = 0;
 static uint32_t g_audioFrames = 0;
 static int g_audioRate = 44100;
@@ -48,7 +48,7 @@ static void audio_dump_header() {
 }
 void audio_out_open(int rate) {
     g_audioRate = rate;
-    const char* dump = getenv("BOI360_AUDIO_DUMP");
+    const char* dump = getenv("ISAAC360_AUDIO_DUMP");
     if (dump && !g_audioDump && (g_audioDump = fopen(dump, "wb+")) != 0) audio_dump_header();
 }
 void audio_out_submit(const int16_t* stereo, int frames) {
@@ -84,17 +84,17 @@ int main(int argc, char** argv) {
         else if (!strcmp(argv[i], "--mem") && i + 1 < argc) cfg.memSize = (uint32_t)atoi(argv[++i]) << 20;
         else if (!strcmp(argv[i], "--log") && i + 1 < argc) cfg.logPath = argv[++i];
         else if (!strcmp(argv[i], "--save") && i + 1 < argc) cfg.saveDir = argv[++i];
-        else if (!strcmp(argv[i], "--hidden")) _putenv("BOI360_HIDDEN=1");
-        else if (!strcmp(argv[i], "--vk")) _putenv("BOI360_GL=vk");
+        else if (!strcmp(argv[i], "--hidden")) _putenv("ISAAC360_HIDDEN=1");
+        else if (!strcmp(argv[i], "--vk")) _putenv("ISAAC360_GL=vk");
         else if (!strcmp(argv[i], "--data-overlay") && i + 1 < argc) cfg.dataOverlay = argv[++i];
     }
-    const char* gl = getenv("BOI360_GL");
+    const char* gl = getenv("ISAAC360_GL");
     if (gl && !strcmp(gl, "vk")) {
         HMODULE vulkan = LoadLibraryA("vulkan-1.dll");
         GlVkHooks hooks;
         memset(&hooks, 0, sizeof(hooks));
         hooks.getInstanceProcAddr = vulkan ? (PFN_vkGetInstanceProcAddr)GetProcAddress(vulkan, "vkGetInstanceProcAddr") : 0;
-        hooks.validation = getenv("BOI360_VK_VALIDATION") != 0;
+        hooks.validation = getenv("ISAAC360_VK_VALIDATION") != 0;
         gl_vk_configure(hooks);
     }
     shims_register_all();

@@ -28,7 +28,7 @@ double g_diskMs = 0;                                 // time in drive reads, all
 // after the block before it reads four blocks in one request (an entry read through), else one.
 enum { BLOCK = 64 << 10, AHEAD = 4, DIRECT = 1 << 20 };
 
-// blocks each reader keeps (BOI360_READ_CACHE, 64: 4 MB) and all readers together (BOI360_READ_BUDGET MB, 24):
+// blocks each reader keeps (ISAAC360_READ_CACHE, 64: 4 MB) and all readers together (ISAAC360_READ_BUDGET MB, 24):
 // vf_trim drops the least recently read past the budget, and any block unread for a minute
 int g_cacheBlocks = -1;
 uint32_t g_budgetBlocks = 0;
@@ -51,7 +51,7 @@ struct Reader {
     int64_t size;
     std::mutex lock;
     std::string path;
-    uint64_t gameBytes, diskBytes, reads, bigReads;   // BOI360_TRACE_READS (vf_dump_readers)
+    uint64_t gameBytes, diskBytes, reads, bigReads;   // ISAAC360_TRACE_READS (vf_dump_readers)
     std::list<Block> blocks;                         // most recent first
 
     size_t raw_read(int64_t off, void* buf, size_t n) {
@@ -80,7 +80,7 @@ struct Reader {
 
     // a block for index at the front (the oldest one's storage once the reader holds its share)
     Block& fresh(int64_t index) {
-        if (g_cacheBlocks < 0) g_cacheBlocks = getenv("BOI360_READ_CACHE") ? atoi(getenv("BOI360_READ_CACHE")) : 64;
+        if (g_cacheBlocks < 0) g_cacheBlocks = getenv("ISAAC360_READ_CACHE") ? atoi(getenv("ISAAC360_READ_CACHE")) : 64;
         if (blocks.size() >= (size_t)(g_cacheBlocks < 1 ? 1 : g_cacheBlocks)) {
             blocks.splice(blocks.begin(), blocks, --blocks.end());
         } else {
@@ -289,7 +289,7 @@ double vf_disk_ms() { return g_diskMs; }
 void vf_trim(uint32_t idleCalls) {
     uint32_t now = ++g_readTick;
     if (!g_budgetBlocks)
-        g_budgetBlocks = (uint32_t)(getenv("BOI360_READ_BUDGET") ? atoi(getenv("BOI360_READ_BUDGET")) : 24) * ((1u << 20) / BLOCK);
+        g_budgetBlocks = (uint32_t)(getenv("ISAAC360_READ_BUDGET") ? atoi(getenv("ISAAC360_READ_BUDGET")) : 24) * ((1u << 20) / BLOCK);
     std::lock_guard<std::mutex> l(g_readersLock);
     for (;;) {
         // each reader's oldest block, the oldest of them goes while the total is past the budget; any idle too long

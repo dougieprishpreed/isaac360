@@ -110,7 +110,7 @@ struct PortGameSession {
     //resources and items persist; only floor-local transient state resets.
     bool DescendNormal(PortNormalRuntime&,NativeSceneFiles&,NativeActionSource* actions=0);
     //Legacy diagnostic checkpoint retained for simulator regressions. Platform
-    //adapters do not load or write this BOI360_C1 format; production New Run
+    //adapters do not load or write this ISAAC360_C1 format; production New Run
     //and Continue ownership is the native selected-slot path below.
     bool SaveContinue(const char* path,PortNormalRuntime&);
     bool ContinueSavedRun(const char* path,PortNormalRuntime&,NativeSceneFiles&,NativeActionSource* actions=0);

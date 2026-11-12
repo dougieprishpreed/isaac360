@@ -22,20 +22,20 @@ import pefile
 import regflow
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-TAG = os.environ.get('BOI360_TAG', '')
-EXE = os.path.join(ROOT, os.environ.get('BOI360_IMAGE', os.path.join('game', 'isaac-ng.exe')))
+TAG = os.environ.get('ISAAC360_TAG', '')
+EXE = os.path.join(ROOT, os.environ.get('ISAAC360_IMAGE', os.path.join('game', 'isaac-ng.exe')))
 PROG = os.path.join(ROOT, 'build', 'recomp', TAG, 'program.json') if TAG else os.path.join(ROOT, 'build', 'recomp', 'program.json')
 OUT = os.path.join(ROOT, 'build', 'recomp', 'out_' + TAG) if TAG else os.path.join(ROOT, 'build', 'recomp', 'out')
 SUFFIX = ('_' + TAG) if TAG else ''
-# BOI360_TRACE_FUNCS=addr,addr: those functions log their entry (arguments) and returns (eax) at run time
-# Check builds for the register flow (regflow.py). BOI360_REGCHECK=1: each call gives what it does not save a poison
-# value (0xdead000n, the flags 0x5a), so a callee that reads one fails at once. BOI360_REGCHECK=2: every call and
+# ISAAC360_TRACE_FUNCS=addr,addr: those functions log their entry (arguments) and returns (eax) at run time
+# Check builds for the register flow (regflow.py). ISAAC360_REGCHECK=1: each call gives what it does not save a poison
+# value (0xdead000n, the flags 0x5a), so a callee that reads one fails at once. ISAAC360_REGCHECK=2: every call and
 # return saves and reloads everything, and each function reports (x86_regcheck) a register it is taken to preserve
 # that its return or tail call left changed (under lean calls a function's copy of a register nobody reads after a
 # call is stale, so only full saves show what the register really holds).
-REGCHECK = os.environ.get('BOI360_REGCHECK', '')
+REGCHECK = os.environ.get('ISAAC360_REGCHECK', '')
 POISON, PRESERVE = REGCHECK == '1', REGCHECK == '2'
-TRACE = set(int(x, 16) for x in os.environ.get('BOI360_TRACE_FUNCS', '').split(',') if x)
+TRACE = set(int(x, 16) for x in os.environ.get('ISAAC360_TRACE_FUNCS', '').split(',') if x)
 
 # Instructions of isaac-ng.exe replaced by other C (the exe only, TAG ''): address -> code.
 PATCHES = {
@@ -362,7 +362,7 @@ class Fn:
         return self.tr.rf.site(self.start, va) if self.tr.rf and not PRESERVE else None
 
     def checked(self):
-        """The registers a BOI360_REGCHECK translation checks at this function's exits (0: none)."""
+        """The registers a ISAAC360_REGCHECK translation checks at this function's exits (0: none)."""
         rf = self.tr.rf
         if not PRESERVE or not rf or self.start not in rf.flows or rf.flows[self.start].opaque:
             return 0

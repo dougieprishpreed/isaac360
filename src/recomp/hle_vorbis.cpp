@@ -14,7 +14,7 @@
 // through the game's file object once and is fed from memory. The host takes a stream when the game opens it
 // (vorbis_pump_first_frame, the end of an open) or at its first read; from then on the game's decoder stays as it
 // was: seek_start's restart (set_file_offset, vorbis_pump_first_frame) restarts the host's instead. A stream the
-// host can't take stays with the game's decoder. BOI360_VORBIS_CHECK=1 runs the game's decoder as well and logs
+// host can't take stays with the game's decoder. ISAAC360_VORBIS_CHECK=1 runs the game's decoder as well and logs
 // how far the host's differs.
 #include <stdio.h>
 #include <stdlib.h>
@@ -39,7 +39,7 @@
 #include "../third_party/stb/stb_vorbis.c"
 #include "../third_party/miniz/miniz_tinfl.h"
 
-extern "C" void F_9aa630(X86* c);                       // the game's get_samples, for BOI360_VORBIS_CHECK
+extern "C" void F_9aa630(X86* c);                       // the game's get_samples, for ISAAC360_VORBIS_CHECK
 
 namespace {
 // the game's decoder object: its input fields (stb_vorbis before the vendor and comment fields)
@@ -735,13 +735,13 @@ struct CheckStats {
 // stb_vorbis_get_samples_short_interleaved(f in ecx, channels in edx, short* buffer, int num_shorts): frames read
 extern "C" int hle_vorbis_get_samples(X86* c) {
     if (t_bypass) return 0;
-    // BOI360_VORBIS_DELAY_MS=N: each read waits N ms first, the console's slower sound thread on the PC
-    static const int delayMs = getenv("BOI360_VORBIS_DELAY_MS") ? atoi(getenv("BOI360_VORBIS_DELAY_MS")) : 0;
+    // ISAAC360_VORBIS_DELAY_MS=N: each read waits N ms first, the console's slower sound thread on the PC
+    static const int delayMs = getenv("ISAAC360_VORBIS_DELAY_MS") ? atoi(getenv("ISAAC360_VORBIS_DELAY_MS")) : 0;
     if (delayMs > 0) std::this_thread::sleep_for(std::chrono::milliseconds(delayMs));
     uint32_t f = c->r[1], esp = c->r[4], buffer = RD32(esp + 4);
     int channels = (int)c->r[2], shorts = (int)RD32(esp + 8);
     if (!f || channels <= 0 || channels > 8 || shorts <= 0) return 0;
-    if (g_check < 0) g_check = getenv("BOI360_VORBIS_CHECK") ? 1 : 0;
+    if (g_check < 0) g_check = getenv("ISAAC360_VORBIS_CHECK") ? 1 : 0;
     uint32_t regs[8];                                   // a new stream may call the game's file object: the game's
     memcpy(regs, c->r, sizeof(regs));                   // get_samples, if it runs, gets its registers back
     std::unique_lock<std::mutex> l(g_lock);
@@ -835,7 +835,7 @@ extern "C" int hle_vorbis_set_file_offset(X86* c) {
 // game's first read, and the game's decoder skips its first frame (it never decodes for this stream)
 extern "C" int hle_vorbis_pump_first_frame(X86* c) {
     if (t_bypass) return 0;
-    if (g_check < 0) g_check = getenv("BOI360_VORBIS_CHECK") ? 1 : 0;
+    if (g_check < 0) g_check = getenv("ISAAC360_VORBIS_CHECK") ? 1 : 0;
     uint32_t f = c->r[1];
     std::unique_lock<std::mutex> l(g_lock);
     std::shared_ptr<Stream> s = served(f);
