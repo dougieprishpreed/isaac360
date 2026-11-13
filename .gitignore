@@ -1,27 +1,20 @@
-# Detailed development docs stay local; README.md is tracked.
+# Development notes stay local; README.md is tracked.
 /AGENTS.md
 /docs/
 
-# Original game data, prepared resources, evidence and development outputs.
+# Your copy of the game, and everything built from it.
 /game/
-.tools/
-tools/data/
-private/
-evidence/
-recovered/
-assets/
-runtime/
-logs/
-scratch/
 build/
 *.xex
 *.pdb
 *.obj
 __pycache__/
 *.pyc
-/steam-screenshots/
 /tools/.venv/
-# console logs copied off the USB drive, and the info file early runs wrote at the root
+/steam-screenshots/
+# console logs copied off the USB drive, and what early PC runs wrote at the root
 /work/
 /savedatapath.txt
-
+/data/
+/mods/
+/out_d/
