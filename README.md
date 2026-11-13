@@ -12,6 +12,16 @@ Nothing from the game is included here. You build the console files from your ow
 - The picture matches the PC version, including the game's Filter option. On a 1080p console each game pixel is an exact 2x2 block.
 - Sound effects are at their original quality. Music streams from the game's archives.
 
+## What makes it different
+
+**The PC game's own code, on the Xbox 360.** The Xbox 360 can't run x86 programs, and this isn't a remake or an emulator. Every function of the Windows game, its Lua library and its C++ library is translated ahead of time into C and compiled for the console's PowerPC CPU. The game then runs as itself: its rules, item effects, secrets and timing are the originals, not reimplementations.
+
+**OpenGL on Vulkan on the Xbox 360.** The game draws with OpenGL, which the Xbox 360 never had. The port implements the OpenGL calls the game makes on top of Vulkan. That runs on the console's GPU through vulkan4xenon, an open Vulkan driver for the Xbox 360's Xenos GPU. The game's shaders are converted ahead of time (GLSL to SPIR-V, then to Xenos microcode), so the console needs no shader compiler while you play.
+
+**A trimmed XEX.** Translated code is large, and on a console with 512 MB for everything, every megabyte of program is a megabyte the game can't use. The translator works out which registers each function reads and changes, so a call saves and reloads only what it needs; that alone took a quarter off the program (103 MB down to 77 MB). None of the game's data is in the XEX. It reads your game files from the USB drive, keeps textures compressed until they're drawn, and leaves sound effects on the drive until they play.
+
+**Native 1080p.** On a console set to 1080p, the game comes out as a true 1920x1080 picture, not a 720p one stretched by the console. Each of the game's pixels is an exact 2x2 block, as the PC version shows it at 1920x1080. The display output of xsdk and vulkan4xenon is patched for this. The game's own Filter option smooths the picture as it does on the PC.
+
 ## What you need
 
 - An Xbox 360 that runs homebrew (such as with ABadAvatar), a controller, and a USB drive with about 1.2 GB free.
