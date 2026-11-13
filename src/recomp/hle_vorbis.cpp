@@ -7,7 +7,7 @@
 //
 // Here a host thread streams each music stream as a disc game would: it finds the archive entry the game's file
 // object reads (resources/packed/music.a, afterbirth.a, afterbirthp.a, repentance.a: same size, same first 4 KB),
-// reads it from the drive itself in 64 KB pieces, unpacks it (tools/extract_resources.py's formats) and feeds a
+// reads it from the drive itself in 64 KB pieces, unpacks it (tools/recomp/archives.py's formats) and feeds a
 // native stb_vorbis (src/third_party/stb, 1.22) through its push API, ~1.5 s of samples ahead; the game's
 // get_samples copies what is ready. A few hundred KB a stream, nothing whole in memory, and nothing on the game's
 // threads but the copy. A stream from anywhere else (the decoder's own memory, an entry not found) comes whole
@@ -136,7 +136,7 @@ void build_index() {
                std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count());
 }
 
-// the generator of version 2's XORed blocks (tools/extract_resources.py ArchiveRng)
+// the generator of version 2's XORed blocks (tools/recomp/archives.py ArchiveRng)
 struct ArchiveRng {
     uint32_t memory[256], results[256], a, b, c;
     int position;

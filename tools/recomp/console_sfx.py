@@ -9,7 +9,7 @@ once). The OpenAL shim (src/recomp/shims_al.cpp) reads an effect from there when
 recently played ones in memory. The sound is the original; only where it waits differs. Every other entry of the
 archives is copied byte for byte, with the archive's checksums recomputed; the PC keeps the original archives.
 
-Archive entries (tools/extract_resources.py has the decoder): version 0 stores an entry word-scrambled with a
+Archive entries (tools/recomp/archives.py has the decoder): version 0 stores an entry word-scrambled with a
 seed from its name hash; version 2 stores 1 KB blocks (u32 header: final << 31 | size), deflated, or after a
 first non-final block of exactly 1024 bytes, XORed with a generator seeded by the name hash ("raw" mode).
 
@@ -24,8 +24,8 @@ import sys
 import zlib
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-sys.path.insert(0, os.path.join(ROOT, 'tools'))
-import extract_resources as ar  # noqa: E402
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import archives as ar  # noqa: E402
 
 ARCHIVES = ['sfx.a', 'afterbirth.a', 'afterbirthp.a', 'repentance.a']
 MARK = b'B3RF'
@@ -119,15 +119,7 @@ def encode_entry(version, data, hash2):
 
 
 def names():
-    table = {}
-    for path in (os.path.join(ROOT, 'tools', 'data', 'resource_names.txt'),
-                 os.path.join(ROOT, 'game', 'tools', 'ResourceExtractor', 'filelist.txt')):
-        if os.path.isfile(path):
-            for name in open(path, encoding='utf-8-sig').read().splitlines():
-                name = name.strip()
-                if name:
-                    table[ar.filename_hash(name)] = name.replace('\\', '/')
-    return table
+    return ar.file_names()
 
 
 def encoded_length(data, version, off, size):

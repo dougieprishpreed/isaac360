@@ -65,10 +65,6 @@ def main():
     ap.add_argument('--out', default=os.path.join(ROOT, 'build', 'console', 'isaac360'))
     args = ap.parse_args()
     os.makedirs(args.out, exist_ok=True)
-    # what the hand port's staging left there
-    for old in ('isaac360.pak',):
-        if os.path.isfile(os.path.join(args.out, old)):
-            os.remove(os.path.join(args.out, old))
     count, copied, total = stage_game(args.out)
     print('game/: %d files, %.1f MB (%d copied)' % (count, total / 1048576.0, copied))
     for dll in ('lua5.3.3r.dll', 'msvcp140.dll'):

@@ -1,50 +1,31 @@
 ﻿# The Binding of Isaac Rebirth Complete Edition for Xbox 360
 
-`isaac360` brings **The Binding of Isaac Rebirth Complete Edition** (the Windows Steam version, Repentance v1.7.5) to the **Xbox 360**. It runs your own copy of the game's program, `isaac-ng.exe`, translated to the console ahead of time: every function of the game, its Lua 5.3 library and its C++ runtime library becomes C, compiled for the console's PowerPC CPU with the open [xsdk](https://github.com/xenosworks/xsdk) toolchain. What the game asks of Windows (files, threads, OpenGL, OpenAL, XInput, Steam) is answered by the port; its OpenGL drawing runs on the console's GPU through [vulkan4xenon](https://github.com/xenosworks/vulkan4xenon).
+`isaac360` lets you play **The Binding of Isaac Rebirth Complete Edition** on an **Xbox 360**. It runs the game's own program from your Windows Steam copy (Repentance v1.7.5), translated ahead of time for the console's PowerPC CPU. All of the content and behaviour is the original: every floor, item, enemy, boss, character, challenge, cutscene, ending and save.
 
-Because the game's own code runs, all of its content and behaviour comes along: every floor, item, enemy, boss, character, mode, cutscene and save. Nothing from the game is in this repository. You build the console files from your own copy of the game.
+Nothing from the game is included here. You build the console files from your own copy of the game.
 
 ## Status
 
-**Not yet playable on the console.** The port works on a PC, builds for the Xbox 360, and is in its first hardware tests.
+**Alpha: playable, with performance still being worked on.**
 
-- **On a PC**, the same translated code runs as a Windows program (`isaac360_recomp.exe`), drawing through the same Vulkan path the console uses:
-  - It plays the intro, menus and runs, and is driven by test scripts.
-  - An automated run went through all 31 floor variants and the special rooms. It played 8 cutscenes, wrote options and save files, and fought 19 bosses from Larry Jr. to Mom. Mom's death played the ending and credits as in the original. None of it crashed.
-- **The console build** compiles: `default.xex` is about 97 MB. Three hardware boots so far, each a step further:
-  - The first sat on its first frame because of slow file lookups on the USB drive.
-  - The third loaded for 80 seconds, then returned to the dashboard. The game checks every archive's checksums at start, reading all 780 MB of them from the drive. Its render targets also share a depth buffer of another size, which the console's GPU driver refuses.
-  - Both are fixed in the current build: start-up now reads about 10 MB.
-- **Memory** is the console's main limit: it has 512 MB, and about 290 MB is left for the game once the program is loaded. Basement I went from about 300 MB to about 150 MB without changing how anything looks or sounds:
-  - Textures reach the GPU only when first drawn. The rest wait compressed: the game loads far more than a screen shows.
-  - Sound effects stay on the drive at their original quality until they play. The recently played stay in memory.
-- **Shaders:** all 22 of the game's shader programs are compiled for the console's GPU. Each was checked against exact maths on the xenos toolchain's simulator.
-- Mods are not supported yet.
+- Whole runs play on the console, from the title screen through the floors, shops, special rooms and bosses, with saving and continuing.
+- The picture matches the PC version, including the game's Filter option. On a 1080p console each game pixel is an exact 2x2 block.
+- Sound effects are at their original quality. Music streams from the game's archives.
 
-## How it works
+## What you need
 
-- `tools/recomp/analyze.py` finds every function in an image. `tools/recomp/translate.py` writes each one as a C function over the game's little-endian memory, which is byte-swapped on the big-endian console.
-- `src/recomp/runtime.cpp` loads the images, runs threads and keeps the game's writes in a save folder; the game folder stays read-only.
-- The `src/recomp/shims_*.cpp` files stand in for the Windows, C runtime, OpenAL, XInput and Steam functions the game imports.
-- `src/recomp/gl_vk.cpp` is a small OpenGL state machine on Vulkan. The game's GLSL shaders are converted ahead of time by `tools/recomp/shaders.py` (to SPIR-V, then to Xenos microcode by xsdk's xost).
-- `src/recomp/host_win32.cpp` and `src/recomp/host_xsdk.cpp` are the PC and console hosts. The console host adds the display, controllers, the audio feed, a watchdog and Back + Start to quit.
-- Console data: `tools/recomp/console_sfx.py` moves the sound effects' samples into one file, `sfx.pcm`, read as sounds play. It rewrites the four archives that hold them to point there; every other file is used as the game ships it.
-- `tools/recomp/translate.py` has one patch to the game's code: the start-up archive checksum pass, which takes 80 seconds on a USB drive, accepts each entry's stored checksum.
-
-The earlier hand-written port (`src/game/`, `src/app/`, `src/render/`, `src/platform/`, `src/simulation/`) stays in the repository; the console build no longer uses it.
-
-## Requirements
-
-- Your copy of the Windows Steam game in `game/` at the repository root (read-only; `isaac-ng.exe`, `Lua5.3.3r.dll`, `resources/`).
-- Windows with Visual Studio 2022 Build Tools, LLVM (clang-cl), CMake, Ninja and a Vulkan driver.
-- Python 3, and a virtual environment `tools/.venv` with `iced-x86` and `pefile`.
-- For the console: WSL (or Linux) with xsdk, vulkan4xenon and glslang-xenon built (see xsdk's `docs/GETTING_STARTED.md`).
+- An Xbox 360 that runs homebrew (such as with ABadAvatar), a controller, and a USB drive with about 1.2 GB free.
+- Your copy of **The Binding of Isaac: Rebirth** with Afterbirth, Afterbirth+ and Repentance, the Windows Steam version at **Repentance v1.7.5**. Other versions of `isaac-ng.exe` are not supported.
+- A Windows PC to build on, with:
+  - Visual Studio 2022 Build Tools, LLVM (clang-cl), CMake and Ninja;
+  - Python 3 with a virtual environment in `tools/.venv` holding `iced-x86` and `pefile`;
+  - WSL (or Linux) with the xsdk toolchain, vulkan4xenon and glslang built (see xsdk's `docs/GETTING_STARTED.md`).
 
 ## Building
 
-From the repository root:
+Copy your game folder (the one with `isaac-ng.exe`, `Lua5.3.3r.dll` and `resources\`) to `game\` in this repository; it is only read. Then, from the repository root:
 
-1. Rebase the two DLLs to their guest addresses:
+1. Rebase the two DLLs to the addresses the translation uses:
 
    ```powershell
    tools\.venv\Scripts\python tools\recomp\rebase.py game\Lua5.3.3r.dll 0x00C60000
@@ -54,77 +35,74 @@ From the repository root:
    tools\.venv\Scripts\python tools\recomp\rebase.py C:\Windows\SysWOW64\msvcp140.dll 0x00CA0000
    ```
 
-2. Analyse and translate the three images. Run the pair of commands for each image: the game itself (no variables), then with `ISAAC360_IMAGE=build/recomp/dlls/lua5.3.3r.dll ISAAC360_TAG=lua`, then with `ISAAC360_IMAGE=build/recomp/dlls/msvcp140.dll ISAAC360_TAG=msvcp`:
+2. Analyse and translate the game's program (this takes 20 to 30 minutes):
 
    ```powershell
-   tools\.venv\Scripts\python tools\recomp\analyze.py
+   tools\.venv\Scripts\python tools\recomp\analyze.py; tools\.venv\Scripts\python tools\recomp\translate.py
    ```
+
+   Then its Lua library:
 
    ```powershell
-   tools\.venv\Scripts\python tools\recomp\translate.py
+   $env:ISAAC360_IMAGE='build/recomp/dlls/lua5.3.3r.dll'; $env:ISAAC360_TAG='lua'; tools\.venv\Scripts\python tools\recomp\analyze.py; tools\.venv\Scripts\python tools\recomp\translate.py
    ```
 
-3. Convert the shaders (they come from the game's archives, extracted by `tools/extract_resources.py`):
+   Then its C++ library, and clear the two settings again:
+
+   ```powershell
+   $env:ISAAC360_IMAGE='build/recomp/dlls/msvcp140.dll'; $env:ISAAC360_TAG='msvcp'; tools\.venv\Scripts\python tools\recomp\analyze.py; tools\.venv\Scripts\python tools\recomp\translate.py; Remove-Item Env:ISAAC360_IMAGE, Env:ISAAC360_TAG
+   ```
+
+3. Convert the game's shaders, which are read from its archives and its program. This runs glslang in WSL: set `ISAAC360_WSL_DISTRO` to the name of your WSL distribution and `GLSLANG` to the glslang program inside it first.
 
    ```powershell
    tools\.venv\Scripts\python tools\recomp\shaders.py
    ```
 
-4. The PC program, `build\recomp\isaac360_recomp.exe`:
+4. Prepare the console's sound archives (written to `build\console_data`):
 
    ```powershell
-   cmd /c tools\recomp\build_win.cmd
+   tools\.venv\Scripts\python tools\recomp\console_sfx.py
    ```
 
-5. The console's sound archives, in `build\console_data`:
-
-   ```powershell
-   py -3 tools\recomp\console_sfx.py
-   ```
-
-6. The console's `default.xex`, in WSL. The xsdk and vulkan4xenon checkouts get the patches in `tools/xsdk/patches` (a 1920x1080 display on a 1080p console) and their libraries are built first (`tools/xsdk/deps.sh`), so give it checkouts of its own, side by side:
+5. Build `default.xex` in WSL, from the repository folder. The build applies the patches in `tools/xsdk/patches` (the 1920x1080 display) to the xsdk and vulkan4xenon checkouts and builds their libraries (`tools/xsdk/deps.sh`), so give it checkouts of its own, side by side. `XSDK_TOOLCHAIN` is where the xsdk toolchain is installed, `GLSLANG` the glslang program, and `ISAAC_XSDK_BUILD` a folder for the build's objects (by default `/opt/isaac360-xsdk/recomp`). It takes 30 to 60 minutes and writes `build/console/recomp/default.xex`.
 
    ```sh
-   XSDK=/path/to/deps/xsdk VULKAN4XENON=/path/to/deps/vulkan4xenon tools/xsdk/build_recomp.sh
+   XSDK=/path/to/deps/xsdk VULKAN4XENON=/path/to/deps/vulkan4xenon XSDK_TOOLCHAIN=/path/to/toolchain GLSLANG=/path/to/glslang tools/xsdk/build_recomp.sh
    ```
 
-7. Stage the folder for the USB drive:
+6. Stage the folder on your USB drive:
 
    ```powershell
-   py -3 tools\stage_console.py --out E:\Apps\isaac360
+   tools\.venv\Scripts\python tools\stage_console.py --out E:\Apps\isaac360
    ```
 
-## Playing on the console
+To try the same build on a PC first, `cmd /c tools\recomp\build_win.cmd` makes `build\recomp\isaac360_recomp.exe`.
 
-Copy the staged folder to the console's drive and start `default.xex` from the dashboard of a console that runs homebrew (such as with ABadAvatar). The controls are the game's own. Hold Back + Start for two seconds to return to the dashboard.
+## Playing
 
-The folder holds:
-- `default.xex`
-- `game\` (your game files, with the converted sound archives and `sfx.pcm`)
-- `dlls\`
-- `save\` (saves and settings)
-- `isaac360_args.txt`: `--mem MB` sets the game's address space; a line `ISAAC360_DISPLAY=720p` keeps the picture at 1280x720 on a 1080p console; a line `ISAAC360_DEADZONE=N` sets the sticks' dead zone in percent (default 24, XInput's own; 100 turns the sticks off and leaves the d-pad); a line `ISAAC360_SWAP_IMAGES=2` shows each frame one refresh sooner where the game keeps up (default 3, which lets the GPU work on one frame while the next is made)
+Start `default.xex` from the dashboard. The controls are the game's own: left stick or d-pad to move, right stick or face buttons to shoot. Hold **Back + Start** for two seconds to return to the dashboard.
 
-On a console set to 1080p the game shows a 1920x1080 picture with each of its pixels as an exact 2x2 block, as the PC version does at 1920x1080. On other video settings it draws 1280x720, which the console scales to the screen.
+The staged folder holds:
 
-Each session writes `isaac360.log` and `default.log` beside the XEX. They show how far loading got and how much memory is free, so copy them off before ejecting the drive.
+- `default.xex`;
+- `game\`: your game files, with the sound archives converted for the console;
+- `dlls\`: the game's runtime libraries, prepared for the console;
+- `save\`: your saves and the game's options;
+- `isaac360_args.txt`: settings, one per line or separated by spaces:
+  - `--mem 320`: the memory the game gets (leave it as it is);
+  - `ISAAC360_DEADZONE=24`: the sticks' dead zone in percent; raise it if a worn stick makes Isaac drift, and 100 turns the sticks off (the d-pad still works);
+  - `ISAAC360_VOLUME=100`: the overall volume in percent, on top of the game's own sound options;
+  - `ISAAC360_DISPLAY=720p`: a 1280x720 picture on a console set to 1080p;
+  - `ISAAC360_SWAP_IMAGES=2`: each frame a refresh sooner where the game keeps up (the default, 3, is smoother in busy moments).
 
-## Testing on a PC
+On a console set to 1080p the game shows a 1920x1080 picture. On other video settings it draws 1280x720, which the console scales to the screen.
 
-The PC program runs hidden and muted for tests:
+Each session writes `isaac360.log` and `default.log` beside the XEX. If something goes wrong, copy them off before ejecting the drive: they show what the game was doing.
 
-```powershell
-build\recomp\isaac360_recomp.exe --hidden --vk --mem 320 --data-overlay build/console_data
-```
+## How it works
 
-- `--vk` draws through the console's Vulkan path, `--data-overlay` uses the console's sound archives and `--mem 320` gives it the console's memory size.
-- `ISAAC360_PAD` scripts the controller, `ISAAC360_SHOTS` saves frames and `ISAAC360_TRACE_FILES` and `ISAAC360_TRACE_PRINTF` log file opens and the game's own log lines. `ISAAC360_TRACE_MUSIC=1` logs each music stream's starts, stops and underruns.
-- A Lua script that logs `audit: <what>` (through `Isaac.DebugString`) splits the run into windows: each gets a log line with its frames' game time and GPU time, average and worst, for finding effects that cost more than a room's usual frame.
-- `ISAAC360_POOL_CHECK=1` and `ISAAC360_IMAGE_CHECK=1` compare reused room textures and cached images with fresh decodes; `ISAAC360_PLAIN_SPRITES=0` and `ISAAC360_RELOAD_POOL=0` turn off the plain sprite shader and the texture reuse for comparisons.
-- `ISAAC360_COUNT_CALLS=1` (PC) counts each translated function's calls on the game's thread and logs the busiest every 600 frames, to see what a heavy frame spends its time on. `ISAAC360_BENCH=1` times the translated code's forms at start-up, old and new side by side.
-- The translator (`tools/recomp/translate.py`) keeps each function's SSE registers in locals, turns x87 float copies into integer copies and passes direct calls' `ecx` and `esp` as arguments; `ISAAC360_FAST_CALLS=0` at translation time goes back to the CPU-state calls.
-- `py -3 tools\recomp\coverage.py` plays a run through every floor, boss room, special room and cutscene with the game's debug commands, hidden, and reports memory and errors.
-- `tools/recomp/check_shaders.py` (in WSL) runs each converted shader on the xenos toolchain's simulator against exact maths, on inputs recorded by `coverage.py`.
+The tools in `tools/recomp` find every function in the game's program and its two libraries and write each one as C. That code is compiled for the console with the xsdk toolchain. The port answers what the game asks of Windows: files, threads, timers, OpenGL, OpenAL, XInput and Steam. The game's OpenGL drawing runs on the console's GPU through vulkan4xenon, and its shaders are converted ahead of time. Because the game's own code runs, gameplay is as on the PC.
 
 ## Acknowledgements
 

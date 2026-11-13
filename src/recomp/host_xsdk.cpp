@@ -43,7 +43,7 @@ struct HostPad {                                     // shims_input.cpp
 extern bool (*g_hostPadSource)(int index, HostPad* out);
 extern uint32_t (*g_hostFreeMemory)();             // shims_gl.cpp
 extern uint32_t (*g_hostHeapBytes)();
-extern "C" size_t spire_big_bytes(void);            // src/platform/xsdk/big_alloc.c
+extern "C" size_t spire_big_bytes(void);            // src/recomp/big_alloc.c
 extern std::atomic<bool> g_quitRequested;           // shims_gl.cpp: the game thread quits at its frame's end
 extern void (*g_hostQuit)();
 

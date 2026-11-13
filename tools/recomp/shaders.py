@@ -5,9 +5,8 @@ and a few built into the exe. Neither the console nor vulkan4xenon has a GLSL fr
 program the game can link is converted here, and the layer finds it again by the FNV-1a 64 hash of the sources
 the game hands glShaderSource.
 
-Sources: the archive files named in evidence/packages/*.json (x.vs pairs with x.fs in the same folder), plus the
-built-in ones captured by a run with ISAAC360_DUMP_SHADERS=1 (build/recomp/shaders/NNN.glsl and programs.txt, one
-linked program a line).
+Sources: the shader files in the game's archives (tools/recomp/archives.py; x.vs pairs with x.fs in the same
+folder), plus the three programs built into isaac-ng.exe, read from its data (BUILTIN).
 
 Conversion, per program (vertex + fragment):
 - attributes get locations in declaration order; the layer answers glGetAttribLocation with them;
@@ -25,7 +24,6 @@ build/recomp/spv/glvk_N.<stage>.spv for the console's shader bundle (vulkan4xeno
     py -3 tools/recomp/shaders.py
 """
 import glob
-import json
 import os
 import re
 import struct
@@ -33,8 +31,10 @@ import subprocess
 import sys
 import tempfile
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import archives  # noqa: E402
+
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-DUMPS = os.path.join(ROOT, 'build', 'recomp', 'shaders')
 OUT = os.path.join(ROOT, 'build', 'recomp', 'gl_shaders.inc')
 SPV_DIR = os.path.join(ROOT, 'build', 'recomp', 'spv')
 GLSLANG = os.environ.get('GLSLANG', '/opt/ctr360-xsdk/glslang/build-host/StandAlone/glslang')
@@ -539,26 +539,38 @@ def compile_spv(glsl, stage, tmp, tag):
     return struct.unpack('<%dI' % (len(data) // 4), data)
 
 
+# The programs built into isaac-ng.exe (its plain sprite and copy shaders): their sources are NUL-terminated strings
+# in its data, at these addresses in v1.7.5, each pair a vertex and a fragment shader, labelled in the order the game
+# compiles them (the labels show in the console's effect and gpu trace lines)
+BUILTIN = [('dump/000+001', 0xb3d8a0, 0xb3d670), ('dump/002+003', 0xb3d730, 0xb3da08),
+           ('dump/004+005', 0xb3d730, 0xb3dba0)]
+
+
+def builtin_sources():
+    import pefile
+    pe = pefile.PE(os.path.join(ROOT, 'game', 'isaac-ng.exe'), fast_load=True)
+    data = pe.get_memory_mapped_image()
+    base = pe.OPTIONAL_HEADER.ImageBase
+
+    def string_at(va):
+        start = va - base
+        end = data.index(b'\0', start)
+        s = data[start:end]
+        if b'void main' not in s:
+            raise SystemExit('no shader at %x in game/isaac-ng.exe: not the Repentance v1.7.5 program?' % va)
+        return s
+
+    return [(label, string_at(vs), string_at(fs)) for label, vs, fs in BUILTIN]
+
+
 def sources():
     """[(label, vs bytes, fs bytes)] for every program the game can link."""
-    progs, files = [], {}
-    for f in sorted(glob.glob(os.path.join(ROOT, 'evidence', 'packages', '*.json'))):
-        for e in json.load(open(f)).get('entries', []):
-            n = e.get('resolved_name') or ''
-            if '/shaders/' in n.lower() and n.lower().endswith(('.vs', '.fs')):
-                files[n.lower()] = os.path.join(ROOT, e['output'])
+    progs = []
+    files = archives.shader_sources()
     for n in sorted(files):
         if n.endswith('.vs') and n[:-3] + '.fs' in files:
-            progs.append((n[:-3], open(files[n], 'rb').read(), open(files[n[:-3] + '.fs'], 'rb').read()))
-    listing = os.path.join(DUMPS, 'programs.txt')
-    if os.path.exists(listing):
-        for line in open(listing):
-            ids = line.split()
-            if len(ids) == 2:
-                rd = lambda i: open(os.path.join(DUMPS, i + '.glsl'), 'rb').read()
-                progs.append(('dump/' + '+'.join(ids), rd(ids[0]), rd(ids[1])))
-    else:
-        print('note: no', os.path.relpath(listing, ROOT), '(run the game once with ISAAC360_DUMP_SHADERS=1 for the built-in shaders)')
+            progs.append((n[:-3], files[n], files[n[:-3] + '.fs']))
+    progs.extend(builtin_sources())
     unique, seen = [], set()
     for label, vs, fs in progs:
         key = (fnv64(vs), fnv64(fs))
