@@ -51,6 +51,8 @@ struct GlVkWork {
     uint64_t reused;                // textures given the image a file's earlier load had (the reload pool)
     double fillSprite, fillPlain, fillOther;   // ISAAC360_FILL_STATS: pixels the draws covered (sprites with their
                                                // effects, sprites drawn plain, the rest)
+    uint32_t pipesMade;             // pipelines made (a draw's first use of a program and state), and their ms
+    double pipeMs;
 };
 void gl_vk_work(GlVkWork* w);
 // hle_image.cpp: the next glTexImage2D given the guest buffer buf (bytes long) gets the pixels of the image file key,

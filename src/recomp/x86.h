@@ -126,6 +126,13 @@ void x86_cpuid(X86* c);
 void x86_lock(void);
 void x86_unlock(void);
 void x86_trace_enter(X86* c, uint32_t fn);         /* ISAAC360_TRACE_FUNCS builds */
+/* the PC's ISAAC360_COUNT_CALLS=1: each translated function's entries on the game's main thread (runtime.cpp);
+ * the console's translations count nothing */
+#if defined(_WIN32)
+extern int x86_counting;
+void x86_count_enter(X86* c, uint32_t fn);
+#define X86_ENTER(c, a) do { if (x86_counting) x86_count_enter(c, a); } while (0)
+#endif
 void x86_trace_leave(X86* c, uint32_t fn, uint32_t eax);
 uint32_t x86_div_check(X86* c, uint32_t eip);
 /* float -> int32 as x86 converts: out of range and NaN give 0x80000000 */
@@ -138,6 +145,19 @@ static inline uint32_t x86_fist32(double v) { return (v != v || v >= 2147483648.
 static inline uint64_t x86_fist64(double v) {
     return (v != v || v >= 9223372036854775808.0 || v < -9223372036854775808.0) ? 0x8000000000000000ull : (uint64_t)(int64_t)v;
 }
+/* a float's bits widened to a double's in integer registers (translate.py's fld m32; fstp m64 pairs): exact, NaNs made
+ * quiet as x87's load makes them; on the console a float register costs a trip through memory each way */
+static inline uint64_t x86_f2d_bits(uint32_t f) {
+    uint64_t sign = (uint64_t)(f & 0x80000000u) << 32;
+    uint32_t e = (f >> 23) & 0xffu, m = f & 0x7fffffu;
+    if (e == 0xffu) return sign | 0x7ff0000000000000ull | ((uint64_t)m << 29) | (m ? 0x0008000000000000ull : 0);
+    if (e == 0) {
+        if (!m) return sign;
+        int p = 31 - __builtin_clz(m);                 /* the highest bit: the value is 1.x * 2^(p - 149) */
+        return sign | ((uint64_t)(p - 149 + 1023) << 52) | ((uint64_t)((m << (23 - p)) & 0x7fffffu) << 29);
+    }
+    return sign | ((uint64_t)(e - 127 + 1023) << 52) | ((uint64_t)m << 29);
+}
 static inline double x86_x87_round(X86* c, double v) {
     switch ((c->fcw >> 10) & 3) { case 0: return nearbyint(v); case 1: return floor(v); case 2: return ceil(v); default: return trunc(v); }
 }
@@ -146,6 +166,18 @@ typedef void (*X86Func)(X86* c);
 typedef struct { uint32_t addr; X86Func fn; } X86FuncEntry;
 extern const X86FuncEntry x86_functions[];
 extern const uint32_t x86_function_count;
+/* An indirect call site's own cache (translate.py): the function its last target was. A virtual call site mostly
+ * calls one function, and the shared lookup (x86_call: a hash, then the table entry) took 57 ns on the console.
+ * Threads may race on a site's pointer; each value it can hold is a whole, unchanging table entry. */
+void x86_call_site(X86* c, uint32_t target, const X86FuncEntry** site);
+#if defined(_WIN32)
+#define X86_ICALL_COUNT(c) do { if (x86_counting) x86_count_icall(c); } while (0)
+void x86_count_icall(X86* c);
+#else
+#define X86_ICALL_COUNT(c) ((void)0)
+#endif
+#define X86_ICALL(c, t) do { static const X86FuncEntry* ic_; const X86FuncEntry* e_ = ic_; \
+    if (e_ && e_->addr == (t)) { X86_ICALL_COUNT(c); e_->fn(c); } else x86_call_site((c), (t), &ic_); } while (0)
 
 #ifdef __cplusplus
 }

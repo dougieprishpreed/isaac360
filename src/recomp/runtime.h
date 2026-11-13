@@ -3,6 +3,7 @@
 #ifndef ISAAC360_RECOMP_RUNTIME_H
 #define ISAAC360_RECOMP_RUNTIME_H
 #include "x86.h"
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -115,6 +116,7 @@ void recomp_profile_dump(void (*line)(const char*));   // the samples since the 
 void recomp_profile_frame(bool slow);    // ISAAC360_PROFILE=slow: a frame ended; its samples count if it was slow
 bool recomp_profile_by_room();           // ISAAC360_PROFILE=room: samples logged per room (shims_gl.cpp)
 void recomp_profile_clear();             // drops the samples since the last dump
+void recomp_count_dump(uint32_t frames, void (*line)(const char*));   // ISAAC360_COUNT_CALLS (PC): calls a frame
 void gl_room_entered(const char* name);  // the game logged "Room type.variant(name)" (shims_crt.cpp)
 void gl_game_exiting();                  // the game's exit(): the last room's line (shims_crt.cpp)
 void gl_audit_mark(const char* what);    // an audit script's mark: the frames since the last get a line (shims_gl.cpp)
@@ -125,6 +127,8 @@ void shims_thread_created(uint32_t handle);  // a guest thread's handle: a wait 
 void shims_thread_exited(uint32_t handle, uint32_t code);
 uint32_t shims_thread_exit_code(uint32_t handle);   // GetExitCodeThread: STILL_ACTIVE (259) until it returns
 void hle_image_stats(uint64_t* hits, uint64_t* misses, uint64_t* hitBytes, size_t* bytes);   // hle_image.cpp
+// the texture packer's copy of an image file's first load (gl_vk.cpp): into the image cache
+void hle_image_store(const std::string& key, const std::shared_ptr<const std::vector<uint8_t> >& packed);
 void hle_image_trim_low();                 // the console short of memory: the image cache halves
 bool recomp_is_main_cpu(X86* c);           // the game's main thread (the first guest thread)
 uint64_t shims_main_lock_enters();         // critical sections the main thread entered so far

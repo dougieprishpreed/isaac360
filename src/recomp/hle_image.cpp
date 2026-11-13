@@ -38,6 +38,7 @@ bool named(const CachedImage& img) { return img.format == 2 && img.bpp == 4 && g
 std::mutex g_lock;
 std::unordered_map<std::string, CachedImage> g_cache;
 std::unordered_map<uint32_t, std::string> g_loading;    // image -> the key its load-from-file is decoding
+std::unordered_map<std::string, CachedImage> g_pending; // decoded, waiting for the texture packer's copy
 int g_check = -1;
 uint64_t g_checked = 0, g_differ = 0;
 size_t g_bytes = 0;
@@ -167,6 +168,44 @@ extern "C" int hle_image_pixels(X86* c) {
     if ((img.format != 1 && img.format != 2) || img.bpp < 3 || img.bpp > 4) return 0;
     uint32_t buf = RD32(RD32(esp + 4)), size = (uint32_t)img.pw * img.ph * img.bpp;
     if (!buf || buf >= g_mem_size || size > g_mem_size - buf || size > budget() * 4) return 0;
+    if (named(img) && g_check > 0) {
+        // the check: this fresh decode against the copy the texture packer gave the cache (unpacked and compared)
+        std::shared_ptr<const std::vector<uint8_t> > had;
+        bool fields = false;
+        {
+            std::lock_guard<std::mutex> l(g_lock);
+            std::unordered_map<std::string, CachedImage>::iterator old = g_cache.find(key);
+            if (old != g_cache.end()) {
+                const CachedImage& o = old->second;
+                fields = o.w == img.w && o.h == img.h && o.pw == img.pw && o.ph == img.ph && o.bpp == img.bpp &&
+                         o.format == img.format;
+                had = o.packed;
+            }
+        }
+        if (had) {
+            std::vector<uint8_t> pixels(size);
+            bool same = fields && lz_decompress(&(*had)[0], had->size(), &pixels[0], size) &&
+                        !memcmp(&pixels[0], g_mem + buf, size);
+            ++g_checked;
+            if (!same && ++g_differ <= 20)
+                recomp_log("image check: %s differs from its cached copy (%ux%u, %u a pixel)", key.c_str(), img.w,
+                           img.h, img.bpp);
+            if (g_checked % 200 == 0)
+                recomp_log("image check: %llu loads compared, %llu differ", (unsigned long long)g_checked,
+                           (unsigned long long)g_differ);
+        }
+    }
+    if (named(img)) {
+        // the texture's packing (gl_vk.cpp's packer thread) packs these pixels anyway and hands the cache its copy
+        // (hle_image_store): packing them here as well took the game's thread through every first load
+        img.lastUse = gl_frame_count();
+        {
+            std::lock_guard<std::mutex> l(g_lock);
+            g_pending[key] = img;
+        }
+        gl_vk_next_pixels(buf, size, key, std::shared_ptr<const std::vector<uint8_t> >(), true);
+        return 0;
+    }
     std::shared_ptr<std::vector<uint8_t> > packed(new std::vector<uint8_t>());
     lz_compress(g_mem + buf, size, *packed);
     img.packed = packed;
@@ -194,6 +233,24 @@ extern "C" int hle_image_pixels(X86* c) {
     g_cache[key] = std::move(img);
     trim(budget());
     return 0;
+}
+
+// the texture packer's copy of a first load's pixels (gl_vk.cpp collect_packed, on the game's thread): into the cache
+void hle_image_store(const std::string& key, const std::shared_ptr<const std::vector<uint8_t> >& packed) {
+    std::lock_guard<std::mutex> l(g_lock);
+    std::unordered_map<std::string, CachedImage>::iterator p = g_pending.find(key);
+    if (p == g_pending.end()) return;
+    CachedImage img = p->second;
+    g_pending.erase(p);
+    img.packed = packed;
+    std::unordered_map<std::string, CachedImage>::iterator old = g_cache.find(key);
+    if (old != g_cache.end()) {
+        g_bytes -= old->second.packed->size();
+        g_cache.erase(old);
+    }
+    g_bytes += packed->size();
+    g_cache[key] = std::move(img);
+    trim(budget());
 }
 
 // the room lines' counts, and the cache's share of host memory

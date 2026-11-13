@@ -829,6 +829,9 @@ static void profile_thread(void*) {
 }
 
 void recomp_profile_start() {
+#if defined(_WIN32)
+    x86_counting = getenv("ISAAC360_COUNT_CALLS") && atoi(getenv("ISAAC360_COUNT_CALLS")) != 0;
+#endif
     const char* mode = getenv("ISAAC360_PROFILE");
     if (!mode) return;
     g_profileSlow = !strcmp(mode, "slow");
@@ -932,7 +935,92 @@ static std::atomic<const X86FuncEntry*> g_callCache[kCallCacheSize];
 
 static inline uint32_t call_cache_slot(uint32_t target) { return ((target >> 2) ^ (target >> 15)) & (kCallCacheSize - 1); }
 
+// ISAAC360_COUNT_CALLS=1 (PC): every translated function's entries on the main thread, and the indirect calls
+// (x86_call) and imports among them, each 600 frames as "calls" lines (recomp_count_dump): what a heavy frame
+// spends its calls on, since the console pays ~50 ns a call (ISAAC360_BENCH)
+#if defined(_WIN32)
+extern "C" int x86_counting = 0;
+#endif
+struct CallCount {
+    uint32_t fn;
+    uint32_t n;
+};
+static const uint32_t kCountSlots = 1u << 16;
+static CallCount g_callCounts[kCountSlots];
+static uint64_t g_countedCalls = 0, g_countedIndirect = 0, g_countedImports = 0;
+
+extern "C" void x86_count_enter(X86* c, uint32_t fn) {
+    if (!recomp_is_main_cpu(c)) return;
+    ++g_countedCalls;
+    uint32_t i = (fn * 2654435761u) >> 16;
+    for (uint32_t n = 0; n < kCountSlots; ++n, i = (i + 1) & (kCountSlots - 1)) {
+        if (g_callCounts[i].fn == fn) {
+            ++g_callCounts[i].n;
+            return;
+        }
+        if (!g_callCounts[i].fn) {
+            g_callCounts[i].fn = fn;
+            g_callCounts[i].n = 1;
+            return;
+        }
+    }
+}
+
+void recomp_count_dump(uint32_t frames, void (*line)(const char*)) {
+#if defined(_WIN32)
+    if (!x86_counting || !frames) return;
+    std::vector<std::pair<uint32_t, uint32_t> > top;
+    for (uint32_t i = 0; i < kCountSlots; ++i)
+        if (g_callCounts[i].fn) top.push_back(std::make_pair(g_callCounts[i].n, g_callCounts[i].fn));
+    std::sort(top.rbegin(), top.rend());
+    char buf[200];
+    snprintf(buf, sizeof(buf), "calls: %.0f a frame on the main thread (%.0f indirect, %.0f into imports), %u functions",
+             (double)g_countedCalls / frames, (double)g_countedIndirect / frames, (double)g_countedImports / frames,
+             (unsigned)top.size());
+    line(buf);
+    for (size_t i = 0; i < top.size() && i < 400; ++i) {
+        snprintf(buf, sizeof(buf), "calls: %8.1f a frame F_%x", (double)top[i].first / frames, top[i].second);
+        line(buf);
+    }
+    memset(g_callCounts, 0, sizeof(g_callCounts));
+    g_countedCalls = g_countedIndirect = g_countedImports = 0;
+#else
+    (void)frames;
+    (void)line;
+#endif
+}
+
+extern "C" void x86_count_icall(X86* c) {
+    if (recomp_is_main_cpu(c)) ++g_countedIndirect;
+}
+
+// an indirect call site's cache missed (x86.h X86_ICALL): the shared lookup, then the site remembers the entry
+extern "C" void x86_call_site(X86* c, uint32_t target, const X86FuncEntry** site) {
+    if (target >= kThunkBase && target < kThunkLimit) {
+        x86_call(c, target);                          // a shim (a GL entry point through its pointer)
+        return;
+    }
+    std::atomic<const X86FuncEntry*>& slot = g_callCache[call_cache_slot(target)];
+    const X86FuncEntry* e = slot.load(std::memory_order_relaxed);
+    if (!e || e->addr != target) {
+        e = find_function(target);
+        if (!e) recomp_fatal(c, "call to %08x, which is not a known function", target);
+        slot.store(e, std::memory_order_relaxed);
+    }
+    *site = e;
+#if defined(_WIN32)
+    if (x86_counting) x86_count_icall(c);
+#endif
+    e->fn(c);
+}
+
 void x86_call(X86* c, uint32_t target) {
+#if defined(_WIN32)
+    if (x86_counting && recomp_is_main_cpu(c)) {
+        ++g_countedIndirect;
+        if (target >= kThunkBase && target < kThunkLimit) ++g_countedImports;
+    }
+#endif
     if (target >= kThunkBase && target < kThunkLimit) {
         call_thunk(c, target);
         return;
@@ -978,6 +1066,16 @@ static BENCH_NOINLINE void bench_callee_lean(X86* c) {
     c->r[0] = eax;
 }
 static BENCH_NOINLINE void bench_nothing(X86* c) { (void)c; }
+// the same callee as translate.py's direct calls now make it (FAST): ecx and esp in, eax and esp back as one value,
+// every register still written to the CPU state at its exit
+static BENCH_NOINLINE uint64_t bench_callee_fast(X86* c, uint32_t ecx, uint32_t esp) {
+    uint32_t eax = RD32(esp + 4) + ecx;
+    esp += 4;
+    c->r[0] = eax;
+    c->r[1] = ecx;
+    c->r[4] = esp;
+    return ((uint64_t)esp << 32) | eax;
+}
 
 typedef std::chrono::steady_clock BenchClock;
 static double bench_ns(BenchClock::time_point t0, uint32_t n) {
@@ -1012,10 +1110,20 @@ void recomp_bench(X86* c) {
         double lean = bench_ns(t0, n);
         sink += ecx;
         t0 = BenchClock::now();
+        for (uint32_t i = 0; i < n; ++i) {
+            esp -= 4; WR32(esp, 0x401000u + i); WR32(esp + 4, i);
+            c->r[4] = esp; c->r[1] = ecx;
+            uint64_t r = bench_callee_fast(c, ecx, esp);
+            eax = (uint32_t)r; esp = (uint32_t)(r >> 32);
+            ecx += eax;
+        }
+        double fast = bench_ns(t0, n);
+        sink += ecx;
+        t0 = BenchClock::now();
         for (uint32_t i = 0; i < n; ++i) bench_nothing(c);
         double bare = bench_ns(t0, n);
-        recomp_log("bench: a translated call %.1f ns, spilling only what it uses %.1f ns, a bare host call %.1f ns",
-                   full, lean, bare);
+        recomp_log("bench: a translated call %.1f ns, spilling only what it uses %.1f ns, with ecx and esp passed and "
+                   "eax and esp returned %.1f ns, a bare host call %.1f ns", full, lean, fast, bare);
     }
     {   // the guest stack: a push read back at once, and a store and a load of different words
         uint32_t esp = base + 0x1000, v = 0;
@@ -1060,6 +1168,59 @@ void recomp_bench(X86* c) {
         }
         double fl = bench_ns(t0, n);
         recomp_log("bench: a float loaded from guest memory, added to and stored back %.1f ns", fl);
+        // translated forms, old and new, over different words (no guest store read back): movss xmm0,[a];
+        // addss xmm0,[b]; movss [d],xmm0, and a copy (movss in, movss out), with the XMM register in the CPU state
+        // (as translated before boot 21) and in a local (xmm_flow); and the x87 copy fld [a]; fstp [d] as the x87
+        // stack in the CPU state and as translate.py's pairs make it (one integer copy)
+        const uint32_t a = base + 0x1900, b = base + 0x1904, dd = base + 0x1908;
+        WR32(a, 0x3f800000u);
+        WR32(b, 0x3f000000u);
+        X86Xmm* xs = &c->x[0];
+        t0 = BenchClock::now();
+        for (uint32_t i = 0; i < n; ++i) {
+            X86Xmm* d_ = xs; d_->u[X32(0)] = RD32(a); d_->u[X32(1)] = d_->u[X32(2)] = d_->u[X32(3)] = 0;
+            { X86Xmm s_; s_.u[X32(0)] = RD32(b); xs->f[X32(0)] = xs->f[X32(0)] + s_.f[X32(0)]; }
+            WR32(dd, xs->u[X32(0)]);
+        }
+        double addOld = bench_ns(t0, n);
+        X86Xmm x0;
+        memset(&x0, 0, sizeof(x0));
+        t0 = BenchClock::now();
+        for (uint32_t i = 0; i < n; ++i) {
+            X86Xmm* d_ = &x0; d_->u[X32(0)] = RD32(a); d_->u[X32(1)] = d_->u[X32(2)] = d_->u[X32(3)] = 0;
+            { X86Xmm s_; s_.u[X32(0)] = RD32(b); x0.f[X32(0)] = x0.f[X32(0)] + s_.f[X32(0)]; }
+            WR32(dd, x0.u[X32(0)]);
+        }
+        double addNew = bench_ns(t0, n);
+        t0 = BenchClock::now();
+        for (uint32_t i = 0; i < n; ++i) {
+            X86Xmm* d_ = xs; d_->u[X32(0)] = RD32(a + (i & 4)); d_->u[X32(1)] = d_->u[X32(2)] = d_->u[X32(3)] = 0;
+            WR32(dd, xs->u[X32(0)]);
+        }
+        double copyOld = bench_ns(t0, n);
+        t0 = BenchClock::now();
+        for (uint32_t i = 0; i < n; ++i) {
+            X86Xmm* d_ = &x0; d_->u[X32(0)] = RD32(a + (i & 4)); d_->u[X32(1)] = d_->u[X32(2)] = d_->u[X32(3)] = 0;
+            WR32(dd, x0.u[X32(0)]);
+        }
+        double copyNew = bench_ns(t0, n);
+        t0 = BenchClock::now();
+        for (uint32_t i = 0; i < n; ++i) {
+            X87_PUSH(c, RDF(a + (i & 4)));
+            WRF(dd, (float)ST(0));
+            X87_POP(c);
+        }
+        double x87Old = bench_ns(t0, n);
+        t0 = BenchClock::now();
+        for (uint32_t i = 0; i < n; ++i) {
+            uint64_t xf_ = RD32(a + (i & 4));
+            WR32(dd, (uint32_t)xf_);
+        }
+        double x87New = bench_ns(t0, n);
+        sink += x0.u[0] + RD32(dd);
+        recomp_log("bench: movss, addss, movss %.1f ns with the XMM register in the CPU state, %.1f in a local; a float "
+                   "copy %.1f and %.1f; an x87 float copy %.1f through its stack, %.1f as one integer copy", addOld,
+                   addNew, copyOld, copyNew, x87Old, x87New);
     }
     shims_bench_locks(c, base + 0x100);
     memset(g_mem + base, 0, top - base);

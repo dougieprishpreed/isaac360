@@ -1024,9 +1024,25 @@ VkBlendFactor blend_factor(uint32_t f) {
 
 VkCompareOp compare_op(uint32_t f) { return (VkCompareOp)(f - 0x0200); }   // GL_NEVER.. and VK_COMPARE_OP_NEVER.. agree
 
+uint32_t g_pipesMade = 0;
+double g_pipeMs = 0;                                // making pipelines (slow frame lines)
+
 VkPipeline pipeline(const PipeKey& k, Program& p) {
+    // the last draw's key first: runs of sprites share one (a map search with a 60-byte key compare at each step)
+    static PipeKey lastKey;
+    static VkPipeline lastPipe = VK_NULL_HANDLE;
+    if (lastPipe && !memcmp(&k, &lastKey, sizeof(k))) return lastPipe;
     std::map<PipeKey, VkPipeline>::iterator it = g_pipelines.find(k);
-    if (it != g_pipelines.end()) return it->second;
+    if (it != g_pipelines.end()) {
+        lastKey = k;
+        lastPipe = it->second;
+        return it->second;
+    }
+    ++g_pipesMade;
+    struct Timed {
+        WaitClock::time_point t0;
+        ~Timed() { g_pipeMs += since(t0); }
+    } timed = {WaitClock::now()};
     VkPipelineShaderStageCreateInfo stages[2];
     memset(stages, 0, sizeof(stages));
     for (int i = 0; i < 2; ++i) {
@@ -1622,10 +1638,11 @@ struct PackJob {
     uint32_t name, gen;
     std::shared_ptr<std::vector<uint8_t> > raw;
     std::vector<uint8_t> lz;
+    std::string key;            // an image file's first load: the image cache gets a copy (hle_image_store)
 };
 enum { PACK_HELD = 16 << 20 };
 std::mutex g_packLock;
-std::condition_variable g_packWake;
+std::condition_variable g_packWake, g_packDoneWake;     // a job queued; a job done
 std::deque<PackJob> g_packQueue, g_packDone;
 bool g_packerStarted = false;
 uint32_t g_packGen = 0;
@@ -1673,21 +1690,27 @@ void packer_thread(void*) {
         l.lock();
         g_packDone.push_back(PackJob());
         std::swap(g_packDone.back(), job);
+        g_packDoneWake.notify_all();
     }
 }
 
 void collect_packed();
 
-void pack_later(uint32_t name, Texture& t, std::vector<uint8_t>& rgba) {
+// Past PACK_HELD the game's thread waits for the packer to catch up rather than packing itself: the packer runs on
+// another hardware thread beside the game's loading, where packing on the game's thread added every byte of a new
+// run's ~90 MB to that one frame (boot 20: 178 ms of glTexImage2D in the new run's 2.4 s frame).
+void pack_later(uint32_t name, Texture& t, std::vector<uint8_t>& rgba, const std::string& key = std::string()) {
     collect_packed();
     t.gen = ++g_packGen;
-    if (g_packHeld + rgba.size() > PACK_HELD) {
-        log_once("gl_vk: the packer holds %u MB; uploads pack on the game's thread until it catches up",
-                 (unsigned)(g_packHeld >> 20));
-        lz_compress(&rgba[0], rgba.size(), t.lz);
-        t.packed = (uint32_t)t.lz.size();
-        g_packedBytes += t.lz.size();
-        return;
+    if (g_packHeld + rgba.size() > PACK_HELD && g_packerStarted) {
+        log_once("gl_vk: the packer holds %u MB; uploads wait for it", (unsigned)(g_packHeld >> 20));
+        while (g_packHeld && g_packHeld + rgba.size() > PACK_HELD) {
+            {
+                std::unique_lock<std::mutex> l(g_packLock);
+                if (g_packDone.empty()) g_packDoneWake.wait_for(l, std::chrono::milliseconds(50));
+            }
+            collect_packed();
+        }
     }
     t.raw.reset(new std::vector<uint8_t>());
     t.raw->swap(rgba);
@@ -1702,6 +1725,7 @@ void pack_later(uint32_t name, Texture& t, std::vector<uint8_t>& rgba) {
     g_packQueue.back().name = name;
     g_packQueue.back().gen = t.gen;
     g_packQueue.back().raw = t.raw;
+    g_packQueue.back().key = key;
     g_packWake.notify_one();
 }
 
@@ -1714,6 +1738,8 @@ void collect_packed() {
     }
     for (size_t i = 0; i < done.size(); ++i) {
         g_packHeld -= done[i].raw->size();
+        if (!done[i].key.empty())                       // a first load: the image cache's copy
+            hle_image_store(done[i].key, std::make_shared<const std::vector<uint8_t> >(done[i].lz));
         std::map<uint32_t, Texture>::iterator it = g_textures.find(done[i].name);
         if (it == g_textures.end() || !it->second.raw || it->second.gen != done[i].gen) continue;
         Texture& t = it->second;
@@ -1821,7 +1847,7 @@ bool take_named(uint32_t name, Texture& t, uint32_t pixels, uint32_t format, uin
     g_next.buf = 0;
     g_next.packed.reset();
     if (next.frame != gl_frame_count() || format != GL_RGBA || type != GL_UNSIGNED_BYTE || t.target ||
-        (uint64_t)w * h * 4 != next.bytes || !next.packed || !g_lazyTextures) {
+        (uint64_t)w * h * 4 != next.bytes || (!next.packed && !next.filled) || !g_lazyTextures) {
         log_once("gl_vk: a named image went the usual way (%dx%d, format 0x%x, %u bytes named)", w, h, format,
                  next.bytes);
         if (!next.filled && next.packed && pixels < g_mem_size && next.bytes <= g_mem_size - pixels &&
@@ -1842,9 +1868,19 @@ bool take_named(uint32_t name, Texture& t, uint32_t pixels, uint32_t format, uin
         // ISAAC360_POOL_CHECK=1: the image's packed pixels against this load's (logged when they differ)
         static const bool check = getenv("ISAAC360_POOL_CHECK") != 0;
         if (check) {
+            // against this load's packed copy, or (a first load) its pixels in the guest buffer
             static uint64_t checked = 0, differ = 0;
+            bool same;
+            if (next.packed) {
+                same = it->second.lz == *next.packed;
+            } else {
+                std::vector<uint8_t> px(next.bytes);
+                same = pixels < g_mem_size && next.bytes <= g_mem_size - pixels &&
+                       lz_decompress(&it->second.lz[0], it->second.lz.size(), &px[0], px.size()) &&
+                       !memcmp(&px[0], g_mem + pixels, px.size());
+            }
             ++checked;
-            if (it->second.lz != *next.packed && ++differ <= 20)
+            if (!same && ++differ <= 20)
                 recomp_log("pool check: %s differs from its kept image's pixels", next.key.c_str());
             if (checked % 100 == 0)
                 recomp_log("pool check: %llu reuses compared, %llu differ", (unsigned long long)checked,
@@ -1857,6 +1893,14 @@ bool take_named(uint32_t name, Texture& t, uint32_t pixels, uint32_t format, uin
         g_poolBytes -= t.img.bytes;
         g_reloadPool.erase(it);
         ++g_poolReused;
+        if (!next.packed) hle_image_store(next.key, std::make_shared<const std::vector<uint8_t> >(t.lz));
+        return true;
+    }
+    if (!next.packed) {
+        // a first load: packed on the packer's thread like any upload, which hands the image cache its copy
+        if (pixels >= g_mem_size || next.bytes > g_mem_size - pixels) return false;
+        std::vector<uint8_t> rgba(g_mem + pixels, g_mem + pixels + next.bytes);
+        pack_later(name, t, rgba, next.key);
         return true;
     }
     t.lz.assign(next.packed->begin(), next.packed->end());
@@ -2189,7 +2233,14 @@ void add_fill(const Program& p, uint32_t lo, int count, bool plain) {
 
 void draw(uint32_t mode, int count, uint32_t indexType, uint32_t indices, int first, bool indexed) {
     if (count <= 0 || !g_program) return;
-    Program& p = g_programs[g_program];
+    // the program in use, found once each time it changes (map nodes stay where they are)
+    static uint32_t lastName = 0;
+    static Program* lastProgram = 0;
+    if (g_program != lastName || !lastProgram) {
+        lastProgram = &g_programs[g_program];
+        lastName = g_program;
+    }
+    Program& p = *lastProgram;
     if (!p.linked) return;
     if (!g_alphaTest || g_alphaFunc != GL_GREATER || g_alphaRef != 0.0f)
         log_once("alpha test %s func 0x%x ref %g differs from the converted shaders' GREATER 0", g_alphaTest ? "on" : "off",
@@ -2239,31 +2290,47 @@ void draw(uint32_t mode, int count, uint32_t indexType, uint32_t indices, int fi
     if (!ensure_pass(false, false)) return;
     f = &g_frames[g_frame];
     // vertices, packed in the program's attribute order; a program with a plain twin learns on the way whether
-    // every vertex has its effects off (Program::plainAt)
-    float* out = (float*)(f->vertices.map + f->vOff);
+    // every vertex has its effects off (Program::plainAt). Float attributes (all of the game's) are copied as bits:
+    // a byte-swapped load into a float register goes through memory on the console's PowerPC, a ~40-cycle stall for
+    // each of a sprite vertex's 22 floats.
+    uint32_t* out = (uint32_t*)(f->vertices.map + f->vOff);
     bool plain = p.fsPlain != VK_NULL_HANDLE;
     for (uint32_t v = 0; v < nverts; ++v) {
         for (size_t a = 0; a < p.attrs.size(); ++a) {
             const Attr& at = p.attrs[a];
             const VertexArray& va = g_va[at.loc];
-            float val[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+            uint32_t bits[4] = {0, 0, 0, 0x3f800000u};           // 0, 0, 0, 1
             if (va.enabled) {
                 int stride = va.stride ? va.stride : va.size * type_bytes(va.type);
                 uint32_t base = va.ptr + (lo + v) * (uint32_t)stride;
-                for (int c = 0; c < va.size && c < 4; ++c) val[c] = attr_component(va, base, c);
+                if (va.type == GL_FLOAT) {
+                    for (int c = 0; c < va.size && c < 4; ++c) bits[c] = RD32(base + 4 * c);
+                } else {
+                    for (int c = 0; c < va.size && c < 4; ++c) {
+                        float fv = attr_component(va, base, c);
+                        memcpy(&bits[c], &fv, 4);
+                    }
+                }
             }
             if (plain) {
+                // on the bits: +-0 is zero; at most 0 is a zero or a negative number (not a NaN)
+                #define Z_(b) (((b) & 0x7fffffffu) == 0)
+                #define NP_(b) (Z_(b) || ((int32_t)(b) < 0 && ((b) & 0x7fffffffu) <= 0x7f800000u))
                 int ai = (int)a;
-                if (ai == p.plainAt[0]) plain = val[3] == 0.0f;                                   // ColorizeIn.a
-                else if (ai == p.plainAt[1]) plain = val[0] == 0.0f && val[1] == 0.0f && val[2] == 0.0f;   // offset
-                else if (ai == p.plainAt[2]) plain = val[0] <= 0.0f;                              // pixelation
-                else if (ai == p.plainAt[3]) plain = val[0] == 0.0f && val[1] == 0.0f && val[2] <= 0.0f;   // clip
+                if (ai == p.plainAt[0]) plain = Z_(bits[3]);                                      // ColorizeIn.a
+                else if (ai == p.plainAt[1]) plain = Z_(bits[0]) && Z_(bits[1]) && Z_(bits[2]);   // ColorOffsetIn
+                else if (ai == p.plainAt[2]) plain = NP_(bits[0]);                                // PixelationAmount
+                else if (ai == p.plainAt[3]) plain = Z_(bits[0]) && Z_(bits[1]) && NP_(bits[2]);  // ClipPlane
+                #undef Z_
+                #undef NP_
             }
-            for (int c = 0; c < at.comps; ++c) *out++ = val[c];
+            for (int c = 0; c < at.comps; ++c) *out++ = bits[c];
             if (g_stats && a == 0) {
                 ProgramStats& st = g_programStats[p.desc->label];
-                if (val[2] < st.zmin) st.zmin = val[2];
-                if (val[2] > st.zmax) st.zmax = val[2];
+                float z;
+                memcpy(&z, &bits[2], 4);
+                if (z < st.zmin) st.zmin = z;
+                if (z > st.zmax) st.zmax = z;
             }
         }
     }
@@ -3430,6 +3497,8 @@ void gl_vk_work(GlVkWork* w) {
     w->fillSprite = g_fillSprite;
     w->fillPlain = g_fillPlain;
     w->fillOther = g_fillOther;
+    w->pipesMade = g_pipesMade;
+    w->pipeMs = g_pipeMs;
 }
 
 void gl_vk_next_pixels(uint32_t buf, uint32_t bytes, const std::string& key,

@@ -377,6 +377,8 @@ struct AuditWindow {
     uint32_t over3, over6;                          // frames of game work over 2.8 and 5.6 ms
     double fillSprite, fillPlain, fillOther, fillMax;   // pixels; fillMax: the most sprite pixels in a frame
     uint32_t fillMaxFrame;
+    uint32_t pipes;                                 // pipelines made, and their ms
+    double pipeMs;
     GlVkWork last;
 };
 static AuditWindow g_audit;
@@ -387,10 +389,10 @@ static void log_audit() {
     AuditWindow& a = g_audit;
     recomp_log("audit %s: %u frames; game work %.2f ms a frame, worst %.2f (frame %u), %u over 2.8 ms, %u over 5.6; the "
                "GPU's %.2f, worst %.2f (frame %u); fill %.2f + %.2f plain + %.2f other Mpx a frame, sprites (both) at "
-               "most %.2f (frame %u)", a.what.c_str(), a.frames, a.work / a.frames, a.workMax, a.workMaxFrame,
-               a.over3, a.over6, a.gpuFrames ? a.gpu / a.gpuFrames : 0.0, a.gpuMax, a.gpuMaxFrame,
-               a.fillSprite / a.frames / 1e6, a.fillPlain / a.frames / 1e6, a.fillOther / a.frames / 1e6, a.fillMax / 1e6,
-               a.fillMaxFrame);
+               "most %.2f (frame %u); %u pipelines made in %.1f ms", a.what.c_str(), a.frames, a.work / a.frames,
+               a.workMax, a.workMaxFrame, a.over3, a.over6, a.gpuFrames ? a.gpu / a.gpuFrames : 0.0, a.gpuMax,
+               a.gpuMaxFrame, a.fillSprite / a.frames / 1e6, a.fillPlain / a.frames / 1e6, a.fillOther / a.frames / 1e6,
+               a.fillMax / 1e6, a.fillMaxFrame, a.pipes, a.pipeMs);
 }
 
 void gl_audit_mark(const char* what) {
@@ -417,6 +419,8 @@ static void audit_frame(double work) {
     if (!gl_vk_enabled()) return;
     GlVkWork w;
     gl_vk_work(&w);
+    a.pipes += w.pipesMade - a.last.pipesMade;
+    a.pipeMs += w.pipeMs - a.last.pipeMs;
     double sprite = w.fillSprite - a.last.fillSprite, plainFill = w.fillPlain - a.last.fillPlain;
     a.fillSprite += sprite;
     a.fillPlain += plainFill;
@@ -521,12 +525,14 @@ static void log_slow_frame(double game, double present) {
         recomp_log("slow frame %u: game %.1f ms, present %.1f; read %llu KB (%llu KB from the drive in %.1f ms), %u images "
                    "made (%llu as an earlier load left them), %llu KB uploaded; textures %.1f ms for %llu KB, packed images "
                    "%.1f; waited for the GPU %.1f, read-backs %.1f, locks %.1f ms; the game's ANM2 loading %u ms, entity "
-                   "spawns %u ms", g_frames, game, present, (unsigned long long)((bytes - lastBytes) >> 10),
+                   "spawns %u ms; %u pipelines made in %.1f ms", g_frames, game, present,
+                   (unsigned long long)((bytes - lastBytes) >> 10),
                    (unsigned long long)((disk - lastDiskBytes) >> 10), diskMs - lastDisk, w.imagesMade - last.imagesMade,
                    (unsigned long long)(w.reused - last.reused), (unsigned long long)((w.uploaded - last.uploaded) >> 10),
                    w.texMs - last.texMs, (unsigned long long)((w.texBytes - last.texBytes) >> 10),
                    w.materializeMs - last.materializeMs, w.waitFence - last.waitFence, w.waitIdle - last.waitIdle,
-                   locks - lastLocks, anm2 - lastAnm2, spawn - lastSpawn);
+                   locks - lastLocks, anm2 - lastAnm2, spawn - lastSpawn, w.pipesMade - last.pipesMade,
+                   w.pipeMs - last.pipeMs);
     }
     lastAnm2 = anm2;
     lastSpawn = spawn;
@@ -630,6 +636,7 @@ void gl_present() {
         if (!g_glCounts.empty()) gl_write_counts();
         if (gl_vk_enabled()) gl_vk_write_stats();
         if (g_frames % 600 == 0) {
+            recomp_count_dump(600, log_line);
             log_times();
             if (!recomp_profile_by_room()) recomp_profile_dump(log_line);
             static bool profiling = getenv("ISAAC360_PROFILE") != 0;

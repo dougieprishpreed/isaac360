@@ -35,6 +35,13 @@ SUFFIX = ('_' + TAG) if TAG else ''
 # call is stale, so only full saves show what the register really holds).
 REGCHECK = os.environ.get('ISAAC360_REGCHECK', '')
 POISON, PRESERVE = REGCHECK == '1', REGCHECK == '2'
+# Direct calls (fast_note): each function F_x also has F_x_f(c, ecx, esp), which returns eax and esp in one 64-bit
+# value. A call passed everything through the CPU state, and the callee read back ecx (this) and esp (its arguments)
+# right after the caller stored them, then the caller eax and esp right after the callee stored them: four ~40-cycle
+# stalls on the console (a translated call 49.5 ns, ISAAC360_BENCH), ~25,000 calls a heavy frame. F_x(c), for indirect
+# calls and the function table, calls F_x_f with the CPU state's ecx and esp; every exit still writes all eight
+# registers to the CPU state. Off in the register check builds and with ISAAC360_FAST_CALLS=0.
+FAST = not (POISON or PRESERVE) and os.environ.get('ISAAC360_FAST_CALLS', '1') != '0'
 TRACE = set(int(x, 16) for x in os.environ.get('ISAAC360_TRACE_FUNCS', '').split(',') if x)
 
 # Instructions of isaac-ng.exe replaced by other C (the exe only, TAG ''): address -> code.
@@ -240,6 +247,128 @@ class Fn:
                     changed = True
         self.live_out = live_out
 
+    # ------------------------------------------------------------------ SSE registers in locals
+    # The XMM registers live in the CPU state (c->x), which every guest store (a memcpy into guest memory, to the
+    # compiler a write that may reach anything) and every call make the compiler reload, and whose int and float
+    # views of one lane pass through memory: on the console each such reload right after a store stalls ~40 cycles
+    # (a float loaded, added to and stored back: 52.8 ns, ISAAC360_BENCH). A heavy room's frame runs ~650,000 float
+    # instructions with a memory operand (boot 20's Caves room, ISAAC360_COUNT_CALLS). So each function keeps the
+    # XMM registers it uses in locals x_N: loaded on entry where read before written, stored to c->x before every
+    # call, tail call and return where it writes them anywhere, and reloaded after a call where read before written
+    # again. The compiler then keeps them in registers, a float copy (most of them) as an integer load and store.
+    # A register written on some paths but not read before on any starts as zero: x86 calls leave the XMM registers
+    # undefined, so nothing reads one a callee did not set (a function passing a callee's xmm0 on reloads it).
+    def xmm_flow(self):
+        rd, kill = {}, {}
+        written = 0
+        used = 0
+        info = ix.InstructionInfoFactory()
+        reads = (ix.OpAccess.READ, ix.OpAccess.COND_READ, ix.OpAccess.READ_WRITE, ix.OpAccess.READ_COND_WRITE)
+        writes = (ix.OpAccess.WRITE, ix.OpAccess.COND_WRITE, ix.OpAccess.READ_WRITE, ix.OpAccess.READ_COND_WRITE)
+        for va, ins in self.insns.items():
+            r = k = 0
+            if ins is not None:
+                for u in info.info(ins).used_registers():
+                    n = XMM.get(u.register)
+                    if n is None:
+                        continue
+                    used |= 1 << n
+                    if u.access in reads:
+                        r |= 1 << n
+                    if u.access in writes:
+                        written |= 1 << n
+                    if u.access == ix.OpAccess.WRITE:
+                        k |= 1 << n
+            rd[va], kill[va] = r, k
+        self.xused, self.xwritten = used, written
+        live_in = {va: 0 for va in self.insns}
+        live_out = {va: 0 for va in self.insns}
+        exits = set()
+        for va, ins in self.insns.items():
+            if ins is None:
+                continue
+            succ = self.succ.get(va, [])
+            if any(isinstance(s, tuple) for s in succ) or ins.flow_control in (FC.RETURN, FC.INDIRECT_BRANCH) and \
+                    not self.tr.jump_tables.get(va) or (ins.flow_control == FC.UNCONDITIONAL_BRANCH and not succ):
+                exits.add(va)
+        changed = True
+        order = sorted(self.insns, reverse=True)
+        while changed:
+            changed = False
+            for va in order:
+                ins = self.insns[va]
+                out = 0
+                for s in self.succ.get(va, []):
+                    if not isinstance(s, tuple):
+                        out |= live_in.get(s, 0)
+                if va in exits:
+                    out |= written                             # stored to the CPU state there
+                if ins is not None and ins.flow_control in (FC.CALL, FC.INDIRECT_CALL):
+                    new_in = rd[va]                            # its stores and reloads stand between
+                else:
+                    new_in = rd[va] | (out & ~kill[va])
+                if out != live_out[va] or new_in != live_in[va]:
+                    live_out[va], live_in[va] = out, new_in
+                    changed = True
+        self.xlive_out = live_out
+        self.xentry = live_in.get(self.start, 0)
+
+    # x87 float copies: MSVC copies floats with fld m32; fstp m32 and widens them with fld m32; fstp m64 (an
+    # argument for a double function), and the hottest functions of a heavy room do ~130,000 a frame (boot 20's Caves
+    # room: F_7b7740). Translated one by one they go through the x87 stack in the CPU state (c->top, c->st) and a
+    # float register: a byte-swapped load into a float register, a store and reload of the stack slot and of top, and
+    # back, each a ~40-cycle stall on the console. A fld from memory whose fstp to memory follows in the same straight
+    # line (no x87 instruction, call, branch or label between) becomes one integer copy, or an integer float to double
+    # widening (exact; a signalling NaN comes out quiet, as x87's load makes it). The value is read at the fld.
+    def find_x87_pairs(self):
+        self.x87load, self.x87store = {}, {}
+        for va in self.order:
+            ins = self.insns[va]
+            if ins is None or ins.mnemonic != M.FLD or ins.op_count < 1 or ins.op0_kind != OK.MEMORY:
+                continue
+            n = MEMSIZE.get(ins.memory_size)
+            if n not in (4, 8):
+                continue
+            cur, steps = va, 0
+            while steps < 12:
+                steps += 1
+                nxt = cur + self.insns[cur].len
+                if self.succ.get(cur) != [nxt] or nxt in self.labels or nxt == self.start:
+                    break
+                nins = self.insns.get(nxt)
+                if nins is None:
+                    break
+                nn = MNAME[nins.mnemonic]
+                if nins.mnemonic == M.FSTP and nins.op_count >= 1 and nins.op0_kind == OK.MEMORY:
+                    m = MEMSIZE.get(nins.memory_size)
+                    if (n, m) in ((4, 4), (8, 8), (4, 8)):
+                        self.x87load[va] = n
+                        self.x87store[nxt] = (n, m)
+                    break
+                if nn.startswith('F') or nins.mnemonic == M.WAIT or nins.flow_control != FC.NEXT:
+                    break
+                cur = nxt
+
+    def xspill(self):
+        """Before a call, tail call or return: the XMM registers this function writes, to the CPU state."""
+        return ''.join('c->x[%d]=x_%d;' % (n, n) for n in range(8) if self.xwritten >> n & 1)
+
+    def xfill(self, va):
+        """After the call at va: the XMM registers read again before written, from the CPU state."""
+        live = self.xlive_out.get(va, 0) & self.xused
+        return ''.join('x_%d=c->x[%d];' % (n, n) for n in range(8) if live >> n & 1)
+
+    def xdecls(self):
+        out = ['uint64_t xf_=0;'] if self.x87load else []
+        for n in range(8):
+            if not self.xused >> n & 1:
+                continue
+            if self.xentry >> n & 1:
+                out.append('X86Xmm x_%d=c->x[%d];' % (n, n))
+            else:
+                out.append('X86Xmm x_%d;x_%d.q[0]=0;x_%d.q[1]=0;' % (n, n, n))
+        return ''.join(out)
+
     # ------------------------------------------------------------------ operands
     def ea(self, ins):
         parts = []
@@ -331,7 +460,7 @@ class Fn:
         r = ins.op_register(i)
         if r not in XMM:
             raise Unhandled('xmm ' + RNAME.get(r, '?'))
-        return 'c->x[%d]' % XMM[r]
+        return 'x_%d' % XMM[r]                         # a local (xmm_flow)
 
     # ------------------------------------------------------------------ flags helpers
     def flags_logic(self, r, n, need):
@@ -379,9 +508,49 @@ class Fn:
         name = self.tr.func_name(target)
         site = self.site(va)
         if name is None:
-            return 'esp-=4;WR32(esp,0x%xu);%sx86_call(c,0x%xu);%s' % (ret, spill_of(site, True), target,
-                                                                      fill_of(site, va))
-        return 'esp-=4;WR32(esp,0x%xu);%s%s(c);%s' % (ret, spill_of(site, True), name, fill_of(site, va))
+            return 'esp-=4;WR32(esp,0x%xu);%s%sx86_call(c,0x%xu);%s%s' % (ret, spill_of(site, True), self.xspill(),
+                                                                          target, fill_of(site, va), self.xfill(va))
+        if FAST:
+            # ecx and esp in, eax and esp back in a 64-bit value (fast_note); the rest as before through c->r
+            if site is None:
+                fill = 'FILL();'
+            else:
+                fill = ''.join('%s=c->r[%d];' % (NAMES8[i], i) for i in range(8)
+                               if site[2] >> i & 1 and i not in (0, 4))
+                fill = ('eax=(uint32_t)r_;' if site[2] & 1 else '') + 'esp=(uint32_t)(r_>>32);' + fill
+            return 'esp-=4;WR32(esp,0x%xu);%s%s{uint64_t r_=%s_f(c,ecx,esp);%s}%s' % (
+                ret, spill_of(site, True), self.xspill(), name, fill, self.xfill(va))
+        return 'esp-=4;WR32(esp,0x%xu);%s%s%s(c);%s%s' % (ret, spill_of(site, True), self.xspill(), name,
+                                                          fill_of(site, va), self.xfill(va))
+
+    def exit_regs(self):
+        """FAST: the registers a return writes to the CPU state: its own changes, its callees' (whose returns wrote
+        them there, so a register this function saved and restored around such a call must go back), the indirect
+        conventions' eax, ecx and edx when it calls through a pointer or an import, and esp; None: all eight (an opaque
+        function). The others hold there what they held at entry, so the function never reads them back, where every
+        call's entry read the eight registers the previous call's return had just written (a ~40-cycle stall each on
+        the console)."""
+        return self.tr.exit_mask(self.start)
+
+    def ret_locals(self):
+        """A return from this function with its locals (FAST: eax and esp as the value; eax as 0 where the function
+        leaves it as it was, which its direct callers then do not read, so it is never read back from the CPU state)."""
+        if not FAST:
+            return 'return;'
+        m = self.exit_regs()
+        return 'return X86_RV(%s,esp);' % ('eax' if m is None or m & 1 else '0')
+
+    def tail_fast(self, n, target):
+        """FAST: a direct tail call's return: eax from the tail callee where it sets it, else this function's own."""
+        m, mt = self.exit_regs(), self.tr.exit_mask(target)
+        if mt is None or mt & 1:
+            return 'return %s_f(c,ecx,esp);' % n
+        mine = 'eax' if m is None or m & 1 else '0'
+        return '{uint64_t r_=%s_f(c,ecx,esp);return X86_RV(%s,(uint32_t)(r_>>32));}' % (n, mine)
+
+    def ret_cpu(self):
+        """A return after a call that left the registers in the CPU state (an indirect or import tail call)."""
+        return 'return X86_CRV(c);' if FAST else 'return;'
 
     def translate_insn(self, va, ins, nxt_va):
         tr = self.tr
@@ -400,7 +569,11 @@ class Fn:
         if mn == M.RET:
             pop = ins.immediate16 if ins.op_count else 0
             trace = 'x86_trace_leave(c,0x%xu,eax);' % self.start if self.start in TRACE else ''
-            E('%sesp+=%d;%s%sreturn;' % (self.regcheck(va), 4 + pop, spill_of(self.site(va)), trace))
+            spill = spill_of(self.site(va))
+            m = self.exit_regs() if FAST else None
+            if m is not None:
+                spill = ''.join('c->r[%d]=%s;' % (i, NAMES8[i]) for i in range(8) if m >> i & 1)
+            E('%sesp+=%d;%s%s%s%s' % (self.regcheck(va), 4 + pop, spill, self.xspill(), trace, self.ret_locals()))
             return
         if mn == M.CALL:
             if ins.op0_kind in (OK.NEAR_BRANCH32, OK.NEAR_BRANCH16):
@@ -411,13 +584,14 @@ class Fn:
                 slot = ins.memory_displacement & 0xffffffff
                 if slot in tr.imports:
                     site = self.site(va)
-                    E('esp-=4;WR32(esp,0x%xu);%sx86_import(c,0x%xu);%s /* %s */' % (
-                        ret, spill_of(site, True), slot, fill_of(site, va), tr.imports[slot]))
+                    E('esp-=4;WR32(esp,0x%xu);%s%sx86_import(c,0x%xu);%s%s /* %s */' % (
+                        ret, spill_of(site, True), self.xspill(), slot, fill_of(site, va), self.xfill(va),
+                        tr.imports[slot]))
                     return
             tgt = self.get(ins, 0, 4)
             site = self.site(va)
-            E('{uint32_t t_=%s;esp-=4;WR32(esp,0x%xu);%sx86_call(c,t_);%s}' % (tgt, ret, spill_of(site, True),
-                                                                              fill_of(site, va)))
+            E('{uint32_t t_=%s;esp-=4;WR32(esp,0x%xu);%s%sX86_ICALL(c,t_);%s%s}' % (
+                tgt, ret, spill_of(site, True), self.xspill(), fill_of(site, va), self.xfill(va)))
             return
         if ins.flow_control == FC.CONDITIONAL_BRANCH:
             t = ins.near_branch_target
@@ -437,8 +611,12 @@ class Fn:
                 s = self.succ[va][0]
                 if isinstance(s, tuple):
                     n = tr.func_name(t)
-                    sp = self.regcheck(va) + spill_of(self.site(va), True)
-                    E('%s%s(c);return;' % (sp, n) if n else '%sx86_call(c,0x%xu);return;' % (sp, t))
+                    sp = self.regcheck(va) + spill_of(self.site(va), True) + self.xspill()
+                    if n and FAST:
+                        E(sp + self.tail_fast(n, t))
+                    else:
+                        E('%s%s(c);%s' % (sp, n, self.ret_cpu()) if n else
+                          '%sx86_call(c,0x%xu);%s' % (sp, t, self.ret_cpu()))
                 else:
                     E(jump_to(t))
                 return
@@ -446,15 +624,16 @@ class Fn:
             if ins.op0_kind == OK.MEMORY and ins.memory_base == R.NONE and ins.memory_index == R.NONE:
                 slot = ins.memory_displacement & 0xffffffff
                 if slot in tr.imports:
-                    E('%s%sx86_import(c,0x%xu);return; /* %s */' % (self.regcheck(va), spill_of(self.site(va), True),
-                                                                     slot, tr.imports[slot]))
+                    E('%s%s%sx86_import(c,0x%xu);%s /* %s */' % (self.regcheck(va), spill_of(self.site(va), True),
+                                                                  self.xspill(), slot, self.ret_cpu(), tr.imports[slot]))
                     return
             tgt = self.get(ins, 0, 4)
             if tbl:
                 cases = ''.join('case 0x%xu:%s' % (t, jump_to(t)) for t in sorted(set(tbl)))
                 E('switch(%s){%sdefault:x86_bad_jump(c,0x%xu,%s);}' % (tgt, cases, va, tgt))
             else:
-                E('{uint32_t t_=%s;%s%sx86_call(c,t_);return;}' % (tgt, self.regcheck(va), spill_of(self.site(va), True)))
+                E('{uint32_t t_=%s;%s%s%sX86_ICALL(c,t_);%s}' % (tgt, self.regcheck(va), spill_of(self.site(va), True),
+                                                                 self.xspill(), self.ret_cpu()))
             return
         if mn == M.INT3:
             E('x86_unreachable(c,0x%xu);' % va)
@@ -1259,6 +1438,8 @@ class Fn:
     def translate(self):
         self.discover()
         self.liveness()
+        self.xmm_flow()
+        self.find_x87_pairs()
         self.find_fusions()
         name = self.tr.func_name(self.start)
         body = []
@@ -1278,6 +1459,13 @@ class Fn:
             try:
                 if va in PATCHES and not TAG:
                     self.out = [PATCHES[va]]
+                elif va in self.x87load:                   # a float copy's read (find_x87_pairs)
+                    self.out = ['xf_=%s(%s);' % ('RD32' if self.x87load[va] == 4 else 'RD64', self.ea(ins))]
+                elif va in self.x87store:                  # and its write
+                    n, m = self.x87store[va]
+                    v = 'xf_' if n == m else 'x86_f2d_bits((uint32_t)xf_)'
+                    self.out = ['%s(%s,%s);' % ('WR32' if m == 4 else 'WR64', self.ea(ins),
+                                                '(uint32_t)xf_' if m == 4 else v)]
                 else:
                     self.translate_insn(va, ins, va + ins.len)
             except Unhandled as e:
@@ -1295,7 +1483,8 @@ class Fn:
                 prev_falls = va + ins.len
             elif succ and isinstance(succ[0], tuple) and fc == FC.NEXT:
                 n = self.tr.func_name(succ[0][1])
-                body.append('%s%s%s(c);return;' % (self.regcheck(va), spill_of(self.site(va), True), n))
+                sp = self.regcheck(va) + spill_of(self.site(va), True) + self.xspill()
+                body.append(sp + self.tail_fast(n, succ[0][1]) if FAST else '%s%s(c);return;' % (sp, n))
         if prev_falls is not None:
             body.append('goto L_%x;' % prev_falls if prev_falls in self.insns and self.insns[prev_falls] is not None
                         else 'x86_unreachable(c,0x%xu);' % prev_falls)
@@ -1317,7 +1506,17 @@ class Fn:
         pre = ('int %s(X86* c);\n' % host) if host else ''
         hook = ('if(%s(c))return;\n' % host) if host else ''
         keep = 'uint32_t e_[8]={eax,ecx,edx,ebx,esp,ebp,esi,edi};\n' if self.checked() else ''
-        src = pre + 'void %s(X86* c){%sREGS();\n%s%s%s\n}\n' % (name, hook, keep, entry, '\n'.join(lines))
+        if FAST:
+            # a hook reads and writes the CPU state: ecx and esp go there first, and come back if it declined
+            hook = ('c->r[1]=ecx;c->r[4]=esp;if(%s(c))return X86_CRV(c);ecx=c->r[1];esp=c->r[4];\n' % host
+                    if host else '')
+            src = pre + 'uint64_t %s_f(X86* c,uint32_t ecx,uint32_t esp){%sREGSF();X86_ENTER(c,0x%xu);%s\n%s%s%s\n' \
+                        'return X86_CRV(c);\n}\n' % (name, hook, self.start, self.xdecls(), keep, entry,
+                                                     '\n'.join(lines))
+            src += 'void %s(X86* c){%s_f(c,c->r[1],c->r[4]);}\n' % (name, name)
+            return src, unhandled
+        src = pre + 'void %s(X86* c){%sREGS();X86_ENTER(c,0x%xu);%s\n%s%s%s\n}\n' % (
+            name, hook, self.start, self.xdecls(), keep, entry, '\n'.join(lines))
         return src, unhandled
 
 
@@ -1395,6 +1594,19 @@ class Translator:
     def func_name(self, va):
         return 'F_%x' % va if va in self.funcs else None
 
+    def exit_mask(self, start):
+        """FAST: the registers a return of the function at start writes to the CPU state (Fn.exit_regs); None: all."""
+        rf = self.rf
+        f = rf.flows.get(start) if rf else None
+        if f is None or f.opaque:
+            return None
+        m = regflow.regs_of(rf.cl.get(start, regflow.REGSL)) | regflow.ESP
+        for g in f.callees | f.tails:
+            m |= regflow.regs_of(rf.cl.get(g, regflow.REGSL))
+        if f.has_icall or f.has_itail:
+            m |= regflow.IND
+        return m
+
 
 PRELUDE = '''#include "x86.h"
 #define REGS() uint32_t eax=c->r[0],ecx=c->r[1],edx=c->r[2],ebx=c->r[3],esp=c->r[4],ebp=c->r[5],esi=c->r[6],edi=c->r[7];\\
@@ -1403,6 +1615,13 @@ PRELUDE = '''#include "x86.h"
     c->cf=cf,c->pf=pf,c->af=af,c->zf=zf,c->sf=sf,c->of=of)
 #define FILL() (eax=c->r[0],ecx=c->r[1],edx=c->r[2],ebx=c->r[3],esp=c->r[4],ebp=c->r[5],esi=c->r[6],edi=c->r[7],\\
     cf=c->cf,pf=c->pf,af=c->af,zf=c->zf,sf=c->sf,of=c->of)
+#ifndef X86_ENTER
+#define X86_ENTER(c, a) ((void)0)
+#endif
+#define REGSF() uint32_t eax=c->r[0],edx=c->r[2],ebx=c->r[3],ebp=c->r[5],esi=c->r[6],edi=c->r[7];\\
+    uint8_t cf=c->cf,pf=c->pf,af=c->af,zf=c->zf,sf=c->sf,of=c->of;(void)cf;(void)pf;(void)af;(void)zf;(void)sf;(void)of
+#define X86_RV(a, s) (((uint64_t)(uint32_t)(s) << 32) | (uint32_t)(a))
+#define X86_CRV(c) X86_RV((c)->r[0], (c)->r[4])
 '''
 
 # An XMM register's canonical form is its two 64-bit halves as native integers (RDX/WRX), so narrower lanes are
@@ -1493,6 +1712,8 @@ def main():
             os.remove(os.path.join(OUT, name))
     with open(os.path.join(OUT, 'decls.h'), 'w', newline='\n') as fp:
         fp.write('#pragma once\n' + '\n'.join('void F_%x(X86* c);' % s for s in sorted(tr.funcs)) + '\n')
+        if FAST:
+            fp.write('\n'.join('uint64_t F_%x_f(X86* c,uint32_t ecx,uint32_t esp);' % s for s in sorted(tr.funcs)) + '\n')
     with open(os.path.join(OUT, 'functions.c'), 'w', newline='\n') as fp:
         fp.write('#include "x86.h"\n#include "decls.h"\n')
         fp.write('const X86FuncEntry x86_functions%s[]={\n' % SUFFIX)

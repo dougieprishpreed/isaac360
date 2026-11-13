@@ -121,6 +121,8 @@ build\recomp\isaac360_recomp.exe --hidden --vk --mem 320 --data-overlay build/co
 - `ISAAC360_PAD` scripts the controller, `ISAAC360_SHOTS` saves frames and `ISAAC360_TRACE_FILES` and `ISAAC360_TRACE_PRINTF` log file opens and the game's own log lines. `ISAAC360_TRACE_MUSIC=1` logs each music stream's starts, stops and underruns.
 - A Lua script that logs `audit: <what>` (through `Isaac.DebugString`) splits the run into windows: each gets a log line with its frames' game time and GPU time, average and worst, for finding effects that cost more than a room's usual frame.
 - `ISAAC360_POOL_CHECK=1` and `ISAAC360_IMAGE_CHECK=1` compare reused room textures and cached images with fresh decodes; `ISAAC360_PLAIN_SPRITES=0` and `ISAAC360_RELOAD_POOL=0` turn off the plain sprite shader and the texture reuse for comparisons.
+- `ISAAC360_COUNT_CALLS=1` (PC) counts each translated function's calls on the game's thread and logs the busiest every 600 frames, to see what a heavy frame spends its time on. `ISAAC360_BENCH=1` times the translated code's forms at start-up, old and new side by side.
+- The translator (`tools/recomp/translate.py`) keeps each function's SSE registers in locals, turns x87 float copies into integer copies and passes direct calls' `ecx` and `esp` as arguments; `ISAAC360_FAST_CALLS=0` at translation time goes back to the CPU-state calls.
 - `py -3 tools\recomp\coverage.py` plays a run through every floor, boss room, special room and cutscene with the game's debug commands, hidden, and reports memory and errors.
 - `tools/recomp/check_shaders.py` (in WSL) runs each converted shader on the xenos toolchain's simulator against exact maths, on inputs recorded by `coverage.py`.
 
