@@ -309,6 +309,8 @@ struct RoomTimes {
     uint64_t enters;                                // the main thread's critical sections, after the first 30 frames
     uint64_t imageHits, imageMisses;                // hle_image.cpp's counts as the room began
     uint32_t traced;                                // the frame given a gpu trace (0: none)
+    uint32_t anm2, spawn;                           // the game's ANM2 loading and spawn totals (ms) as it began,
+                                                    // then their growth over the first 30 frames
 };
 static RoomTimes g_room;
 static std::mutex g_roomLock;
@@ -353,11 +355,95 @@ static void log_room() {
     uint64_t hits, misses, hitBytes;
     size_t cached;
     hle_image_stats(&hits, &misses, &hitBytes, &cached);
-    recomp_log("room %s: first %u frames %.0f ms (slowest %.1f), %llu images decoded and %llu from the cache (%u MB "
-               "held)%s", r.name.c_str(), r.entryFrames, r.entry, r.entryMax,
+    recomp_log("room %s: first %u frames %.0f ms (slowest %.1f; the game's ANM2 loading %u ms, entity spawns %u ms), "
+               "%llu images decoded and %llu from the cache (%u MB held)%s", r.name.c_str(), r.entryFrames, r.entry,
+               r.entryMax, r.entryFrames == kRoomEntryFrames ? r.anm2 : RD32(0xbcb4ac) - r.anm2,
+               r.entryFrames == kRoomEntryFrames ? r.spawn : RD32(0xbcc4d4) - r.spawn,
                (unsigned long long)(misses - r.imageMisses), (unsigned long long)(hits - r.imageHits),
                (unsigned)(cached >> 20), steady);
     if (recomp_profile_by_room() && r.frames >= 240) recomp_profile_dump(log_line);
+}
+
+// Audit scripts (scratch Lua run through every card, pill and active item) log "audit: <what>" before each thing
+// they do: the frames until the next mark get a line with the game's work (its sleeps left out) and the GPU's, the
+// average and the worst frame, to find effects that cost far more than a room's usual frame.
+// With ISAAC360_FILL_STATS the line also gives the pixels the frames' draws covered (gl_vk.cpp add_fill), in
+// millions: sprites with their effects, sprites drawn plain, everything else; average and the worst frame's sprites.
+struct AuditWindow {
+    std::string what;
+    uint32_t frames, gpuFrames;
+    double work, workMax, gpu, gpuMax;
+    uint32_t workMaxFrame, gpuMaxFrame;
+    uint32_t over3, over6;                          // frames of game work over 2.8 and 5.6 ms
+    double fillSprite, fillPlain, fillOther, fillMax;   // pixels; fillMax: the most sprite pixels in a frame
+    uint32_t fillMaxFrame;
+    GlVkWork last;
+};
+static AuditWindow g_audit;
+static bool g_auditOn = false;
+
+static void log_audit() {
+    if (!g_auditOn || !g_audit.frames) return;
+    AuditWindow& a = g_audit;
+    recomp_log("audit %s: %u frames; game work %.2f ms a frame, worst %.2f (frame %u), %u over 2.8 ms, %u over 5.6; the "
+               "GPU's %.2f, worst %.2f (frame %u); fill %.2f + %.2f plain + %.2f other Mpx a frame, sprites (both) at "
+               "most %.2f (frame %u)", a.what.c_str(), a.frames, a.work / a.frames, a.workMax, a.workMaxFrame,
+               a.over3, a.over6, a.gpuFrames ? a.gpu / a.gpuFrames : 0.0, a.gpuMax, a.gpuMaxFrame,
+               a.fillSprite / a.frames / 1e6, a.fillPlain / a.frames / 1e6, a.fillOther / a.frames / 1e6, a.fillMax / 1e6,
+               a.fillMaxFrame);
+}
+
+void gl_audit_mark(const char* what) {
+    log_audit();
+    g_audit = AuditWindow();
+    g_audit.what = what;
+    while (!g_audit.what.empty() && (g_audit.what.back() == '\n' || g_audit.what.back() == '\r')) g_audit.what.pop_back();
+    memset(&g_audit.last, 0, sizeof(g_audit.last));
+    if (gl_vk_enabled()) gl_vk_work(&g_audit.last);
+    g_auditOn = true;
+}
+
+static void audit_frame(double work) {
+    if (!g_auditOn) return;
+    AuditWindow& a = g_audit;
+    ++a.frames;
+    a.work += work;
+    if (work > a.workMax) {
+        a.workMax = work;
+        a.workMaxFrame = g_frames;
+    }
+    if (work > 2.8) ++a.over3;
+    if (work > 5.6) ++a.over6;
+    if (!gl_vk_enabled()) return;
+    GlVkWork w;
+    gl_vk_work(&w);
+    double sprite = w.fillSprite - a.last.fillSprite, plainFill = w.fillPlain - a.last.fillPlain;
+    a.fillSprite += sprite;
+    a.fillPlain += plainFill;
+    a.fillOther += w.fillOther - a.last.fillOther;
+    if (sprite + plainFill > a.fillMax) {
+        a.fillMax = sprite + plainFill;
+        a.fillMaxFrame = g_frames;
+    }
+    uint32_t n = w.gpuFrames - a.last.gpuFrames;
+    if (n) {
+        double ms = (w.gpuMs - a.last.gpuMs) / n;
+        a.gpu += w.gpuMs - a.last.gpuMs;
+        a.gpuFrames += n;
+        if (ms > a.gpuMax) {
+            a.gpuMax = ms;
+            a.gpuMaxFrame = g_frames;
+        }
+    }
+    a.last = w;
+}
+
+// the game is quitting (its exit()): the room it was in gets its line too
+void gl_game_exiting() {
+    log_room();
+    g_room.name.clear();
+    log_audit();
+    g_auditOn = false;
 }
 
 static void room_frame(double ms, double game, double present, double slept) {
@@ -372,6 +458,8 @@ static void room_frame(double ms, double game, double present, double slept) {
         }
         r = RoomTimes();
         r.name = next;
+        r.anm2 = RD32(0xbcb4ac);
+        r.spawn = RD32(0xbcc4d4);
         uint64_t hitBytes;
         size_t cached;
         hle_image_stats(&r.imageHits, &r.imageMisses, &hitBytes, &cached);
@@ -382,6 +470,8 @@ static void room_frame(double ms, double game, double present, double slept) {
         r.entry += ms;
         if (ms > r.entryMax) r.entryMax = ms;
         if (r.entryFrames == kRoomEntryFrames) {
+            r.anm2 = RD32(0xbcb4ac) - r.anm2;
+            r.spawn = RD32(0xbcc4d4) - r.spawn;
             if (gl_vk_enabled()) gl_vk_work(&r.work);
             guest_heap_stats(&r.heap);
             r.enters = shims_main_lock_enters();
@@ -420,18 +510,26 @@ static void log_slow_frame(double game, double present) {
     memset(&w, 0, sizeof(w));
     if (gl_vk_enabled()) gl_vk_work(&w);
     double locks = profiling ? shims_lock_wait_ms() : 0;
+    // the game's own totals (ms, by its timeGetTime): ANM2 loading (added at 0x408b9a) and entity spawns (0x6bb683),
+    // printed at its shutdown as "Total ANM2 loading time" and "Total entity spawn time"
+    static uint32_t lastAnm2 = 0, lastSpawn = 0;
+    uint32_t anm2 = RD32(0xbcb4ac), spawn = RD32(0xbcc4d4);
     static double slowMs = getenv("ISAAC360_SLOW_MS") ? atof(getenv("ISAAC360_SLOW_MS")) : 50.0;
     if (profiling) recomp_profile_frame(game + present > slowMs && g_frames > 3);
     if (game + present > slowMs && g_frames > 3 && g_times.slowLogged < 12) {
         ++g_times.slowLogged;
         recomp_log("slow frame %u: game %.1f ms, present %.1f; read %llu KB (%llu KB from the drive in %.1f ms), %u images "
-                   "made, %llu KB uploaded; textures %.1f ms for %llu KB, packed images %.1f; waited for the GPU %.1f, read-backs "
-                   "%.1f, locks %.1f ms", g_frames, game, present, (unsigned long long)((bytes - lastBytes) >> 10),
+                   "made (%llu as an earlier load left them), %llu KB uploaded; textures %.1f ms for %llu KB, packed images "
+                   "%.1f; waited for the GPU %.1f, read-backs %.1f, locks %.1f ms; the game's ANM2 loading %u ms, entity "
+                   "spawns %u ms", g_frames, game, present, (unsigned long long)((bytes - lastBytes) >> 10),
                    (unsigned long long)((disk - lastDiskBytes) >> 10), diskMs - lastDisk, w.imagesMade - last.imagesMade,
-                   (unsigned long long)((w.uploaded - last.uploaded) >> 10), w.texMs - last.texMs,
-                   (unsigned long long)((w.texBytes - last.texBytes) >> 10), w.materializeMs - last.materializeMs, w.waitFence - last.waitFence, w.waitIdle - last.waitIdle,
-                   locks - lastLocks);
+                   (unsigned long long)(w.reused - last.reused), (unsigned long long)((w.uploaded - last.uploaded) >> 10),
+                   w.texMs - last.texMs, (unsigned long long)((w.texBytes - last.texBytes) >> 10),
+                   w.materializeMs - last.materializeMs, w.waitFence - last.waitFence, w.waitIdle - last.waitIdle,
+                   locks - lastLocks, anm2 - lastAnm2, spawn - lastSpawn);
     }
+    lastAnm2 = anm2;
+    lastSpawn = spawn;
     lastBytes = bytes;
     lastDiskBytes = disk;
     lastDisk = diskMs;
@@ -491,6 +589,7 @@ void gl_present() {
         lastEnd = end;
         log_slow_frame(game, present);
         room_frame(game + present, game, present, slept);
+        audit_frame(game - slept);
     }
     ++g_frames;
     if (g_quitRequested.load()) {

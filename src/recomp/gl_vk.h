@@ -7,6 +7,7 @@
 #endif
 #include <vulkan/vulkan_core.h>
 #include <stdint.h>
+#include <memory>
 #include <string>
 #include <vector>
 #include "runtime.h"
@@ -47,8 +48,16 @@ struct GlVkWork {
     uint32_t gpuFrames;
     uint64_t readPixels;            // glReadPixels calls
     uint64_t readPixelsWaited;      // those that waited for the GPU
+    uint64_t reused;                // textures given the image a file's earlier load had (the reload pool)
+    double fillSprite, fillPlain, fillOther;   // ISAAC360_FILL_STATS: pixels the draws covered (sprites with their
+                                               // effects, sprites drawn plain, the rest)
 };
 void gl_vk_work(GlVkWork* w);
+// hle_image.cpp: the next glTexImage2D given the guest buffer buf (bytes long) gets the pixels of the image file key,
+// whose packed copy (lz.h, RGBA rows) is packed; filled: buf holds them too (false: a cached load left it unwritten,
+// for the texture to take the packed copy or the file's earlier image). buf 0 clears it.
+void gl_vk_next_pixels(uint32_t buf, uint32_t bytes, const std::string& key,
+                       const std::shared_ptr<const std::vector<uint8_t> >& packed, bool filled);
 double gl_vk_gpu_max_reset();       // the longest frame of GPU work since the last call
 void gl_vk_gpu_trace_next();        // ISAAC360_PROFILE: stamp the next frame's draws one by one (gpu trace lines)
 uint64_t gl_vk_packed_bytes();      // host memory held by packed texture pixels (gl_vk.cpp, lazy textures)

@@ -116,6 +116,8 @@ void recomp_profile_frame(bool slow);    // ISAAC360_PROFILE=slow: a frame ended
 bool recomp_profile_by_room();           // ISAAC360_PROFILE=room: samples logged per room (shims_gl.cpp)
 void recomp_profile_clear();             // drops the samples since the last dump
 void gl_room_entered(const char* name);  // the game logged "Room type.variant(name)" (shims_crt.cpp)
+void gl_game_exiting();                  // the game's exit(): the last room's line (shims_crt.cpp)
+void gl_audit_mark(const char* what);    // an audit script's mark: the frames since the last get a line (shims_gl.cpp)
 int recomp_guest_returns(X86* c, uint32_t* out, int n);    // the innermost guest return addresses on c's stack
 void shims_lock_stats_dump(void (*line)(const char*));    // ISAAC360_PROFILE: contended critical sections (kernel32)
 double shims_lock_wait_ms();               // ISAAC360_PROFILE: ms all threads waited for critical sections so far

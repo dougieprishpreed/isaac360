@@ -208,6 +208,9 @@ void s_vsprintf(X86* c) {
     }
     // the game's log line for each room it enters ("Room %d.%d(%s)\n" in isaac-ng.exe): the room lines' boundary
     if (ARG(c, 4) == 0xb2e1cc) gl_room_entered(s.c_str());
+    // an audit script's marks (Lua "audit: <what>"): the frames since the last one get their line (shims_gl.cpp)
+    size_t mark = s.find("Lua Debug: audit: ");
+    if (mark != std::string::npos) gl_audit_mark(s.c_str() + mark + 18);
     if (buf && count) guest_write_str(buf, s, count);
     RET_CDECL(c, (uint32_t)s.size());
 }
@@ -521,8 +524,9 @@ void s_errno(X86* c) {
 }
 void s_set_errno(X86* c) { RET_CDECL(c, 0); }
 void s_exit(X86* c) {
+    gl_game_exiting();                  // the last room's line
     recomp_log("game exit(%d)", (int)ARG(c, 0));
-    vf_drain();                         // the files the game wrote reach the drive
+    vf_drain();                        // the files the game wrote reach the drive
     recomp_log_drain();
     _exit((int)ARG(c, 0));
 }

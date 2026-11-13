@@ -22,6 +22,7 @@
 
 void audio_out_open(int rate);                       // platform: start the device (no-op when muted)
 void audio_out_submit(const int16_t* stereo, int frames);   // platform: blocks until the device takes it
+uint32_t gl_frame_count();                           // shims_gl.cpp
 
 namespace {
 enum {
@@ -112,6 +113,21 @@ std::atomic<bool> g_running(false);
 bool trace_al() {
     static int left = getenv("ISAAC360_TRACE_AL") ? atoi(getenv("ISAAC360_TRACE_AL")) : 0;
     return left > 0 && left-- > 0;
+}
+
+// ISAAC360_TRACE_MUSIC=1: each play, stop, pause and buffer change on a source that has had buffers queued (music
+// and jingles), and its queues and unqueues while it is not playing (starts, underruns), with the presented frame and
+// the ms since the first such line; =2 every refill too
+bool tracing_music() {
+    static const bool on = getenv("ISAAC360_TRACE_MUSIC") != 0;
+    return on;
+}
+void trace_music(const char* what, uint32_t id, const Source& s, uint32_t n) {
+    static const std::chrono::steady_clock::time_point t0 = std::chrono::steady_clock::now();
+    double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+    recomp_log("music: frame %u at %.0f ms: %s %u (%u): state %x, %u queued (first %u), %u done, at %.0f, gain %.2f%s",
+               gl_frame_count(), ms, what, id, n, s.state, (unsigned)s.queue.size(), s.queue.empty() ? 0 : s.queue.front(),
+               (unsigned)s.done.size(), s.pos, s.gain, s.looping ? ", looping" : "");
 }
 
 // Mixes one block of every playing source into acc (stereo floats). Each source runs a buffer at a time: the buffer
@@ -370,6 +386,7 @@ void a_alSourcei(X86* c) {
     Source& s = g_sources[ARG(c, 0)];
     uint32_t p = ARG(c, 1), v = ARG(c, 2);
     if (p == AL_BUFFER) {
+        if (s.streamed && tracing_music()) trace_music("set buffer", ARG(c, 0), s, v);
         s.queue.clear();
         s.done.clear();
         s.pos = 0;
@@ -436,6 +453,7 @@ void a_alSourcePlay(X86* c) {
     // again. OpenAL restarts a playing source from its queue's start: on the PC a millisecond after it began,
     // unheard; on the console the three decodes between take long enough that the opening plays twice (the user
     // heard boss jingles and floor music repeat). A streamed source that plays goes on as it is.
+    if (s.streamed && tracing_music()) trace_music("play", ARG(c, 0), s, 0);
     if (s.streamed && s.state == AL_PLAYING) {
         RET_CDECL(c, 0);
         return;
@@ -450,6 +468,7 @@ void a_alSourceStop(X86* c) {
     if (trace_al())
         recomp_log("al: stop %u (state %x, %u queued, %u done)", ARG(c, 0), s.state, (unsigned)s.queue.size(),
                    (unsigned)s.done.size());
+    if (s.streamed && tracing_music()) trace_music("stop", ARG(c, 0), s, 0);
     s.state = AL_STOPPED;
     while (!s.queue.empty()) {                  // a stopped source has played its whole queue
         s.done.push_back(s.queue.front());
@@ -461,6 +480,7 @@ void a_alSourceStop(X86* c) {
 void a_alSourcePause(X86* c) {
     std::lock_guard<std::mutex> l(g_lock);
     Source& s = g_sources[ARG(c, 0)];
+    if (s.streamed && tracing_music()) trace_music("pause", ARG(c, 0), s, 0);
     if (s.state == AL_PLAYING) s.state = AL_PAUSED;
     RET_CDECL(c, 0);
 }
@@ -470,6 +490,9 @@ void a_alSourceQueueBuffers(X86* c) {
     Source& s = g_sources[ARG(c, 0)];
     for (uint32_t i = 0; i < ARG(c, 1); ++i) s.queue.push_back(RD32(ARG(c, 2) + 4 * i));
     s.streamed = true;
+    // a refill of a playing stream is routine; one onto a stream that stopped is an underrun (or its start)
+    if (tracing_music() && (s.state != AL_PLAYING || getenv("ISAAC360_TRACE_MUSIC")[0] == '2'))
+        trace_music("queue", ARG(c, 0), s, ARG(c, 1));
     if (trace_al())
         recomp_log("al: queue %u +%u (state %x, %u queued, %u done)", ARG(c, 0), ARG(c, 1), s.state,
                    (unsigned)s.queue.size(), (unsigned)s.done.size());
@@ -484,6 +507,8 @@ void a_alSourceUnqueueBuffers(X86* c) {
         WR32(out + 4 * i, s.done.front());
         s.done.pop_front();
     }
+    if (s.streamed && tracing_music() && (s.state != AL_PLAYING || getenv("ISAAC360_TRACE_MUSIC")[0] == '2'))
+        trace_music("unqueue", ARG(c, 0), s, n);
     if (trace_al())
         recomp_log("al: unqueue %u -%u (state %x, %u queued, %u done)", ARG(c, 0), n, s.state,
                    (unsigned)s.queue.size(), (unsigned)s.done.size());

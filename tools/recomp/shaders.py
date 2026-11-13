@@ -460,6 +460,23 @@ void main(void)
     'resources/shaders/bloom': BLOOM_FS,
 }
 
+# coloroffset.fs (nearly every sprite) works out its clip plane, pixelation, colorize, colour offset and colour
+# reduction for each pixel; with them all off (ColorizeIn.a, ColorOffsetIn, PixelationAmount 0, the clip plane 0 0
+# and z <= 0) its colour is Color0 times the texel exactly (mix by 0, adding 0), and the Death card's smoke over the
+# whole room took the console's GPU to 20.5 ms. gl_vk.cpp draws those draws with this program instead (the same
+# vertex stage), checking each vertex as it packs them.
+PLAIN_VARIANTS = {
+    'resources/shaders/coloroffset': '''varying vec4 Color0;
+varying vec2 TexCoord0;
+uniform sampler2D Texture0;
+
+void main(void)
+{
+	gl_FragColor = Color0 * texture2D(Texture0, TexCoord0);
+}
+''',
+}
+
 
 def rewrite(label, stage_src):
     if label in REPLACE:
@@ -573,6 +590,15 @@ def main():
             f = blob(compile_spv(fglsl, 'frag', tmp, tag), 'frag')
             rows.append((label, fnv64(vs), fnv64(fs), v, f, meta))
             print('%-40s vs %5d words, fs %5d words  %s' % (label, len(blobs[v]), len(blobs[f]), meta['attribs']))
+            if label in PLAIN_VARIANTS:                 # its plain twin: label#plain, never linked by the game
+                plain = PLAIN_VARIANTS[label]
+                vglsl, fglsl, pmeta = program(vs.decode('latin-1'), plain, label + '#plain')
+                if pmeta != meta:
+                    raise SystemExit('the plain variant of %s lays out its inputs differently' % label)
+                pv = blob(compile_spv(vglsl, 'vert', tmp, tag + 'p'), 'vert')
+                pf = blob(compile_spv(fglsl, 'frag', tmp, tag + 'p'), 'frag')
+                rows.append((label + '#plain', fnv64(vs), fnv64(plain.encode()), pv, pf, pmeta))
+                print('%-40s fs %5d words' % (label + '#plain', len(blobs[pf])))
         present = (blob(compile_spv(PRESENT_VS, 'vert', tmp, 'present'), 'vert'),
                    blob(compile_spv(PRESENT_FS, 'frag', tmp, 'present'), 'frag'),
                    blob(compile_spv(PRESENT_COPY_FS, 'frag', tmp, 'present_copy'), 'frag'),

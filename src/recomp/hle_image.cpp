@@ -8,9 +8,14 @@
 // reading or decoding the file. Palette images (whose palette goes to another virtual) are left to the game.
 // ISAAC360_IMAGE_CACHE=MB sets the cache's size (default 24; 0 turns it off). ISAAC360_IMAGE_CHECK=1 decodes every
 // load as the game does and compares a cached file's pixels and fields with the fresh decode (logged when they differ).
+// With the console's GL layer (gl_vk.cpp) an RGBA image's packed copy goes to its texture as it is: a cached load
+// leaves the game's buffer unwritten (the hand-off only gives it to glTexImage2D and frees it), and the texture takes
+// the file's earlier image or this copy (gl_vk_next_pixels).
 #include "runtime.h"
+#include "gl_vk.h"
 #include "lz.h"
 #include <ctype.h>
+#include <memory>
 #include <mutex>
 #include <stdlib.h>
 #include <string.h>
@@ -24,9 +29,12 @@ namespace {
 struct CachedImage {
     uint16_t w, h, pw, ph;                          // the image's +80h..+86h: size and padded size
     uint32_t bpp, format;                           // +88h: bytes a pixel; +18h: 1 RGB, 2 RGBA
-    std::vector<uint8_t> packed;                    // pw * ph * bpp bytes, packed
+    std::shared_ptr<const std::vector<uint8_t> > packed;   // pw * ph * bpp bytes, packed (shared with gl_vk)
     uint32_t lastUse;
 };
+
+// an image whose packed copy its texture can take: RGBA, on the console's GL layer
+bool named(const CachedImage& img) { return img.format == 2 && img.bpp == 4 && gl_vk_enabled(); }
 std::mutex g_lock;
 std::unordered_map<std::string, CachedImage> g_cache;
 std::unordered_map<uint32_t, std::string> g_loading;    // image -> the key its load-from-file is decoding
@@ -60,7 +68,7 @@ void trim(size_t keep) {
         std::unordered_map<std::string, CachedImage>::iterator oldest = g_cache.begin();
         for (std::unordered_map<std::string, CachedImage>::iterator it = g_cache.begin(); it != g_cache.end(); ++it)
             if (it->second.lastUse < oldest->second.lastUse) oldest = it;
-        g_bytes -= oldest->second.packed.size();
+        g_bytes -= oldest->second.packed->size();
         g_cache.erase(oldest);
     }
 }
@@ -90,8 +98,9 @@ extern "C" int hle_image_load(X86* c) {
     c->r[1] = 0xbc3fc8;
     uint32_t sizeArgs[2] = {size, 0};
     uint32_t buf = guest_call(c, 0x9863b0, 2, sizeArgs, true);
+    bool give = named(img);                         // the texture takes the packed copy: the buffer stays unwritten
     if (!buf || buf >= g_mem_size || size > g_mem_size - buf ||
-        !lz_decompress(&img.packed[0], img.packed.size(), g_mem + buf, size)) {
+        (!give && !lz_decompress(&(*img.packed)[0], img.packed->size(), g_mem + buf, size))) {
         c->r[1] = self;
         return 0;                                   // the game's code (an unfreed buffer at worst)
     }
@@ -107,7 +116,9 @@ extern "C" int hle_image_load(X86* c) {
     uint32_t slotArg[1] = {esp - 16};
     c->r[1] = self;
     g_replaying = true;
+    if (give) gl_vk_next_pixels(buf, size, key, img.packed, false);
     guest_call(c, 0x99d030, 1, slotArg, true);
+    if (give) gl_vk_next_pixels(0, 0, std::string(), std::shared_ptr<const std::vector<uint8_t> >(), false);
     g_replaying = false;
     c->r[4] = esp;
     // then as 0x98cd10 goes on: the image's name (0x94fb90 on 0xba3bd0) in place of any before, its finishing virtual
@@ -156,14 +167,17 @@ extern "C" int hle_image_pixels(X86* c) {
     if ((img.format != 1 && img.format != 2) || img.bpp < 3 || img.bpp > 4) return 0;
     uint32_t buf = RD32(RD32(esp + 4)), size = (uint32_t)img.pw * img.ph * img.bpp;
     if (!buf || buf >= g_mem_size || size > g_mem_size - buf || size > budget() * 4) return 0;
-    lz_compress(g_mem + buf, size, img.packed);
+    std::shared_ptr<std::vector<uint8_t> > packed(new std::vector<uint8_t>());
+    lz_compress(g_mem + buf, size, *packed);
+    img.packed = packed;
     img.lastUse = gl_frame_count();
+    if (named(img)) gl_vk_next_pixels(buf, size, key, img.packed, true);   // the hand-off's texture packs no copy
     std::lock_guard<std::mutex> l(g_lock);
     std::unordered_map<std::string, CachedImage>::iterator old = g_cache.find(key);
     if (g_check > 0 && old != g_cache.end()) {
         const CachedImage& o = old->second;
         bool same = o.w == img.w && o.h == img.h && o.pw == img.pw && o.ph == img.ph && o.bpp == img.bpp &&
-                    o.format == img.format && o.packed == img.packed;
+                    o.format == img.format && *o.packed == *img.packed;
         ++g_checked;
         if (!same && ++g_differ <= 20)
             recomp_log("image check: %s differs from its cached copy (%ux%u, %u a pixel)", key.c_str(), img.w, img.h,
@@ -173,10 +187,10 @@ extern "C" int hle_image_pixels(X86* c) {
                        (unsigned long long)g_differ);
     }
     if (old != g_cache.end()) {
-        g_bytes -= old->second.packed.size();
+        g_bytes -= old->second.packed->size();
         g_cache.erase(old);
     }
-    g_bytes += img.packed.size();
+    g_bytes += img.packed->size();
     g_cache[key] = std::move(img);
     trim(budget());
     return 0;

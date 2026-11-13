@@ -161,6 +161,9 @@ struct Texture {
     // packed and uploaded): only the colour is kept, and the image is made by a clear on the GPU
     bool solid;
     uint8_t solidRgba[4];
+    // the image file its pixels are (hle_image.cpp), while nothing changed them: when the game deletes it, its image
+    // waits in the reload pool for the next load of that file (next_pixels)
+    std::string key;
 };
 
 struct Renderbuffer {
@@ -206,6 +209,11 @@ struct Program {
     uint8_t push[PUSH_BYTES];
     VkShaderModule vs, fs;
     bool linked;
+    // a plain twin (shaders.py PLAIN_VARIANTS): its fragment stage, and the attributes (indices in attrs) whose
+    // values all 0 let a draw use it: ColorizeIn's alpha, ColorOffsetIn, PixelationAmount (<= 0), ClipPlane (xy 0,
+    // z <= 0); -1: none
+    VkShaderModule fsPlain;
+    int plainAt[4];
 };
 
 struct VertexArray {
@@ -241,7 +249,7 @@ struct PassKey {
 
 struct PipeKey {
     int program;
-    bool blend, cull, depthTest, depthWrite, hasDepth;
+    bool blend, cull, depthTest, depthWrite, hasDepth, plain;
     uint32_t src, dst, srcA, dstA, cullFace, depthFunc, frontFace, topology;
     bool operator<(const PipeKey& o) const { return memcmp(this, &o, sizeof(*this)) < 0; }
 };
@@ -1024,7 +1032,7 @@ VkPipeline pipeline(const PipeKey& k, Program& p) {
     for (int i = 0; i < 2; ++i) {
         stages[i].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
         stages[i].stage = i == 0 ? VK_SHADER_STAGE_VERTEX_BIT : VK_SHADER_STAGE_FRAGMENT_BIT;
-        stages[i].module = i == 0 ? p.vs : p.fs;
+        stages[i].module = i == 0 ? p.vs : k.plain && p.fsPlain ? p.fsPlain : p.fs;
         stages[i].pName = "main";
     }
     VkVertexInputBindingDescription binding = {0, (uint32_t)p.stride, VK_VERTEX_INPUT_RATE_VERTEX};
@@ -1524,7 +1532,10 @@ std::vector<std::vector<std::string> > split_meta(const char* s) {
     return rows;
 }
 
+void clear_loc_cache();
+
 bool link(Program& p) {
+    clear_loc_cache();                              // the locations the game asked for may change
     uint64_t vs = 0, fs = 0;
     bool haveV = false, haveF = false;
     for (int i = 0; i < p.nshaders; ++i) {
@@ -1577,15 +1588,24 @@ bool link(Program& p) {
     for (int i = 0; i < SAMPLER_SLOTS; ++i) p.samplerUnit[i] = 0;
     p.vs = make_module(p.desc->vs, p.desc->vsWords);
     p.fs = make_module(p.desc->fs, p.desc->fsWords);
+    p.fsPlain = VK_NULL_HANDLE;
+    for (int i = 0; i < 4; ++i) p.plainAt[i] = -1;
+    static const bool plainOn = !getenv("ISAAC360_PLAIN_SPRITES") || atoi(getenv("ISAAC360_PLAIN_SPRITES")) != 0;
+    std::string twin = std::string(p.desc->label) + "#plain";
+    for (size_t i = 0; plainOn && i < sizeof(GLVK_PROGRAMS) / sizeof(GLVK_PROGRAMS[0]); ++i)
+        if (twin == GLVK_PROGRAMS[i].label) {
+            static const char* const names[4] = {"ColorizeIn", "ColorOffsetIn", "PixelationAmount", "ClipPlane"};
+            bool all = true;
+            for (int n = 0; n < 4; ++n) {
+                for (size_t a = 0; a < p.attrs.size(); ++a)
+                    if (p.attrs[a].name == names[n]) p.plainAt[n] = (int)a;
+                all = all && p.plainAt[n] >= 0;
+            }
+            if (all) p.fsPlain = make_module(GLVK_PROGRAMS[i].fs, GLVK_PROGRAMS[i].fsWords);
+            else log_once("gl_vk: %s's plain twin lacks its attributes", p.desc->label);
+        }
     p.linked = true;
     return true;
-}
-
-int program_index(uint32_t name) {
-    int i = 0;
-    for (std::map<uint32_t, Program>::iterator it = g_programs.begin(); it != g_programs.end(); ++it, ++i)
-        if (it->first == name) return i;
-    return -1;
 }
 
 // ---- packed textures -------------------------------------------------------------------------------------
@@ -1719,11 +1739,141 @@ bool has_pixels(const Texture& t) { return t.raw || !t.lz.empty() || t.solid; }
 
 void drop_packed(Texture& t) {
     t.solid = false;
+    t.key.clear();
     release_raw(t);
     g_packedBytes -= t.lz.size();
     std::vector<uint8_t>().swap(t.lz);
     if (t.raw) g_packedBytes -= t.raw->size();
     t.raw.reset();
+}
+
+// ---- images the game loads again ---------------------------------------------------------------------------
+// The game frees a room's images when it leaves and loads the same files again at a later door: 5-10 MB a door
+// copied from the guest, packed and uploaded each time (17-27 and 16-24 ms of a console door, boot 20). The image
+// cache (hle_image.cpp) names the file whose pixels the next glTexImage2D gets and hands over its packed copy
+// (gl_vk_next_pixels): the texture keeps that rather than packing its own, and a deleted texture of a file keeps
+// its image in the reload pool, so the file's next load takes the image as it is, with no copy, packing or upload.
+// ISAAC360_RELOAD_POOL=MB sizes the pool (default 24, 0 turns it off); the oldest go first, all when memory is short.
+struct NextPixels {
+    uint32_t buf, bytes;
+    std::string key;
+    std::shared_ptr<const std::vector<uint8_t> > packed;
+    bool filled;                                    // the guest buffer holds the pixels too
+    uint32_t frame;
+};
+NextPixels g_next;
+struct Pooled {
+    Image img;
+    std::vector<uint8_t> lz;
+    int lw, lh;
+    uint32_t frame;                                 // when it went in
+};
+std::map<std::string, Pooled> g_reloadPool;
+uint64_t g_poolBytes = 0;                           // the pool's images
+uint64_t g_poolReused = 0;                          // images taken from it (the slow frame lines)
+
+uint64_t pool_budget() {
+    static const long mb = getenv("ISAAC360_RELOAD_POOL") ? atol(getenv("ISAAC360_RELOAD_POOL")) : 24;
+    return mb > 0 ? (uint64_t)mb << 20 : 0;
+}
+
+void pool_erase(std::map<std::string, Pooled>::iterator it) {
+    g_poolBytes -= it->second.img.bytes;
+    g_packedBytes -= it->second.lz.size();
+    retire_image(it->second.img);
+    g_lastSet = VK_NULL_HANDLE;                     // a new image may reuse a freed view's handle
+    g_reloadPool.erase(it);
+}
+
+// the oldest go until the pool's images are within keep bytes
+void pool_trim(uint64_t keep) {
+    while (g_poolBytes > keep && !g_reloadPool.empty()) {
+        std::map<std::string, Pooled>::iterator oldest = g_reloadPool.begin();
+        for (std::map<std::string, Pooled>::iterator it = g_reloadPool.begin(); it != g_reloadPool.end(); ++it)
+            if (it->second.frame < oldest->second.frame) oldest = it;
+        pool_erase(oldest);
+    }
+}
+
+// a texture the game deletes: its image (and packed pixels) wait for the next load of its file
+bool pool_put(Texture& t) {
+    if (t.key.empty() || !t.img.image || t.target || t.lz.empty() || !pool_budget() || t.img.bytes > pool_budget() / 2)
+        return false;
+    std::map<std::string, Pooled>::iterator it = g_reloadPool.find(t.key);
+    if (it != g_reloadPool.end()) pool_erase(it);
+    Pooled& p = g_reloadPool[t.key];
+    p.img = t.img;
+    memset(&t.img, 0, sizeof(t.img));
+    p.lz.swap(t.lz);                                // still counted in g_packedBytes
+    p.lw = t.lw;
+    p.lh = t.lh;
+    p.frame = gl_frame_count();
+    g_poolBytes += p.img.bytes;
+    pool_trim(pool_budget());
+    return true;
+}
+
+// glTexImage2D given the pixels the image cache named: the file's pooled image, or the cache's packed copy (and
+// the pixels as they came, for the first draw). False: not those pixels (the guest buffer then holds them).
+bool take_named(uint32_t name, Texture& t, uint32_t pixels, uint32_t format, uint32_t type, int w, int h) {
+    if (!g_next.buf || pixels != g_next.buf) return false;
+    NextPixels next = g_next;
+    g_next.buf = 0;
+    g_next.packed.reset();
+    if (next.frame != gl_frame_count() || format != GL_RGBA || type != GL_UNSIGNED_BYTE || t.target ||
+        (uint64_t)w * h * 4 != next.bytes || !next.packed || !g_lazyTextures) {
+        log_once("gl_vk: a named image went the usual way (%dx%d, format 0x%x, %u bytes named)", w, h, format,
+                 next.bytes);
+        if (!next.filled && next.packed && pixels < g_mem_size && next.bytes <= g_mem_size - pixels &&
+            !lz_decompress(&(*next.packed)[0], next.packed->size(), g_mem + pixels, next.bytes))
+            log_once("lz: a named image did not unpack");
+        return false;
+    }
+    t.lw = w;
+    t.lh = h;
+    t.key = next.key;
+    if (t.img.image) {
+        if (g_inPass && t.img.view == g_passKey.color) end_pass();
+        retire_image(t.img);
+        g_lastSet = VK_NULL_HANDLE;
+    }
+    std::map<std::string, Pooled>::iterator it = g_reloadPool.find(next.key);
+    if (it != g_reloadPool.end() && it->second.lw == w && it->second.lh == h) {
+        // ISAAC360_POOL_CHECK=1: the image's packed pixels against this load's (logged when they differ)
+        static const bool check = getenv("ISAAC360_POOL_CHECK") != 0;
+        if (check) {
+            static uint64_t checked = 0, differ = 0;
+            ++checked;
+            if (it->second.lz != *next.packed && ++differ <= 20)
+                recomp_log("pool check: %s differs from its kept image's pixels", next.key.c_str());
+            if (checked % 100 == 0)
+                recomp_log("pool check: %llu reuses compared, %llu differ", (unsigned long long)checked,
+                           (unsigned long long)differ);
+        }
+        t.img = it->second.img;                     // the image as the file's last load left it
+        memset(&it->second.img, 0, sizeof(it->second.img));
+        t.lz.swap(it->second.lz);
+        t.packed = (uint32_t)t.lz.size();
+        g_poolBytes -= t.img.bytes;
+        g_reloadPool.erase(it);
+        ++g_poolReused;
+        return true;
+    }
+    t.lz.assign(next.packed->begin(), next.packed->end());
+    t.packed = (uint32_t)t.lz.size();
+    g_packedBytes += t.lz.size();
+    t.gen = ++g_packGen;
+    if (next.filled && next.bytes <= RAW_KEPT && pixels < g_mem_size && next.bytes <= g_mem_size - pixels) {
+        // the first draw makes the image from these, as from the packer's kept ones (collect_packed)
+        t.raw.reset(new std::vector<uint8_t>(g_mem + pixels, g_mem + pixels + next.bytes));
+        g_packedBytes += next.bytes;
+        release_kept_raw(RAW_KEPT - next.bytes);
+        t.rawKept = true;
+        t.keptFrame = gl_frame_count();
+        g_rawKept += next.bytes;
+        g_keptRaw.push_back(std::make_pair(name, t.gen));
+    }
+    return true;
 }
 
 // an image filled with one colour on the GPU, in SHADER_READ_ONLY layout; outside a render pass
@@ -1790,7 +1940,8 @@ bool materialize(Texture& t) {
 // read as the 1x1 white placeholder (the white playfield of console boot 10).
 bool reclaim_images() {
     release_kept_raw(0);
-    uint64_t freed = 0;
+    uint64_t freed = g_poolBytes;
+    pool_trim(0);
     for (std::map<uint32_t, Texture>::iterator it = g_textures.begin(); it != g_textures.end(); ++it) {
         Texture& t = it->second;
         if (!t.img.image || !has_pixels(t) || t.target || t.drawFrame + 1 >= gl_frame_count()) continue;
@@ -1814,6 +1965,8 @@ bool reclaim_images() {
 void evict_textures() {
     if (g_hostFreeMemory && gl_frame_count() % 30 == 0 && g_hostFreeMemory() < (32u << 20)) {
         release_kept_raw(0);
+        if (g_poolBytes) log_once("free memory short: the reload pool's images go");
+        pool_trim(0);
         std::vector<std::pair<uint32_t, uint32_t> > idle;     // (last drawn frame, name)
         for (std::map<uint32_t, Texture>::iterator it = g_textures.begin(); it != g_textures.end(); ++it)
             if (it->second.img.image && has_pixels(it->second) && !it->second.target &&
@@ -1830,6 +1983,7 @@ void evict_textures() {
         }
         if (freed) log_once("free memory short: idle textures give their images back");
     }
+    if (g_imageBytes > g_textureBudget) pool_trim(0);   // images for reloads go before any a texture has
     if (g_imageBytes <= g_textureBudget) return;
     std::vector<std::pair<uint32_t, uint32_t> > idle;     // (last drawn frame, name)
     for (std::map<uint32_t, Texture>::iterator it = g_textures.begin(); it != g_textures.end(); ++it)
@@ -1983,6 +2137,56 @@ void bloom_rows(Program& p, uint32_t first) {
     }
 }
 
+// ISAAC360_FILL_STATS=1 (audits): the pixels each frame's draws cover, summed (overdraw), for sprites (the
+// coloroffset programs, apart those drawn plain) and the rest. The PC's GPU is far too fast to show what overdraw
+// costs the console (the Death card's smoke took the console's GPU to 20.5 ms and the PC's not past its usual
+// frames). A sprite triangle's area comes from its Position through the program's Transform as glUniformMatrix4fv
+// gave it (column-major), clamped to the viewport; a draw of a program without one counts its viewport.
+bool g_fillStats = false;
+double g_fillSprite = 0, g_fillPlain = 0, g_fillOther = 0;     // pixels, summed over all frames
+std::vector<uint32_t>& draw_indices() {
+    static std::vector<uint32_t> v;
+    return v;
+}
+void add_fill(const Program& p, uint32_t lo, int count, bool plain) {
+    double vw = g_viewport[2], vh = g_viewport[3];
+    bool sprite = p.desc && strstr(p.desc->label, "coloroffset") != 0;
+    const float* m = 0;
+    for (size_t u = 0; u < p.uniforms.size(); ++u)
+        if (p.uniforms[u].bytes == 64 && p.uniforms[u].name == "Transform") m = (const float*)(p.push + p.uniforms[u].offset);
+    if (!m || p.attrs.empty() || p.attrs[0].name != "Position") {
+        (sprite ? g_fillSprite : g_fillOther) += vw * vh;
+        return;
+    }
+    const std::vector<uint32_t>& idx = draw_indices();
+    const VertexArray& va = g_va[p.attrs[0].loc];
+    if (!va.enabled || va.type != GL_FLOAT) return;
+    int stride = va.stride ? va.stride : va.size * 4;
+    double sum = 0;
+    for (int t = 0; t + 2 < count; t += 3) {
+        double x[3], y[3];
+        for (int k = 0; k < 3; ++k) {
+            uint32_t base = va.ptr + idx[(size_t)(t + k)] * (uint32_t)stride;
+            float px = RDF(base), py = va.size > 1 ? RDF(base + 4) : 0.0f, pz = va.size > 2 ? RDF(base + 8) : 0.0f;
+            double cx = m[0] * px + m[4] * py + m[8] * pz + m[12];
+            double cy = m[1] * px + m[5] * py + m[9] * pz + m[13];
+            double cw = m[3] * px + m[7] * py + m[11] * pz + m[15];
+            if (cw == 0) cw = 1;
+            double nx = cx / cw, ny = cy / cw;
+            nx = nx < -1 ? -1 : nx > 1 ? 1 : nx;
+            ny = ny < -1 ? -1 : ny > 1 ? 1 : ny;
+            x[k] = (nx * 0.5 + 0.5) * vw;
+            y[k] = (ny * 0.5 + 0.5) * vh;
+        }
+        double a = ((x[1] - x[0]) * (y[2] - y[0]) - (x[2] - x[0]) * (y[1] - y[0])) * 0.5;
+        sum += a < 0 ? -a : a;
+    }
+    (void)lo;
+    if (!sprite) g_fillOther += sum;
+    else if (plain) g_fillPlain += sum;
+    else g_fillSprite += sum;
+}
+
 void draw(uint32_t mode, int count, uint32_t indexType, uint32_t indices, int first, bool indexed) {
     if (count <= 0 || !g_program) return;
     Program& p = g_programs[g_program];
@@ -1997,8 +2201,9 @@ void draw(uint32_t mode, int count, uint32_t indexType, uint32_t indices, int fi
         log_once("draw mode 0x%x", mode);
         return;
     }
-    // the vertex range the indices use
-    std::vector<uint32_t> idx((size_t)count);
+    // the vertex range the indices use (one list kept for every draw: the game's thread alone draws)
+    std::vector<uint32_t>& idx = draw_indices();
+    if (idx.size() < (size_t)count) idx.resize((size_t)count);
     uint32_t lo = 0xffffffffu, hi = 0;
     for (int i = 0; i < count; ++i) {
         uint32_t v = !indexed ? (uint32_t)(first + i)
@@ -2033,8 +2238,10 @@ void draw(uint32_t mode, int count, uint32_t indexType, uint32_t indices, int fi
     pass_area_for_draw();
     if (!ensure_pass(false, false)) return;
     f = &g_frames[g_frame];
-    // vertices, packed in the program's attribute order
+    // vertices, packed in the program's attribute order; a program with a plain twin learns on the way whether
+    // every vertex has its effects off (Program::plainAt)
     float* out = (float*)(f->vertices.map + f->vOff);
+    bool plain = p.fsPlain != VK_NULL_HANDLE;
     for (uint32_t v = 0; v < nverts; ++v) {
         for (size_t a = 0; a < p.attrs.size(); ++a) {
             const Attr& at = p.attrs[a];
@@ -2044,6 +2251,13 @@ void draw(uint32_t mode, int count, uint32_t indexType, uint32_t indices, int fi
                 int stride = va.stride ? va.stride : va.size * type_bytes(va.type);
                 uint32_t base = va.ptr + (lo + v) * (uint32_t)stride;
                 for (int c = 0; c < va.size && c < 4; ++c) val[c] = attr_component(va, base, c);
+            }
+            if (plain) {
+                int ai = (int)a;
+                if (ai == p.plainAt[0]) plain = val[3] == 0.0f;                                   // ColorizeIn.a
+                else if (ai == p.plainAt[1]) plain = val[0] == 0.0f && val[1] == 0.0f && val[2] == 0.0f;   // offset
+                else if (ai == p.plainAt[2]) plain = val[0] <= 0.0f;                              // pixelation
+                else if (ai == p.plainAt[3]) plain = val[0] == 0.0f && val[1] == 0.0f && val[2] <= 0.0f;   // clip
             }
             for (int c = 0; c < at.comps; ++c) *out++ = val[c];
             if (g_stats && a == 0) {
@@ -2088,7 +2302,7 @@ void draw(uint32_t mode, int count, uint32_t indexType, uint32_t indices, int fi
     VkCommandBuffer cmd = f->cmd;
     PipeKey k;
     memset(&k, 0, sizeof(k));
-    k.program = program_index(g_program);
+    k.program = (int)g_program;                     // program names are never reused
     k.blend = g_blend;
     if (g_blend) {
         k.src = g_src;
@@ -2108,9 +2322,19 @@ void draw(uint32_t mode, int count, uint32_t indexType, uint32_t indices, int fi
         log_once("a draw without the depth test GREATER (test %s, func 0x%x): its transparent texels are drawn",
                  k.depthTest ? "on" : "off", g_depthFunc);
     k.topology = (uint32_t)topo;
+    k.plain = plain;
+    if (g_fillStats) add_fill(p, lo, count, plain);
     VkPipeline pipe = pipeline(k, p);
     if (!pipe) return;
     ++g_counts.draws;
+    if (p.fsPlain) {
+        static uint64_t sprites = 0, plainOnes = 0;
+        ++sprites;
+        if (plain) ++plainOnes;
+        if (sprites == 20000)
+            recomp_log("gl_vk: %llu of the first 20000 draws with a plain twin drew plain",
+                       (unsigned long long)plainOnes);
+    }
     if (pipe != g_boundPipe) {
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipe);
         g_boundPipe = pipe;
@@ -2200,8 +2424,9 @@ void draw(uint32_t mode, int count, uint32_t indexType, uint32_t indices, int fi
     vkCmdBindVertexBuffers(cmd, 0, 1, &vb, &voff);
     vkCmdBindIndexBuffer(cmd, f->indices.buf, f->iOff, wide ? VK_INDEX_TYPE_UINT32 : VK_INDEX_TYPE_UINT16);
     if (tracing()) {
-        recomp_log("trace: draw %s, fbo %u, %d indices of %u vertices, viewport %d,%d %dx%d, blend %s %x,%x,%x,%x, "
-                   "depth test %d write %d func %x, cull %d,%x front %x, textures%s", p.desc ? p.desc->label : "?", g_fbo,
+        recomp_log("trace: draw %s%s, fbo %u, %d indices of %u vertices, viewport %d,%d %dx%d, blend %s %x,%x,%x,%x, "
+                   "depth test %d write %d func %x, cull %d,%x front %x, textures%s", p.desc ? p.desc->label : "?",
+                   plain ? " (plain)" : "", g_fbo,
                    count, nverts, g_viewport[0], g_viewport[1], g_viewport[2], g_viewport[3], k.blend ? "on" : "off", k.src,
                    k.dst, k.srcA, k.dstA, k.depthTest ? 1 : 0, k.depthWrite ? 1 : 0, k.depthFunc, k.cull ? 1 : 0,
                    k.cullFace, k.frontFace, texInfo.empty() ? " none" : texInfo.c_str());
@@ -2523,7 +2748,7 @@ void vk_glDeleteTextures(X86* c) {
         std::map<uint32_t, Texture>::iterator it = g_textures.find(name);
         if (it == g_textures.end()) continue;
         if (g_inPass && it->second.img.view == g_passKey.color) end_pass();
-        retire_image(it->second.img);
+        if (!pool_put(it->second)) retire_image(it->second.img);
         drop_packed(it->second);
         g_textures.erase(it);
         for (int u = 0; u < MAX_UNITS; ++u)
@@ -2590,6 +2815,13 @@ void vk_glTexImage2D(X86* c) {
     } timed = {WaitClock::now()};
     uint32_t level = ARG(c, 1), format = ARG(c, 6), type = ARG(c, 7), pixels = ARG(c, 8);
     int w = (int)ARG(c, 3), h = (int)ARG(c, 4);
+    // ISAAC360_TEX_LOG=N: the first N uploads with pixels, their caller and whether the image cache named them
+    static int texLog = getenv("ISAAC360_TEX_LOG") ? atoi(getenv("ISAAC360_TEX_LOG")) : 0;
+    if (texLog > 0 && pixels) {
+        --texLog;
+        recomp_log("tex: frame %u, %dx%d format 0x%x type 0x%x, %s, from %08x %08x", gl_frame_count(), w, h, format, type,
+                   g_next.buf == pixels ? "named" : "not named", RD32(c->r[4]), RD32(c->r[4] + 0x40));
+    }
     RET_STD(c, 9, 0);
     if (level != 0) {
         log_once("glTexImage2D level %u", level);
@@ -2602,6 +2834,7 @@ void vk_glTexImage2D(X86* c) {
     drop_packed(t);
     if (w <= 0 || h <= 0) return;
     if (pixels) g_texBytes += (uint64_t)w * h * 4;
+    if (pixels && take_named(g_units[g_activeUnit], t, pixels, format, type, w, h)) return;
     std::vector<uint8_t> rgba;
     uint8_t one[4];
     bool solid = pixels && format == GL_RGBA && type == GL_UNSIGNED_BYTE && solid_rgba(pixels, w, h, one);
@@ -2898,7 +3131,8 @@ void vk_glCreateProgram(X86* c) {
     p.nshaders = 0;
     p.desc = 0;
     p.linked = false;
-    p.vs = p.fs = VK_NULL_HANDLE;
+    p.vs = p.fs = p.fsPlain = VK_NULL_HANDLE;
+    for (int i = 0; i < 4; ++i) p.plainAt[i] = -1;
     RET_STD(c, 0, name);
 }
 void vk_glAttachShader(X86* c) {
@@ -2920,20 +3154,53 @@ bool guest_name_is(uint32_t a, const std::string& name) {
     if (!a || a + name.size() >= g_mem_size) return false;
     return !memcmp(g_mem + a, name.data(), name.size()) && !g_mem[a + name.size()];
 }
+// The game asks for each attribute's location before every draw (~300 a frame, 1.1% of the console's main thread in
+// boot 20), by names among its own constant strings: answers for names inside isaac-ng.exe's image are kept by
+// (program, name address, uniform or not), and dropped whenever a program links.
+struct LocCacheEntry {
+    uint32_t program, name;
+    int loc;
+};
+LocCacheEntry g_locCache[256];
+bool cacheable_name(uint32_t name) { return name >= 0x00401000u && name < 0x00c00000u; }
+void clear_loc_cache() { memset(g_locCache, 0, sizeof(g_locCache)); }
+LocCacheEntry& loc_slot(uint32_t program, uint32_t name, bool uniform) {
+    return g_locCache[((name >> 2) ^ (program * 31) ^ (uniform ? 128u : 0u)) & 255];
+}
 void vk_glGetAttribLocation(X86* c) {
-    Program& p = g_programs[ARG(c, 0)];
-    uint32_t name = ARG(c, 1);
+    uint32_t prog = ARG(c, 0), name = ARG(c, 1);
+    LocCacheEntry& e = loc_slot(prog, name, false);
+    if (e.program == prog && e.name == name && prog) {
+        RET_STD(c, 2, (uint32_t)e.loc);
+        return;
+    }
+    Program& p = g_programs[prog];
     int loc = -1;
     for (size_t i = 0; i < p.attrs.size(); ++i)
         if (guest_name_is(name, p.attrs[i].name)) loc = p.attrs[i].loc;
+    if (cacheable_name(name) && p.linked) {
+        e.program = prog;
+        e.name = name;
+        e.loc = loc;
+    }
     RET_STD(c, 2, (uint32_t)loc);
 }
 void vk_glGetUniformLocation(X86* c) {
-    Program& p = g_programs[ARG(c, 0)];
-    uint32_t name = ARG(c, 1);
+    uint32_t prog = ARG(c, 0), name = ARG(c, 1);
+    LocCacheEntry& e = loc_slot(prog, name, true);
+    if (e.program == prog && e.name == name && prog) {
+        RET_STD(c, 2, (uint32_t)e.loc);
+        return;
+    }
+    Program& p = g_programs[prog];
     int loc = -1;
     for (size_t i = 0; i < p.uniforms.size(); ++i)
         if (guest_name_is(name, p.uniforms[i].name)) loc = (int)i;
+    if (cacheable_name(name) && p.linked) {
+        e.program = prog;
+        e.name = name;
+        e.loc = loc;
+    }
     RET_STD(c, 2, (uint32_t)loc);
 }
 Uniform* uniform_at(int loc) {
@@ -3137,6 +3404,7 @@ void gl_vk_configure(const GlVkHooks& hooks) {
         if (*t == ',') ++t;
     }
     g_lazyTextures = !(v = getenv("ISAAC360_TEX_LAZY")) || atoi(v) != 0;
+    g_fillStats = (v = getenv("ISAAC360_FILL_STATS")) && atoi(v) != 0;
     g_textureBudget = (uint64_t)((v = getenv("ISAAC360_TEX_BUDGET")) ? atoi(v) : 96) << 20;
 }
 
@@ -3158,6 +3426,20 @@ void gl_vk_work(GlVkWork* w) {
     w->gpuFrames = g_gpuFrames;
     w->readPixels = g_readPixels;
     w->readPixelsWaited = g_readPixelsWaited;
+    w->reused = g_poolReused;
+    w->fillSprite = g_fillSprite;
+    w->fillPlain = g_fillPlain;
+    w->fillOther = g_fillOther;
+}
+
+void gl_vk_next_pixels(uint32_t buf, uint32_t bytes, const std::string& key,
+                       const std::shared_ptr<const std::vector<uint8_t> >& packed, bool filled) {
+    g_next.buf = buf;
+    g_next.bytes = bytes;
+    g_next.key = key;
+    g_next.packed = packed;
+    g_next.filled = filled;
+    g_next.frame = gl_frame_count();
 }
 double gl_vk_gpu_max_reset() {
     double m = g_gpuMax;

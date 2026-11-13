@@ -754,8 +754,8 @@ struct ProfileKey {
     }
 };
 // ISAAC360_PROFILE=slow keeps only the samples of frames that turn out slow (recomp_profile_frame: the slow frame
-// lines' test), to see what a door's or a load's frame does; the main thread's samples also count every guest
-// return address on its stack once ("incl" lines: a function's share with all it calls).
+// lines' test), to see what a door's or a load's frame does; the main thread's samples also count each call on its
+// frame chain once (frame_returns; "incl" lines: a function's share with all it calls).
 static std::mutex g_profileLock;
 static std::map<ProfileKey, uint32_t> g_profileCounts, g_frameCounts;
 static std::map<uint32_t, uint32_t> g_profileIncl, g_frameIncl;
@@ -784,6 +784,24 @@ static uint32_t innermost_return(X86* c) {
     return 0;
 }
 
+// the main thread's calls for the inclusive shares: the innermost return address, then the ebp chain (each frame's
+// saved ebp and return address, as the game's functions with frames push them). A stack scan also finds return
+// addresses calls left behind, and gave the inclusive lines functions that had long returned.
+static int frame_returns(X86* c, uint32_t* out, int n) {
+    int found = 0;
+    uint32_t first = innermost_return(c);
+    if (first) out[found++] = first;
+    uint32_t esp = c->r[4], ebp = c->r[5];
+    for (int depth = 0; found < n && depth < 64; ++depth) {
+        if (ebp < esp || ebp - esp > (1u << 20) || ebp + 8 > g_mem_size) break;
+        uint32_t ret = RD32(ebp + 4), next = RD32(ebp);
+        if (guest_code(ret) && ret != first) out[found++] = ret;
+        if (next <= ebp) break;
+        ebp = next;
+    }
+    return found;
+}
+
 static void profile_thread(void*) {
     if (g_cfg.threadStarted) g_cfg.threadStarted("profiler");
     std::map<ProfileKey, uint32_t>& counts = g_profileSlow ? g_frameCounts : g_profileCounts;
@@ -800,8 +818,8 @@ static void profile_thread(void*) {
             ++counts[k];
             ++samples[i];
             if (i == 0) {
-                uint32_t rets[24];
-                int n = recomp_guest_returns(c, rets, 24);
+                uint32_t rets[48];
+                int n = frame_returns(c, rets, 48);
                 std::sort(rets, rets + n);
                 for (int j = 0; j < n; ++j)
                     if (!j || rets[j] != rets[j - 1]) ++incl[rets[j]];

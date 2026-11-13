@@ -551,9 +551,12 @@ std::shared_ptr<Stream> stream_for(std::unique_lock<std::mutex>& l, X86* c, uint
         recomp_log("music: a stream the host can't read (file %08x, %u bytes): the game decodes it", s->file, length);
         return std::shared_ptr<Stream>();
     }
-    if (++g_opened <= 12)
-        recomp_log("music: the host streams %u KB from %s", (s->native ? s->entry.size : (uint32_t)s->data.size()) >> 10,
-                   s->native ? g_archives[s->entry.archive]->path.c_str() : "memory (read whole)");
+    static const bool tracing = getenv("ISAAC360_TRACE_MUSIC") != 0;
+    if (++g_opened <= 12 || tracing)
+        recomp_log("music: the host streams %u KB from %s (entry %08x, decoder %08x)",
+                   (s->native ? s->entry.size : (uint32_t)s->data.size()) >> 10,
+                   s->native ? g_archives[s->entry.archive]->path.c_str() : "memory (read whole)",
+                   s->native ? s->entry.hash2 : 0, f);
     s->ring.resize((size_t)kRingFrames * channels);
     g_streams[f] = s;
     watch(f, true);
