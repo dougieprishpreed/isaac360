@@ -35,8 +35,9 @@ uint32_t shim_proc_address(const std::string& module, const std::string& name); 
 // or, while the main thread is parked in a wait, serves it itself. Serving clears the biased bit of each listed lock;
 // the main thread's plain stores before it are published by the release that ends the serving.
 uint32_t g_lockMainId = 0;
-std::atomic<uint32_t> g_lockRevokePending(0);
+std::atomic<uint32_t> g_mainChores(0);
 namespace {
+void (*g_framesChore)() = 0;
 std::mutex g_revokeLock;
 std::vector<GuestLock*> g_revokeList;
 uint64_t g_revokeAsked = 0;                             // under g_revokeLock
@@ -51,7 +52,7 @@ void serve_listed() {                                   // with g_revokeLock
     }
     g_revoked.fetch_add((uint32_t)g_revokeList.size(), std::memory_order_relaxed);
     g_revokeList.clear();
-    g_lockRevokePending.store(0, std::memory_order_relaxed);
+    g_mainChores.fetch_and(~(uint32_t)kChoreLocks, std::memory_order_relaxed);
     g_revokeDone.store(g_revokeAsked, std::memory_order_release);
 }
 }  // namespace
@@ -59,8 +60,18 @@ void serve_listed() {                                   // with g_revokeLock
 void guest_lock_set_main(uint32_t id) { g_lockMainId = id; }
 
 void guest_lock_serve() {
-    std::lock_guard<std::mutex> g(g_revokeLock);
-    serve_listed();
+    uint32_t chores = g_mainChores.load(std::memory_order_relaxed);
+    if (chores & kChoreLocks) {
+        std::lock_guard<std::mutex> g(g_revokeLock);
+        serve_listed();
+    }
+    if ((chores & kChoreFrames) && g_framesChore) g_framesChore();
+}
+
+void guest_main_frames_chore(void (*fn)()) {
+    g_framesChore = fn;
+    if (fn) g_mainChores.fetch_or(kChoreFrames, std::memory_order_relaxed);
+    else g_mainChores.fetch_and(~(uint32_t)kChoreFrames, std::memory_order_relaxed);
 }
 
 void guest_lock_revoke_slow(GuestLock& l, uint32_t me) {
@@ -71,7 +82,7 @@ void guest_lock_revoke_slow(GuestLock& l, uint32_t me) {
         if (!(l.word.load(std::memory_order_relaxed) & kLockBiased)) return;
         g_revokeList.push_back(&l);
         ticket = ++g_revokeAsked;
-        g_lockRevokePending.store(1, std::memory_order_relaxed);
+        g_mainChores.fetch_or(kChoreLocks, std::memory_order_relaxed);
     }
     std::chrono::steady_clock::time_point t0 = std::chrono::steady_clock::now();
     for (uint32_t spins = 0;; ++spins) {
@@ -351,7 +362,10 @@ void k_GetLocalTime(X86* c) {
     for (int i = 0; i < 8; ++i) WR16(a + 2 * i, v[i]);
     RET_STD(c, 1, 0);
 }
-void w_timeGetTime(X86* c) { RET_STD(c, 0, (uint32_t)(now_us() / 1000)); }
+void w_timeGetTime(X86* c) {
+    if (guest_thread(c)->id == g_lockMainId) guest_lock_main_check();
+    RET_STD(c, 0, (uint32_t)(now_us() / 1000));
+}
 void w_timeBeginPeriod(X86* c) { RET_STD(c, 1, 0); }
 void w_timeEndPeriod(X86* c) { RET_STD(c, 1, 0); }
 void w_timeGetDevCaps(X86* c) { WR32(ARG(c, 0), 1); WR32(ARG(c, 0) + 4, 1000000); RET_STD(c, 2, 0); }

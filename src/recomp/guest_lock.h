@@ -19,8 +19,12 @@
 enum { kLockWaiting = 1u, kLockBiased = 2u };       // the word: owner id << 2 | biased | waiting (0: free, shared)
 
 extern uint32_t g_lockMainId;                       // the main thread's GuestThread::id (0 until it runs)
-extern std::atomic<uint32_t> g_lockRevokePending;   // another thread waits for biased locks (the main thread serves)
-void guest_lock_serve();                            // the main thread: hand over the locks asked for
+// what the main thread does between its lock operations and in clock reads (guest_lock_serve): hand over the locks
+// another thread waits for, and the loading screen's frames (shims_gl.cpp) while it is up
+enum { kChoreLocks = 1u, kChoreFrames = 2u };
+extern std::atomic<uint32_t> g_mainChores;
+void guest_lock_serve();                            // the main thread: its chores
+void guest_main_frames_chore(void (*fn)());         // the main thread: fn as a chore from now on (0: none)
 void guest_lock_revoke_slow(struct GuestLock& l, uint32_t me);   // another thread: returns once l is shared
 void guest_lock_main_park();                        // the main thread is about to block: others may take locks
 void guest_lock_main_unpark();
@@ -35,9 +39,9 @@ struct GuestLock {
     GuestLock() : word(g_lockMainId ? kLockBiased : 0u), count(0), waiting(0) {}
 };
 
-// the main thread, between lock operations: hand over what others asked for (a plain load when nothing is asked)
+// the main thread, between lock operations: its chores (a plain load when there are none)
 inline void guest_lock_main_check() {
-    if (g_lockRevokePending.load(std::memory_order_relaxed)) guest_lock_serve();
+    if (g_mainChores.load(std::memory_order_relaxed)) guest_lock_serve();
 }
 
 // owner ids come from GuestThread::id (runtime.h), from 1
@@ -45,7 +49,7 @@ inline bool guest_lock_try(GuestLock& l, uint32_t me) {
     uint32_t w = l.word.load(std::memory_order_relaxed);
     if (w & kLockBiased) {
         if (me == g_lockMainId) {
-            if (g_lockRevokePending.load(std::memory_order_relaxed)) {
+            if (g_mainChores.load(std::memory_order_relaxed)) {
                 guest_lock_serve();
                 w = l.word.load(std::memory_order_relaxed);
             }

@@ -75,4 +75,14 @@ std::vector<uint32_t> gl_vk_targets();     // the textures the game renders to
 bool gl_vk_read_texture(uint32_t name, std::vector<uint8_t>& bgra, int& w, int& h);
 void gl_vk_frame_counts(char* buf, size_t size);   // the last frame's passes and draws (frame lines)
 
+// Frames drawn again (shims_gl.cpp's loading screen): while recording is on, each clear and draw of a frame is kept
+// with the GL state it was made in and its vertices as packed, from the next present on. gl_vk_replay draws the last
+// whole frame again in the middle of a later one, the texture names in from[] drawn as those in to[], presents it and
+// puts the game's GL state back. It declines (false) a frame that drew bloom, named a texture or program that is
+// gone, or renders into a texture the frame under way has rendered into.
+void gl_vk_record_frames(bool on);
+bool gl_vk_last_frame_samples(uint32_t texture);   // the last whole frame drew with it
+bool gl_vk_texture_exists(uint32_t texture);
+bool gl_vk_replay(const uint32_t* from, const uint32_t* to, int n);
+
 #endif

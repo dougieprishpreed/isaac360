@@ -1,6 +1,7 @@
 // UCRT and VCRUNTIME imports of isaac-ng.exe (docs/RECOMP_PLAN.md). cdecl unless noted. Strings and buffers are
 // guest memory; files go through the host C library with the game folder as the current directory.
 #include "runtime.h"
+#include "guest_lock.h"
 #include "vfile.h"
 #include <algorithm>
 #include <ctype.h>
@@ -64,7 +65,12 @@ void s_fclose(X86* c) {
     }
     RET_CDECL(c, f ? 0 : (uint32_t)-1);
 }
+// the main thread's chores (guest_lock.h) at its allocations and reads too: a load runs long stretches without a lock
+inline void main_chores(X86* c) {
+    if (g_mainChores.load(std::memory_order_relaxed) && guest_thread(c)->id == g_lockMainId) guest_lock_serve();
+}
 void s_fread(X86* c) {
+    main_chores(c);
     VFile* f = host_file(ARG(c, 3));
     uint32_t n = f ? (uint32_t)vf_read(f, G(ARG(c, 0)), ARG(c, 1), ARG(c, 2)) : 0;
     RET_CDECL(c, n);
@@ -326,8 +332,13 @@ uint32_t traced_alloc(X86* c, uint32_t p, uint32_t size) {
     if (guest_heap_checking()) guest_heap_note(p, "made from", stack_site(c));
     return p;
 }
-void s_malloc(X86* c) { big_alloc_log(c, ARG(c, 0)); RET_CDECL(c, traced_alloc(c, guest_malloc(ARG(c, 0)), ARG(c, 0))); }
+void s_malloc(X86* c) {
+    main_chores(c);
+    big_alloc_log(c, ARG(c, 0));
+    RET_CDECL(c, traced_alloc(c, guest_malloc(ARG(c, 0)), ARG(c, 0)));
+}
 void s_free(X86* c) {
+    main_chores(c);
     if (g_heapProfile) profile_free(ARG(c, 0));
     if (guest_heap_checking()) guest_heap_note(ARG(c, 0), "freed from", stack_site(c));
     hle_vorbis_freed(ARG(c, 0));                    // a music decoder the host serves goes with its object

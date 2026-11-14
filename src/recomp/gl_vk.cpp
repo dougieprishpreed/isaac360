@@ -350,6 +350,46 @@ void ring_high(VkDeviceSize v, VkDeviceSize i, VkDeviceSize u) {
     if (i > g_ringHigh[1]) g_ringHigh[1] = i;
     if (u > g_ringHigh[2]) g_ringHigh[2] = u;
 }
+// Frames drawn again (gl_vk_replay): each clear and draw of a recorded frame with the GL state it was made in, its
+// vertices and indices as the rings took them
+struct RecState {
+    uint32_t fbo, fboColor, fboDepth;
+    int viewport[4];
+    float clearColor[4], clearDepth;
+    bool blend, cull, depthTest, alphaTest, depthMask;
+    uint32_t src, dst, srcA, dstA, cullFace, frontFace, depthFunc, alphaFunc;
+    float alphaRef;
+    uint32_t program;
+    uint8_t push[PUSH_BYTES];
+    int samplerUnit[SAMPLER_SLOTS];
+    uint32_t tex[SAMPLER_SLOTS];                 // the texture each sampler binding's unit held (0: none)
+    uint32_t texParams[SAMPLER_SLOTS][4];        // its min and mag filters, s and t wraps
+};
+struct RecCmd {
+    bool draw;
+    uint32_t clearMask;
+    RecState st;
+    VkPrimitiveTopology topo;
+    int count;
+    uint32_t nverts;
+    bool wide, plain;
+    std::vector<uint8_t> verts, idx;
+};
+struct RecFrame {
+    std::vector<RecCmd> cmds;                   // the first n are this frame's (the rest keep their buffers)
+    size_t n;
+    std::set<uint32_t> targets;                 // the textures it rendered into
+    bool whole;                                 // nothing it did is left out of a replay (bloom's rows are)
+    RecFrame() : n(0), whole(true) {}
+    void reset() {
+        n = 0;
+        targets.clear();
+        whole = true;
+    }
+};
+bool g_recOn = false, g_replaying = false;
+RecFrame g_recNow, g_recLast;                   // the frame being drawn, the last whole one
+std::vector<uint32_t> g_recKept;                // deleted by the game, named by g_recLast (release_kept)
 // ISAAC360_GL_STATS: per program, the z its vertices span and the states it draws with (build/recomp/gl_stats.txt)
 struct ProgramStats {
     float zmin, zmax;
@@ -959,6 +999,11 @@ bool ensure_pass(bool clearsColor, bool clearsDepth) {
     PassKey key = {t.color->view, t.depth ? t.depth->view : VK_NULL_HANDLE};
     if (g_inPass && g_passKey == key) return true;
     end_pass();
+    if (g_recOn && !g_replaying) {
+        // a frame drawn again redraws its targets whole: one that draws onto what a target held before is not
+        uint32_t target = g_fbo ? g_fbos[g_fbo].color : 0;
+        if (g_recNow.targets.insert(target).second && !clearsColor) g_recNow.whole = false;
+    }
     bool hasDepth = t.depth != 0;
     VkRenderPass pass = render_pass(!clearsColor, !(clearsDepth && hasDepth), hasDepth, false);
     VkFramebuffer fb;
@@ -2231,6 +2276,125 @@ void add_fill(const Program& p, uint32_t lo, int count, bool plain) {
     else g_fillSprite += sum;
 }
 
+// ---- frames recorded to be drawn again (gl_vk_replay) ------------------------------------------------------
+void rec_state(RecState& s, const Program* p) {
+    s.fbo = g_fbo;
+    s.fboColor = s.fboDepth = 0;
+    if (g_fbo) {
+        std::map<uint32_t, Fbo>::iterator it = g_fbos.find(g_fbo);
+        if (it != g_fbos.end()) {
+            s.fboColor = it->second.color;
+            s.fboDepth = it->second.depth;
+        }
+    }
+    memcpy(s.viewport, g_viewport, sizeof(s.viewport));
+    memcpy(s.clearColor, g_clearColor, sizeof(s.clearColor));
+    s.clearDepth = g_clearDepth;
+    s.blend = g_blend;
+    s.cull = g_cull;
+    s.depthTest = g_depthTest;
+    s.alphaTest = g_alphaTest;
+    s.depthMask = g_depthMask;
+    s.src = g_src;
+    s.dst = g_dst;
+    s.srcA = g_srcA;
+    s.dstA = g_dstA;
+    s.cullFace = g_cullFace;
+    s.frontFace = g_frontFace;
+    s.depthFunc = g_depthFunc;
+    s.alphaFunc = g_alphaFunc;
+    s.alphaRef = g_alphaRef;
+    s.program = g_program;
+    memset(s.tex, 0, sizeof(s.tex));
+    if (!p) return;
+    memcpy(s.push, p->push, PUSH_BYTES);
+    memcpy(s.samplerUnit, p->samplerUnit, sizeof(s.samplerUnit));
+    for (size_t u = 0; u < p->uniforms.size(); ++u) {
+        if (p->uniforms[u].bytes >= 0) continue;
+        int b = p->uniforms[u].offset;
+        if (b < 0 || b >= SAMPLER_SLOTS) continue;
+        uint32_t unit = (uint32_t)p->samplerUnit[b];
+        if (unit >= MAX_UNITS || !g_units[unit]) continue;
+        std::map<uint32_t, Texture>::iterator it = g_textures.find(g_units[unit]);
+        if (it == g_textures.end()) continue;
+        s.tex[b] = g_units[unit];
+        s.texParams[b][0] = it->second.minFilter;
+        s.texParams[b][1] = it->second.magFilter;
+        s.texParams[b][2] = it->second.wrapS;
+        s.texParams[b][3] = it->second.wrapT;
+    }
+}
+
+RecCmd& rec_next() {
+    RecFrame& r = g_recNow;
+    if (r.n == r.cmds.size()) r.cmds.push_back(RecCmd());
+    return r.cmds[r.n++];
+}
+
+void record_clear(uint32_t mask) {
+    RecCmd& c = rec_next();
+    c.draw = false;
+    c.clearMask = mask;
+    rec_state(c.st, 0);
+}
+
+void record_draw(const Program& p, VkPrimitiveTopology topo, int count, uint32_t nverts, bool wide, bool plain,
+                 bool bloom) {
+    if (bloom) {                                    // its rows pass reads the guest's vertices: not kept
+        g_recNow.whole = false;
+        return;
+    }
+    RecCmd& c = rec_next();
+    c.draw = true;
+    c.clearMask = 0;
+    rec_state(c.st, &p);
+    c.topo = topo;
+    c.count = count;
+    c.nverts = nverts;
+    c.wide = wide;
+    c.plain = plain;
+    const Frame& f = g_frames[g_frame];
+    c.verts.assign(f.vertices.map + f.vOff, f.vertices.map + f.vOff + (size_t)nverts * p.stride);
+    c.idx.assign(f.indices.map + f.iOff, f.indices.map + f.iOff + (size_t)count * (wide ? 4 : 2));
+}
+
+// the textures a recorded frame renders into or samples
+bool rec_names(const RecFrame& r, uint32_t name) {
+    for (size_t i = 0; i < r.n; ++i) {
+        const RecCmd& c = r.cmds[i];
+        if (c.st.fbo && c.st.fboColor == name) return true;
+        if (c.draw)
+            for (int b = 0; b < SAMPLER_SLOTS; ++b)
+                if (c.st.tex[b] == name) return true;
+    }
+    return false;
+}
+
+void delete_texture(std::map<uint32_t, Texture>::iterator it) {
+    if (g_inPass && it->second.img.view == g_passKey.color) end_pass();
+    if (!pool_put(it->second)) retire_image(it->second.img);
+    drop_packed(it->second);
+    g_textures.erase(it);
+}
+
+// textures the game deleted that the frame to be drawn again names; those it no longer names go now (all: true)
+void release_kept(bool all) {
+    for (size_t i = 0; i < g_recKept.size();) {
+        uint32_t name = g_recKept[i];
+        std::map<uint32_t, Texture>::iterator it = g_textures.find(name);
+        if (it != g_textures.end() && !all && rec_names(g_recLast, name)) {
+            ++i;
+            continue;
+        }
+        if (it != g_textures.end()) delete_texture(it);
+        g_recKept[i] = g_recKept.back();
+        g_recKept.pop_back();
+    }
+}
+
+void emit_draw(Program& p, VkPrimitiveTopology topo, int count, uint32_t nverts, bool wide, bool plain, bool bloom,
+               uint32_t lo, bool replayed);
+
 void draw(uint32_t mode, int count, uint32_t indexType, uint32_t indices, int first, bool indexed) {
     if (count <= 0 || !g_program) return;
     // the program in use, found once each time it changes (map nodes stay where they are)
@@ -2366,6 +2530,16 @@ void draw(uint32_t mode, int count, uint32_t indexType, uint32_t indices, int fi
         uint16_t* ix = (uint16_t*)(f->indices.map + f->iOff);
         for (int i = 0; i < count; ++i) ix[i] = (uint16_t)(idx[(size_t)i] - lo);
     }
+    if (g_recOn && !g_replaying) record_draw(p, topo, count, nverts, wide, plain, bloom);
+    emit_draw(p, topo, count, nverts, wide, plain, bloom, lo, false);
+}
+
+// a draw's commands, its vertices and indices in the rings at the frame's offsets (replayed: a recorded draw's, whose
+// guest vertices are not read again)
+void emit_draw(Program& p, VkPrimitiveTopology topo, int count, uint32_t nverts, bool wide, bool plain, bool bloom,
+               uint32_t lo, bool replayed) {
+    Frame* f = &g_frames[g_frame];
+    VkDeviceSize vbytes = (VkDeviceSize)nverts * p.stride;
     VkCommandBuffer cmd = f->cmd;
     PipeKey k;
     memset(&k, 0, sizeof(k));
@@ -2390,7 +2564,7 @@ void draw(uint32_t mode, int count, uint32_t indexType, uint32_t indices, int fi
                  k.depthTest ? "on" : "off", g_depthFunc);
     k.topology = (uint32_t)topo;
     k.plain = plain;
-    if (g_fillStats) add_fill(p, lo, count, plain);
+    if (g_fillStats && !replayed) add_fill(p, lo, count, plain);
     VkPipeline pipe = pipeline(k, p);
     if (!pipe) return;
     ++g_counts.draws;
@@ -2615,6 +2789,7 @@ void pass_area_for_draw() {
 void clear(uint32_t mask) {
     bool color = (mask & GL_COLOR_BUFFER_BIT) != 0, depth = (mask & (GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT)) != 0;
     if (!color && !depth) return;
+    if (g_recOn && !g_replaying) record_clear(mask);
     // a pass that begins with this clear does not load what it clears (vulkan4xenon: no draw-back)
     if (!ensure_pass(color, depth)) return;
     VkClearAttachment att[2];
@@ -2814,12 +2989,15 @@ void vk_glDeleteTextures(X86* c) {
         uint32_t name = RD32(names + 4 * i);
         std::map<uint32_t, Texture>::iterator it = g_textures.find(name);
         if (it == g_textures.end()) continue;
-        if (g_inPass && it->second.img.view == g_passKey.color) end_pass();
-        if (!pool_put(it->second)) retire_image(it->second.img);
-        drop_packed(it->second);
-        g_textures.erase(it);
         for (int u = 0; u < MAX_UNITS; ++u)
             if (g_units[u] == name) g_units[u] = 0;
+        // the frame to be drawn again names it: it stays (under a name the game never gets again) until that frame
+        // is replaced (gl_vk_present)
+        if (g_recOn && rec_names(g_recLast, name)) {
+            g_recKept.push_back(name);
+            continue;
+        }
+        delete_texture(it);
     }
     RET_STD(c, 2, 0);
 }
@@ -3663,11 +3841,15 @@ void effects_frame() {
     }
 }
 
-void gl_vk_present() {
-    if (!g_ready) return;
-    effects_frame();
-    g_lastCounts = g_counts;
-    memset(&g_counts, 0, sizeof(g_counts));
+// the frame's end: its commands submitted, the default framebuffer shown; injected: a frame drawn again in the middle
+// of one of the game's (gl_vk_replay), which leaves the game's frame counts and effects alone and is not timed (the
+// GPU work before it is the game's frame's too)
+static void present_frame(bool injected) {
+    if (!injected) {
+        effects_frame();
+        g_lastCounts = g_counts;
+        memset(&g_counts, 0, sizeof(g_counts));
+    }
     begin_recording();
     end_pass();
     collect_packed();
@@ -3734,6 +3916,7 @@ void gl_vk_present() {
         vkCmdWriteTimestamp(f.cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, g_queries, (uint32_t)(2 * g_frame + 1));
     vkEndCommandBuffer(f.cmd);
     g_recording = false;
+    if (injected) g_frameFlushed[g_frame] = true;
     VkPipelineStageFlags wait = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
     VkSubmitInfo si;
     memset(&si, 0, sizeof(si));
@@ -3760,4 +3943,234 @@ void gl_vk_present() {
         vkQueuePresentKHR(g_queue, &pi);
     }
     next_frame();
+}
+
+void gl_vk_present() {
+    if (!g_ready) return;
+    if (g_recOn) {                                  // the frame's record is whole: the one drawn again from now on
+        std::swap(g_recNow, g_recLast);
+        g_recNow.reset();
+        if (!g_recKept.empty()) release_kept(false);
+    }
+    present_frame(false);
+}
+
+// ---- frames drawn again ------------------------------------------------------------------------------------
+void gl_vk_record_frames(bool on) {
+    if (on == g_recOn) return;
+    g_recOn = on;
+    g_recNow = RecFrame();                          // a frame half recorded is no use, and off frees the buffers
+    g_recLast = RecFrame();
+    release_kept(true);
+}
+
+bool gl_vk_last_frame_samples(uint32_t texture) {
+    if (!texture) return false;
+    for (size_t i = 0; i < g_recLast.n; ++i) {
+        const RecCmd& c = g_recLast.cmds[i];
+        if (c.draw)
+            for (int b = 0; b < SAMPLER_SLOTS; ++b)
+                if (c.st.tex[b] == texture) return true;
+    }
+    return false;
+}
+
+bool gl_vk_texture_exists(uint32_t texture) {
+    std::map<uint32_t, Texture>::iterator it = g_textures.find(texture);
+    return texture && it != g_textures.end() && (it->second.img.image || has_pixels(it->second));
+}
+
+namespace {
+// a recorded draw from its packed vertices, in the state replay_state set
+void replay_draw(const RecCmd& d) {
+    std::map<uint32_t, Program>::iterator pi = g_programs.find(g_program);
+    if (pi == g_programs.end() || !pi->second.linked) return;
+    Program& p = pi->second;
+    if (g_lazyTextures)
+        for (size_t u = 0; u < p.uniforms.size(); ++u) {
+            if (p.uniforms[u].bytes >= 0) continue;
+            uint32_t unit = (uint32_t)p.samplerUnit[p.uniforms[u].offset];
+            std::map<uint32_t, Texture>::iterator it = g_textures.find(unit < MAX_UNITS ? g_units[unit] : 0);
+            if (it != g_textures.end() && !it->second.img.image && has_pixels(it->second)) materialize(it->second);
+        }
+    Frame* f = &g_frames[g_frame];
+    if (f->vOff + d.verts.size() > VERTEX_RING || f->iOff + d.idx.size() > INDEX_RING) flush_wait();
+    pass_area_for_draw();
+    if (!ensure_pass(false, false)) return;
+    f = &g_frames[g_frame];
+    if (!d.verts.empty()) memcpy(f->vertices.map + f->vOff, &d.verts[0], d.verts.size());
+    if (!d.idx.empty()) memcpy(f->indices.map + f->iOff, &d.idx[0], d.idx.size());
+    emit_draw(p, d.topo, d.count, d.nverts, d.wide, d.plain, false, 0, true);
+}
+
+uint32_t substitute(uint32_t t, const uint32_t* from, const uint32_t* to, int n) {
+    for (int i = 0; i < n; ++i)
+        if (t == from[i]) return to[i];
+    return t;
+}
+
+void replay_state(const RecCmd& c, const uint32_t* from, const uint32_t* to, int n) {
+    const RecState& s = c.st;
+    g_fbo = s.fbo;
+    if (s.fbo) {
+        Fbo& f = g_fbos[s.fbo];
+        f.color = s.fboColor;
+        f.depth = s.fboDepth;
+    }
+    memcpy(g_viewport, s.viewport, sizeof(g_viewport));
+    memcpy(g_clearColor, s.clearColor, sizeof(g_clearColor));
+    g_clearDepth = s.clearDepth;
+    if (!c.draw) return;
+    g_blend = s.blend;
+    g_cull = s.cull;
+    g_depthTest = s.depthTest;
+    g_alphaTest = s.alphaTest;
+    g_depthMask = s.depthMask;
+    g_src = s.src;
+    g_dst = s.dst;
+    g_srcA = s.srcA;
+    g_dstA = s.dstA;
+    g_cullFace = s.cullFace;
+    g_frontFace = s.frontFace;
+    g_depthFunc = s.depthFunc;
+    g_alphaFunc = s.alphaFunc;
+    g_alphaRef = s.alphaRef;
+    g_program = s.program;
+    Program& p = g_programs[s.program];
+    memcpy(p.push, s.push, PUSH_BYTES);
+    memcpy(p.samplerUnit, s.samplerUnit, sizeof(p.samplerUnit));
+    for (int b = 0; b < SAMPLER_SLOTS; ++b) {
+        if (!s.tex[b]) continue;
+        uint32_t t = substitute(s.tex[b], from, to, n);
+        g_units[(uint32_t)s.samplerUnit[b] & (MAX_UNITS - 1)] = t;
+        if (t != s.tex[b]) continue;                // a texture drawn in another's place keeps its own sampling
+        Texture& x = g_textures[t];
+        x.minFilter = s.texParams[b][0];
+        x.magFilter = s.texParams[b][1];
+        x.wrapS = s.texParams[b][2];
+        x.wrapT = s.texParams[b][3];
+    }
+}
+}  // namespace
+
+bool gl_vk_replay(const uint32_t* from, const uint32_t* to, int n) {
+    RecFrame& r = g_recLast;
+    if (!g_ready || !g_recOn || g_replaying || !r.whole || !r.n) return false;
+    // the frame under way rendered into a texture the recorded one renders into: drawing it again would undo that
+    for (std::set<uint32_t>::const_iterator it = r.targets.begin(); it != r.targets.end(); ++it)
+        if (g_recNow.targets.count(*it)) {
+            log_once("gl_vk: a frame not drawn again: the frame under way rendered into its texture %u", *it);
+            return false;
+        }
+    // everything it names is still there
+    for (size_t i = 0; i < r.n; ++i) {
+        const RecCmd& c = r.cmds[i];
+        if (c.st.fbo) {
+            std::map<uint32_t, Texture>::iterator t = g_textures.find(c.st.fboColor);
+            if (!g_fbos.count(c.st.fbo) || t == g_textures.end() || !t->second.img.image) {
+                log_once("gl_vk: a frame not drawn again: its target texture %u is gone", c.st.fboColor);
+                return false;
+            }
+        }
+        if (!c.draw) continue;
+        std::map<uint32_t, Program>::iterator p = g_programs.find(c.st.program);
+        if (p == g_programs.end() || !p->second.linked) return false;
+        for (int b = 0; b < SAMPLER_SLOTS; ++b)
+            if (c.st.tex[b] && !gl_vk_texture_exists(substitute(c.st.tex[b], from, to, n))) {
+                log_once("gl_vk: a frame not drawn again: texture %u is gone", substitute(c.st.tex[b], from, to, n));
+                return false;
+            }
+    }
+    // the game's GL state, put back after
+    uint32_t units[MAX_UNITS];
+    memcpy(units, g_units, sizeof(units));
+    uint32_t activeUnit = g_activeUnit, program = g_program, fbo = g_fbo, rb = g_rb;
+    int viewport[4];
+    memcpy(viewport, g_viewport, sizeof(viewport));
+    float clearColor[4];
+    memcpy(clearColor, g_clearColor, sizeof(clearColor));
+    float clearDepth = g_clearDepth, alphaRef = g_alphaRef;
+    bool blend = g_blend, cull = g_cull, depthTest = g_depthTest, alphaTest = g_alphaTest, depthMask = g_depthMask;
+    uint32_t src = g_src, dst = g_dst, srcA = g_srcA, dstA = g_dstA, cullFace = g_cullFace, frontFace = g_frontFace;
+    uint32_t depthFunc = g_depthFunc, alphaFunc = g_alphaFunc;
+    std::map<uint32_t, Fbo> fbos = g_fbos;
+    FrameCounts counts = g_counts;
+    uint64_t effectMask = g_effectMask;
+    struct ProgramSaved {
+        uint8_t push[PUSH_BYTES];
+        int samplerUnit[SAMPLER_SLOTS];
+    };
+    struct ParamsSaved {
+        uint32_t v[4];
+    };
+    std::map<uint32_t, ProgramSaved> programs;
+    std::map<uint32_t, ParamsSaved> params;
+    for (size_t i = 0; i < r.n; ++i) {
+        const RecCmd& c = r.cmds[i];
+        if (!c.draw) continue;
+        if (!programs.count(c.st.program)) {
+            Program& p = g_programs[c.st.program];
+            ProgramSaved& ps = programs[c.st.program];
+            memcpy(ps.push, p.push, PUSH_BYTES);
+            memcpy(ps.samplerUnit, p.samplerUnit, sizeof(ps.samplerUnit));
+        }
+        for (int b = 0; b < SAMPLER_SLOTS; ++b)
+            if (c.st.tex[b] && !params.count(c.st.tex[b])) {
+                Texture& t = g_textures[c.st.tex[b]];
+                uint32_t* v = params[c.st.tex[b]].v;
+                v[0] = t.minFilter;
+                v[1] = t.magFilter;
+                v[2] = t.wrapS;
+                v[3] = t.wrapT;
+            }
+    }
+    g_replaying = true;
+    begin_recording();
+    end_pass();                                     // the game's next draw begins a pass that loads its target
+    for (size_t i = 0; i < r.n; ++i) {
+        const RecCmd& c = r.cmds[i];
+        replay_state(c, from, to, n);
+        if (c.draw) replay_draw(c);
+        else clear(c.clearMask);
+    }
+    present_frame(true);
+    memcpy(g_units, units, sizeof(units));
+    g_activeUnit = activeUnit;
+    g_program = program;
+    g_fbo = fbo;
+    g_rb = rb;
+    memcpy(g_viewport, viewport, sizeof(viewport));
+    memcpy(g_clearColor, clearColor, sizeof(clearColor));
+    g_clearDepth = clearDepth;
+    g_alphaRef = alphaRef;
+    g_blend = blend;
+    g_cull = cull;
+    g_depthTest = depthTest;
+    g_alphaTest = alphaTest;
+    g_depthMask = depthMask;
+    g_src = src;
+    g_dst = dst;
+    g_srcA = srcA;
+    g_dstA = dstA;
+    g_cullFace = cullFace;
+    g_frontFace = frontFace;
+    g_depthFunc = depthFunc;
+    g_alphaFunc = alphaFunc;
+    g_fbos = fbos;
+    g_counts = counts;
+    g_effectMask = effectMask;
+    for (std::map<uint32_t, ProgramSaved>::iterator it = programs.begin(); it != programs.end(); ++it) {
+        Program& p = g_programs[it->first];
+        memcpy(p.push, it->second.push, PUSH_BYTES);
+        memcpy(p.samplerUnit, it->second.samplerUnit, sizeof(p.samplerUnit));
+    }
+    for (std::map<uint32_t, ParamsSaved>::iterator it = params.begin(); it != params.end(); ++it) {
+        Texture& t = g_textures[it->first];
+        t.minFilter = it->second.v[0];
+        t.magFilter = it->second.v[1];
+        t.wrapS = it->second.v[2];
+        t.wrapT = it->second.v[3];
+    }
+    g_replaying = false;
+    return true;
 }

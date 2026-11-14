@@ -4,6 +4,7 @@
 // stop with their name the first time the game calls them, so the set grows with what the game really uses.
 #include "runtime.h"
 #include "gl_vk.h"
+#include "guest_lock.h"
 #include "vfile.h"
 #include <atomic>
 #include <chrono>
@@ -543,6 +544,109 @@ static void log_slow_frame(double game, double present) {
     lastLocks = locks;
 }
 
+// ---- the run's loading screen kept moving
+// From Continue or a new run the game shows a drawing (F_89af70 loads its two pictures, gfx/ui/loadimages/
+// loadimages-NNN.png and its _2, into the manager at +0x4A364 and +0x4A36C: texture objects that hold their GL names
+// at +0x78) and alternates them every 8 frames by the manager's frame counter (+0x4A230, which a frame draws with as
+// the present finds it; F_89b260: the second picture while the count mod 16 is 8 or more), for at least 3 s (F_6b81f0:
+// 0xBB8 ms by timeGetTime from +0x4A374) and until the run is loaded. The load runs in one frame inside it: 0.15-0.4 s
+// on the PC, 2.3 s on the console (boot 21), the drawing still all that time. While the pictures are loaded the GL
+// layer keeps each frame's draws (gl_vk_record_frames); once a frame has run 50 ms, the main thread's chores (between
+// its lock operations and in its clock reads: guest_lock.h) draw the last frame again with the picture the counter
+// would have reached by then, each time it changes, and present it (gl_vk_replay). The game's memory is left alone:
+// after the load its counter goes on from where it was. ISAAC360_LOAD_FRAMES=0 leaves the drawing still;
+// ISAAC360_LOAD_STALL_MS=N draws a frame of the screen that runs over 100 ms out by N ms, waits of N/20 ms in
+// 20 of those chores (the console's load on the PC); ISAAC360_LOAD_SHOTS=1 writes each frame drawn again as load_F_N.bmp.
+namespace {
+const uint32_t kManager = 0x00BC9B0Cu;
+enum { kLoadPictures = 0x4A364, kFrameCounter = 0x4A230, kTextureName = 0x78 };
+struct LoadScreen {
+    bool armed, failed;
+    uint32_t picture[2];                            // GL names (0: none)
+    uint32_t counter;                               // the manager's frame counter the last frame drew with
+    int shown;                                      // the picture on the screen
+    Clock::time_point presented, lastChance;        // the last present's end, the last chore's clock read
+    uint32_t calls, chances, injected, stalls;
+    double longestGap;
+};
+LoadScreen g_load;
+
+uint32_t load_picture(uint32_t manager, int i) {
+    uint32_t obj = RD32(manager + kLoadPictures + 8 * i);
+    uint32_t name = obj ? RD32(obj + kTextureName) : 0;
+    return gl_vk_texture_exists(name) ? name : 0;
+}
+
+void load_frames_chore() {
+    LoadScreen& s = g_load;
+    if (++s.calls & 31) return;                     // the clock at every 32nd chance
+    Clock::time_point now = Clock::now();
+    double gap = std::chrono::duration<double, std::milli>(now - s.lastChance).count();
+    if (gap > s.longestGap) s.longestGap = gap;
+    s.lastChance = now;
+    ++s.chances;
+    double ran = std::chrono::duration<double, std::milli>(now - s.presented).count();
+    static const int stallMs = getenv("ISAAC360_LOAD_STALL_MS") ? atoi(getenv("ISAAC360_LOAD_STALL_MS")) : 0;
+    if (stallMs > 0 && ran > 100.0 && s.stalls < 20) {
+        ++s.stalls;
+        std::this_thread::sleep_for(std::chrono::milliseconds(stallMs / 20));
+    }
+    if (ran < 50.0 || s.failed) return;
+    uint32_t k = (uint32_t)(ran * 0.06);            // display frames since the last present
+    int want = s.picture[1] && ((s.counter + k) & 15) >= 8 ? 1 : 0;
+    if (want == s.shown) return;
+    uint32_t to[2] = {s.picture[want], s.picture[want]};
+    guest_lock_main_park();                         // a present may wait for the display: others may take locks
+    bool ok = gl_vk_replay(s.picture, to, 2);
+    guest_lock_main_unpark();
+    if (!ok) {
+        s.failed = true;                            // not again in this frame (gl_vk logs why)
+        return;
+    }
+    s.shown = want;
+    ++s.injected;
+    static const bool shots = getenv("ISAAC360_LOAD_SHOTS") != 0;
+    if (shots) {
+        std::vector<uint8_t> px;
+        int w = 0, h = 0;
+        char name[64];
+        snprintf(name, sizeof(name), "/load_%05u_%02u.bmp", g_frames, s.injected);
+        if (gl_vk_read_frame(px, w, h)) write_bmp(recomp_out_dir() + name, px, w, h);
+    }
+}
+
+// after each present: the screen up (its pictures loaded) arms the chore for the next frame
+void load_frames_present() {
+    static const bool replay = !(getenv("ISAAC360_LOAD_FRAMES") && !atoi(getenv("ISAAC360_LOAD_FRAMES")));
+    static const bool stall = getenv("ISAAC360_LOAD_STALL_MS") != 0;
+    LoadScreen& s = g_load;
+    Clock::time_point now = Clock::now();
+    double ran = std::chrono::duration<double, std::milli>(now - s.presented).count();
+    if (s.armed && (s.injected || ran > 100.0))
+        recomp_log("load frames: frame %u ran %.0f ms, the loading screen presented %u times in it (the main thread's "
+                   "chores read the clock %u times, at most %.1f ms apart)", g_frames, ran, s.injected, s.chances,
+                   s.longestGap);
+    uint32_t m = replay || stall ? RD32(kManager) : 0;
+    uint32_t a = m ? load_picture(m, 0) : 0;
+    gl_vk_record_frames(a != 0 && replay);
+    if (!a) {
+        if (s.armed) guest_main_frames_chore(0);
+        s.armed = false;
+        return;
+    }
+    s.picture[0] = a;
+    s.picture[1] = load_picture(m, 1);
+    s.counter = RD32(m + kFrameCounter);
+    s.shown = gl_vk_last_frame_samples(s.picture[1]) ? 1 : gl_vk_last_frame_samples(a) ? 0 : -1;
+    s.failed = !replay || s.shown < 0;              // a frame without the drawing (or not recorded yet) stays as it is
+    s.presented = s.lastChance = now;
+    s.calls = s.chances = s.injected = s.stalls = 0;
+    s.longestGap = 0;
+    if (!s.armed) guest_main_frames_chore(load_frames_chore);
+    s.armed = true;
+}
+}  // namespace
+
 void gl_present() {
     static Clock::time_point lastEnd = Clock::now();
     Clock::time_point start = Clock::now();
@@ -563,6 +667,7 @@ void gl_present() {
     if (gl_vk_enabled()) {
         gl_vk_shot(g_frames);
         gl_vk_present();
+        load_frames_present();
     }
 #if defined(_WIN32)
     else gl_pt_present();
