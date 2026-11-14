@@ -36,7 +36,8 @@ def main():
     ap.add_argument('--mem', type=int, default=320)
     ap.add_argument('--shots', type=int, default=900, help='a screenshot every N frames (0: none)')
     ap.add_argument('--mod', default='main', help='the script in tools/recomp/coverage_mod: main (the walk) or '
-                    'sound_stress (sound channels, music, cutscenes and restarts against the sound thread)')
+                    'sound_stress (sound channels, music, cutscenes and restarts against the sound thread), or walk '
+                    '(the stick held right, down, left and up in the first room: the player moves)')
     ap.add_argument('--heap-check', action='store_true', help='ISAAC360_HEAP_CHECK=1: guard bytes and held frees')
     args = ap.parse_args()
     if os.path.isdir(SAVE):
@@ -52,7 +53,10 @@ def main():
         os.remove(old)
     # the game writes log.txt only when it exits cleanly: its lines (and the script's "cov:") come from the printf
     # trace in the host log
-    env = dict(os.environ, ISAAC360_PAD=MENU_PAD, ISAAC360_SHADER_SAMPLES='1', ISAAC360_GL_STATS='1',
+    pad = MENU_PAD
+    if args.mod == 'walk':
+        pad += ''.join(';%d:%d:%s' % (2300 + 90 * i, 2390 + 90 * i, 'DSAW'[i % 4]) for i in range(40))
+    env = dict(os.environ, ISAAC360_PAD=pad, ISAAC360_SHADER_SAMPLES='1', ISAAC360_GL_STATS='1',
                ISAAC360_TRACE_PRINTF='400000', ISAAC360_TRACE_PRINTF_ONLY='cov:,ERROR,Error,error,warn,Lua,ASSERT')
     if args.shots:
         env['ISAAC360_SHOTS'] = ','.join(str(f) for f in range(args.shots, 200000, args.shots))

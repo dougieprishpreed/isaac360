@@ -318,8 +318,12 @@ class Fn:
                     out |= written                             # stored to the CPU state there
                 if ins is not None and ins.flow_control in (FC.CALL, FC.INDIRECT_CALL):
                     # its stores and reloads stand between for the registers the callee can reach; the others keep
-                    # their locals through it (compute_xmm_reach)
-                    new_in = rd[va] | (out & ~self.call_reach(ins))
+                    # their locals through it (compute_xmm_reach). The stores (xspill: the reached registers this
+                    # function writes) read them: a register a callee takes as its argument is live up to the call,
+                    # so a branch or label before it puts its lane 0 back in x_N (boot 22: the player's movement,
+                    # F_72ae20, passed a stale xmm0 at 0x72b52f and never moved)
+                    reach = self.call_reach(ins)
+                    new_in = rd[va] | (out & ~reach) | (reach & written)
                 else:
                     new_in = rd[va] | (out & ~kill[va])
                 if out != live_out[va] or new_in != live_in[va]:

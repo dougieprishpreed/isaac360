@@ -134,10 +134,55 @@ void trace_music(const char* what, uint32_t id, const Source& s, uint32_t n) {
 // Mixes one block of every playing source into acc (stereo floats). Each source runs a buffer at a time: the buffer
 // is looked up when the source moves to it, not for each sample (the console mixes under g_lock, which every AL call
 // the game makes waits for).
+// ISAAC360_TRACE_MIX=1: each second of the mix, the sources heard in it (gain above 0): streamed or not, the gain, the
+// frames mixed, the last buffer's length and, for a converted effect, its offset in sfx.pcm (what is that sound?)
+struct MixHeard {
+    uint32_t frames, bufferFrames, effect;
+    float gain;
+    bool streamed;
+};
+void trace_mix(uint32_t id, const Source* s, const Buffer* b, int frames, int total) {
+    static std::map<uint32_t, MixHeard> heard;
+    static uint32_t mixed = 0, second = 0;
+    if (s) {
+        MixHeard& h = heard[id];
+        h.frames += (uint32_t)frames;
+        h.gain = s->gain;
+        h.streamed = s->streamed;
+        if (b) {
+            h.bufferFrames = b->channels && b->pcm ? (uint32_t)(b->pcm->size() / b->channels) : 0;
+            h.effect = b->effect;
+        }
+        return;
+    }
+    mixed += (uint32_t)total;
+    if (mixed < (uint32_t)kRate) return;
+    mixed -= (uint32_t)kRate;
+    ++second;
+    std::string line;
+    for (std::map<uint32_t, MixHeard>::iterator it = heard.begin(); it != heard.end(); ++it) {
+        char b[96];
+        snprintf(b, sizeof(b), " %u%s gain %.2f %u frames (buffer %u%s)", it->first, it->second.streamed ? "s" : "",
+                 it->second.gain, it->second.frames, it->second.bufferFrames, it->second.effect ? ", effect" : "");
+        line += b;
+        if (it->second.effect) {
+            snprintf(b, sizeof(b), " @%u", it->second.effect);
+            line += b;
+        }
+    }
+    recomp_log("mix: second %u, frame %u:%s", second, gl_frame_count(), line.empty() ? " silence" : line.c_str());
+    heard.clear();
+}
+
 void mix_sources(std::map<uint32_t, Source>& sources, float* acc, int frames) {
+    static const bool tracingMix = getenv("ISAAC360_TRACE_MIX") != 0;
     for (std::map<uint32_t, Source>::iterator it = sources.begin(); it != sources.end(); ++it) {
         Source& s = it->second;
         if (s.state != AL_PLAYING) continue;
+        if (tracingMix && s.gain > 0 && !s.queue.empty()) {
+            std::map<uint32_t, Buffer>::iterator b = g_buffers.find(s.queue.front());
+            trace_mix(it->first, &s, b == g_buffers.end() ? 0 : &b->second, frames, 0);
+        }
         float g = s.gain * g_listenerGain * g_master, gl, gr;
         mono_gains(s, g, &gl, &gr);
         float near = g * kStereoNear, far = g * kStereoFar;
@@ -198,6 +243,7 @@ void mix_sources(std::map<uint32_t, Source>& sources, float* acc, int frames) {
             }
         }
     }
+    if (tracingMix) trace_mix(0, 0, 0, 0, frames);
 }
 
 void mix(int16_t* out, int frames) {

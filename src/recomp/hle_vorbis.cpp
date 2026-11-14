@@ -51,6 +51,7 @@ const uint32_t kMaxStream = 32u << 20;                  // more is not a music f
 const size_t kMaxStreams = 16;                          // past this the least recently read goes (a safety net)
 const size_t kFeed = 16u << 10;                         // bytes fed to the decoder at a time
 const uint32_t kMatchBytes = 4096;                      // the first bytes compared to find a stream's entry
+const uint32_t kHeadBytes = 64;                         // the first bytes kept to tell a stream from the next one
 
 // ------------------------------------------------------------------------------------------------ archives
 // An archive: "ARCH000", a version byte, u32 table offset, u16 entry count; the table: hash1, hash2, offset, size,
@@ -385,6 +386,8 @@ struct EntryReader {
 // ------------------------------------------------------------------------------------------------ streams
 struct Stream {
     uint32_t file, fileStart, memStart, memEnd;         // its source as the game's decoder has it (and who it is)
+    uint32_t length = 0;                                // the stream's bytes, as the decoder has them
+    std::vector<uint8_t> first;                         // its first bytes (kHeadBytes): the first Ogg page's header
     int channels;                                       // as the game reads it
     bool native = false;                                // an archive entry the host reads, else data
     Entry entry;
@@ -442,7 +445,7 @@ void retire(std::map<uint32_t, std::shared_ptr<Stream> >::iterator it) {   // wi
 
 bool same_source(const Stream& s, uint32_t f) {
     return s.file == RD32(f + G_FILE) && s.fileStart == RD32(f + G_FILE_START) && s.memStart == RD32(f + G_STREAM_START) &&
-           s.memEnd == RD32(f + G_STREAM_END);
+           s.memEnd == RD32(f + G_STREAM_END) && s.length == RD32(f + G_STREAM_LEN);
 }
 
 // a thiscall on the game's file object, from the game's thread
@@ -455,7 +458,7 @@ uint32_t vcall(X86* c, uint32_t object, uint32_t slot, int nargs, const uint32_t
 // vtable +0x14, Seek at +0xc, Tell at +0x8), its position put back for the game's decoder
 bool read_through_game(X86* c, const Stream& s, uint32_t length, std::vector<uint8_t>& out) {
     out.clear();
-    uint32_t buffer = guest_malloc(64u << 10);
+    uint32_t buffer = guest_malloc(length < (64u << 10) ? length : 64u << 10);
     if (!buffer) return false;
     out.reserve(length);
     uint32_t was = vcall(c, s.file, 0x8, 0, 0);
@@ -480,6 +483,7 @@ bool read_through_game(X86* c, const Stream& s, uint32_t length, std::vector<uin
 bool find_source(X86* c, Stream& s, uint32_t length) {
     if (s.memStart && s.memEnd > s.memStart && s.memEnd <= g_mem_size && s.memEnd - s.memStart <= kMaxStream) {
         s.data.assign(g_mem + s.memStart, g_mem + s.memEnd);
+        s.first.assign(s.data.begin(), s.data.begin() + (long)std::min<size_t>(kHeadBytes, s.data.size()));
         return true;
     }
     if (!s.file || !length || length > kMaxStream) return false;
@@ -499,11 +503,26 @@ bool find_source(X86* c, Stream& s, uint32_t length) {
                 if (r.read(&mine[0], mine.size()) == mine.size() && mine == theirs) {
                     s.native = true;
                     s.entry = *it;
+                    s.first.assign(theirs.begin(), theirs.begin() + (long)std::min<size_t>(kHeadBytes, theirs.size()));
                     return true;
                 }
             }
     }
-    return read_through_game(c, s, length, s.data);
+    if (!read_through_game(c, s, length, s.data)) return false;
+    s.first.assign(s.data.begin(), s.data.begin() + (long)std::min<size_t>(kHeadBytes, s.data.size()));
+    return true;
+}
+
+// The game's decoder object f still reads the stream s was made for? The game makes its decoders in place: a
+// track's intro opens in the object the jingle before it used, on a file object at the address the jingle's had
+// (boots 20 to 22: the host went on serving the jingle from its start in the Caves intro's place, and the floor's
+// music came in late and abruptly after it). An open ends in vorbis_pump_first_frame like a seek to the start,
+// so there the stream's first bytes are compared: each Ogg stream's first page carries its own serial number.
+bool same_stream(X86* c, const Stream& s) {
+    if (s.first.empty()) return true;
+    if (s.memStart) return s.memStart + s.first.size() <= g_mem_size && !memcmp(g_mem + s.memStart, &s.first[0], s.first.size());
+    std::vector<uint8_t> now;
+    return read_through_game(c, s, (uint32_t)s.first.size(), now) && now == s.first;
 }
 
 // the host's stream for the game's decoder object f, made if new (null: f stays with the game's decoder).
@@ -531,6 +550,7 @@ std::shared_ptr<Stream> stream_for(std::unique_lock<std::mutex>& l, X86* c, uint
     s->memEnd = RD32(f + G_STREAM_END);
     s->channels = channels;
     uint32_t length = RD32(f + G_STREAM_LEN);
+    s->length = length;
     l.unlock();
     bool found = find_source(c, *s, length);
     l.lock();
@@ -781,6 +801,20 @@ extern "C" int hle_vorbis_get_samples(X86* c) {
         give_back(l, c, f, regs);
         return 0;
     }
+    // ISAAC360_TRACE_MUSIC=2: each stream's first reads and its last (which decoder object got which entry's samples)
+    static const bool tracingReads = getenv("ISAAC360_TRACE_MUSIC") && getenv("ISAAC360_TRACE_MUSIC")[0] == '2';
+    if (tracingReads) {
+        int peak = 0;
+        for (uint32_t i = 0; i < got * (uint32_t)channels; ++i) {
+            int v = (int16_t)RD16(buffer + 2 * i);
+            if (v < 0) v = -v;
+            if (v > peak) peak = v;
+        }
+        recomp_log("music: decoder %08x read %u of %u frames of entry %08x (%u KB, file %08x, %llu served before), peak %d, "
+                   "into %08x", f, got, want, s->native ? s->entry.hash2 : 0,
+                   (s->native ? s->entry.size : (uint32_t)s->data.size()) >> 10, s->file, (unsigned long long)s->served, peak,
+                   buffer);
+    }
     s->served += got ? got : 1;
     l.unlock();
     if (g_check) {
@@ -842,6 +876,19 @@ extern "C" int hle_vorbis_pump_first_frame(X86* c) {
     uint32_t f = c->r[1];
     std::unique_lock<std::mutex> l(g_lock);
     std::shared_ptr<Stream> s = served(f);
+    if (s) {                                            // a seek to its start, or another stream opened in the object
+        uint32_t regs[8];
+        memcpy(regs, c->r, sizeof(regs));
+        l.unlock();                                     // the game's file read can wait on game locks
+        bool same = same_stream(c, *s);
+        l.lock();
+        memcpy(c->r, regs, sizeof(regs));
+        if (!same) {
+            std::map<uint32_t, std::shared_ptr<Stream> >::iterator it = g_streams.find(f);
+            if (it != g_streams.end() && it->second == s) retire(it);
+            s.reset();
+        }
+    }
     if (s) {
         s->restart = true;
         s->head = s->count = 0;
