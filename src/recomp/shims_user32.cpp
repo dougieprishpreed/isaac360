@@ -1,6 +1,7 @@
 // USER32, GDI32, WGL, userenv, dwmapi and XInput for the recompiled game (stdcall). The game's window is a
 // handle of ours: the platform presents its frames (the GL layer), input comes from the platform's pad state.
 #include "runtime.h"
+#include "guest_lock.h"
 #include <map>
 #include <mutex>
 #include <stdio.h>
@@ -153,7 +154,14 @@ void g_DescribePixelFormat(X86* c) {
     }
     RET_STD(c, 4, 1);
 }
-void g_SwapBuffers(X86* c) { gl_present(); RET_STD(c, 1, 1); }
+// the present can wait for the display: the main thread parks (guest_lock.h; it runs no guest code meanwhile)
+void g_SwapBuffers(X86* c) {
+    bool main = guest_thread(c)->id == g_lockMainId;
+    if (main) guest_lock_main_park();
+    gl_present();
+    if (main) guest_lock_main_unpark();
+    RET_STD(c, 1, 1);
+}
 void wgl_CreateContext(X86* c) { RET_STD(c, 1, gl_create_context() ? kHglrc : 0); }
 STDRET(wgl_DeleteContext, 1, 1)
 void wgl_MakeCurrent(X86* c) { if (ARG(c, 1)) gl_make_current(); RET_STD(c, 2, 1); }

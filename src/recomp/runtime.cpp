@@ -1,5 +1,6 @@
 // Host runtime of the recompiled game (runtime.h, docs/RECOMP_PLAN.md).
 #include "runtime.h"
+#include "guest_lock.h"
 #include "vfile.h"
 #include <algorithm>
 #include <map>
@@ -710,6 +711,7 @@ static void sample_register(X86* c, const char* name) {
     g_sampleThunk[slot] = "";
     g_sampleCpu[slot] = c;
     guest_thread(c)->sampleSlot = slot;
+    if (slot == 0) guest_lock_set_main(guest_thread(c)->id);   // its critical sections start biased to it
 }
 
 bool recomp_is_main_cpu(X86* c) { return g_sampleCpu[0] == c; }
@@ -1192,6 +1194,42 @@ void recomp_bench(X86* c) {
             WR32(dd, x0.u[X32(0)]);
         }
         double addNew = bench_ns(t0, n);
+        // the same as translate.py's scalar float registers make it (x86.h's XS: VMX on the console)
+        t0 = BenchClock::now();
+        for (uint32_t i = 0; i < n; ++i) {
+            XS v = xs_ld(a);
+            v = XS_ADD(v, xs_ld(b));
+            xs_st(dd, v);
+        }
+        double addXs = bench_ns(t0, n);
+        {   // and a chain: three loads, a multiply-add and a compare that picks the store
+            const uint32_t e = base + 0x190c;
+            WR32(e, 0x40000000u);
+            t0 = BenchClock::now();
+            for (uint32_t i = 0; i < n; ++i) {
+                XS v = XS_ADD(XS_MUL(xs_ld(a), xs_ld(e)), xs_ld(b));
+                if (xs_gt(v, XS_K(0x3f800000u))) v = XS_SUB(v, XS_K(0x3f800000u));
+                xs_st(dd, v);
+            }
+        }
+        double chainXs = bench_ns(t0, n);
+        t0 = BenchClock::now();
+        for (uint32_t i = 0; i < n; ++i) {
+            X86Xmm x1, x2, x3;
+            x1.u[X32(0)] = RD32(a); x2.u[X32(0)] = RD32(base + 0x190c); x3.u[X32(0)] = RD32(b);
+            x1.f[X32(0)] = x1.f[X32(0)] * x2.f[X32(0)] + x3.f[X32(0)];
+            if (x1.f[X32(0)] > 1.0f) x1.f[X32(0)] -= 1.0f;
+            WR32(dd, x1.u[X32(0)]);
+        }
+        double chainOld = bench_ns(t0, n);
+        recomp_log("bench: movss, addss, movss %.1f ns as a scalar float register (%s); a chain of three loads, a "
+                   "multiply, an add, a compare and a store %.1f ns so, %.1f ns as X86Xmm locals", addXs,
+#if defined(XS_VMX)
+                   "VMX",
+#else
+                   "a float",
+#endif
+                   chainXs, chainOld);
         t0 = BenchClock::now();
         for (uint32_t i = 0; i < n; ++i) {
             X86Xmm* d_ = xs; d_->u[X32(0)] = RD32(a + (i & 4)); d_->u[X32(1)] = d_->u[X32(2)] = d_->u[X32(3)] = 0;

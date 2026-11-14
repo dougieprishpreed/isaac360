@@ -106,6 +106,147 @@ static inline double RDF80(uint32_t a) {
     return sign ? -v : v;
 }
 
+/* Scalar SSE floats (translate.py's scalar float registers, Fn.sfo_flow): an XMM register a function uses only for
+ * single floats keeps its lane 0 as an XS (its other lanes stay in the X86Xmm local). On the console an XS is a VMX
+ * register holding the float in all four elements: guest memory's little-endian words load and store through
+ * lvx/vperm and vperm/stvewx, which reverse bytes for nothing, where a float register reaches a byte-reversed word
+ * only through a GPR and memory (~31 clocks a load, ~51 a store: xsdk docs/HARDWARE.md "Byte-reversed loads and
+ * stores"; boot 21's bench: movss, addss, movss 53 ns). Elsewhere an XS is a float. Each operation gives x86's
+ * result for every input but two: VMX takes denormal inputs and results as zero (its non-Java mode), and the NaN an
+ * invalid operation makes is positive (x86's is negative). Division and square root go through a float register
+ * (exact; they are rare). ISAAC360_NO_VMX builds the console's with floats too. */
+#if defined(__ALTIVEC__) && defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__ && !defined(ISAAC360_NO_VMX)
+#include <altivec.h>
+#undef vector
+#undef pixel
+#undef bool
+#define XS_VMX 1
+typedef __vector float XS;
+typedef __vector unsigned int XSu;
+typedef __vector unsigned char XSb;
+#define XS_K(bits) ((XS)(XSu){(bits), (bits), (bits), (bits)})
+static inline XS xs_ld(uint32_t a) {
+    const unsigned char* p = g_mem + a;
+    const XSb rev = {3, 2, 1, 0, 3, 2, 1, 0, 3, 2, 1, 0, 3, 2, 1, 0};
+    XSb lo = vec_ld(0, p), hi = vec_ld(3, p), sh = vec_lvsl(0, p);
+    return (XS)vec_perm(lo, hi, vec_perm(sh, sh, rev));
+}
+static inline void xs_st(uint32_t a, XS v) {
+    const XSb rev = {3, 2, 1, 0, 7, 6, 5, 4, 11, 10, 9, 8, 15, 14, 13, 12};
+    XSu w = (XSu)vec_perm((XSb)v, (XSb)v, rev);
+    if (__builtin_expect(a & 3, 0)) {
+        union { XSu v; uint32_t u[4]; } t;
+        t.v = w;
+        memcpy(g_mem + a, &t.u[0], 4);
+        return;
+    }
+    vec_ste(w, 0, (unsigned int*)(g_mem + a));
+}
+/* lane 0 of an X86Xmm in host memory (the CPU state), as the u[X32(0)] element's address: a word on 4 bytes */
+static inline XS xs_ldcpu(const uint32_t* p) {
+    const XSb pick = {0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3};
+    XSb sh = vec_lvsl(0, (const unsigned char*)p);
+    XSu w = vec_lde(0, (const unsigned int*)p);
+    return (XS)vec_perm((XSb)w, (XSb)w, vec_perm(sh, sh, pick));
+}
+static inline void xs_stcpu(uint32_t* p, XS v) { vec_ste((XSu)v, 0, (unsigned int*)p); }
+static inline uint32_t xs_bits(XS v) { union { XS v; uint32_t u[4]; } t; t.v = v; return t.u[0]; }
+static inline XS xs_of_bits(uint32_t u) { union { uint32_t u[4]; XS v; } t; t.u[0] = t.u[1] = t.u[2] = t.u[3] = u; return t.v; }
+static inline float xs_f(XS v) { union { XS v; float f[4]; } t; t.v = v; return t.f[0]; }
+static inline XS xs_of_f(float f) { union { float f[4]; XS v; } t; t.f[0] = t.f[1] = t.f[2] = t.f[3] = f; return t.v; }
+#define XS_ZERO() XS_K(0u)
+#define XS_ADD(a, b) vec_add((a), (b))
+#define XS_SUB(a, b) vec_sub((a), (b))
+#define XS_MUL(a, b) vec_madd((a), (b), XS_K(0x80000000u))       /* a * b + -0: one rounding, x86's product */
+#define XS_AND(a, b) ((XS)vec_and((XSu)(a), (XSu)(b)))
+#define XS_OR(a, b) ((XS)vec_or((XSu)(a), (XSu)(b)))
+#define XS_XOR(a, b) ((XS)vec_xor((XSu)(a), (XSu)(b)))
+#define XS_ANDN(a, b) ((XS)vec_andc((XSu)(b), (XSu)(a)))         /* ~a & b, as andnps */
+static inline XS xs_div(XS a, XS b) { return xs_of_f(xs_f(a) / xs_f(b)); }
+static inline XS xs_sqrt(XS a) { return xs_of_f(sqrtf(xs_f(a))); }
+static inline XS xs_min(XS a, XS b) { return vec_sel(b, a, vec_cmpgt(b, a)); }   /* a < b ? a : b (NaN: b) */
+static inline XS xs_max(XS a, XS b) { return vec_sel(b, a, vec_cmpgt(a, b)); }   /* a > b ? a : b (NaN: b) */
+static inline int xs_lt(XS a, XS b) { return vec_all_lt(a, b); }
+static inline int xs_le(XS a, XS b) { return vec_all_le(a, b); }
+static inline int xs_gt(XS a, XS b) { return vec_all_gt(a, b); }
+static inline int xs_ge(XS a, XS b) { return vec_all_ge(a, b); }
+static inline int xs_eq(XS a, XS b) { return vec_all_eq(a, b); }
+static inline int xs_unord(XS a, XS b) { return !vec_all_eq(a, a) || !vec_all_eq(b, b); }
+static inline XS xs_of_i32(int32_t i) {
+    union { int32_t i[4]; __vector signed int v; } t;
+    t.i[0] = t.i[1] = t.i[2] = t.i[3] = i;
+    return vec_ctf(t.v, 0);
+}
+/* cvttss2si: toward zero; NaN and out of range give 0x80000000 (vctsxs saturates, so those are put back) */
+static inline uint32_t xs_trunc_i32(XS v) {
+    __vector signed int r = vec_cts(v, 0);
+    __vector __bool int in = vec_and(vec_cmplt(v, XS_K(0x4f000000u)), vec_cmpge(v, XS_K(0xcf000000u)));
+    r = vec_sel((__vector signed int)XS_K(0x80000000u), r, in);
+    union { __vector signed int v; int32_t i[4]; } t;
+    t.v = r;
+    return (uint32_t)t.i[0];
+}
+/* cmpss's masks (imm & 7): eq, lt, le, unord, neq, nlt, nle, ord */
+static inline XS xs_cmpmask(XS a, XS b, int imm) {
+    XSu ord = vec_and((XSu)vec_cmpeq(a, a), (XSu)vec_cmpeq(b, b)), m;
+    switch (imm & 3) {
+    case 0: m = (XSu)vec_cmpeq(a, b); break;
+    case 1: m = (XSu)vec_cmpgt(b, a); break;
+    case 2: m = (XSu)vec_cmpge(b, a); break;
+    default: m = vec_nor(ord, ord); break;
+    }
+    if (imm & 4) m = vec_nor(m, m);
+    return (XS)m;
+}
+#else
+typedef float XS;
+#define XS_K(bits) U2F(bits)
+static inline XS xs_ld(uint32_t a) { return RDF(a); }
+static inline void xs_st(uint32_t a, XS v) { WRF(a, v); }
+static inline XS xs_ldcpu(const uint32_t* p) { return U2F(*p); }
+static inline void xs_stcpu(uint32_t* p, XS v) { *p = F2U(v); }
+static inline uint32_t xs_bits(XS v) { return F2U(v); }
+static inline XS xs_of_bits(uint32_t u) { return U2F(u); }
+static inline float xs_f(XS v) { return v; }
+static inline XS xs_of_f(float f) { return f; }
+#define XS_ZERO() 0.0f
+#define XS_ADD(a, b) ((a) + (b))
+#define XS_SUB(a, b) ((a) - (b))
+#define XS_MUL(a, b) ((a) * (b))
+#define XS_AND(a, b) U2F(F2U(a) & F2U(b))
+#define XS_OR(a, b) U2F(F2U(a) | F2U(b))
+#define XS_XOR(a, b) U2F(F2U(a) ^ F2U(b))
+#define XS_ANDN(a, b) U2F(~F2U(a) & F2U(b))
+static inline XS xs_div(XS a, XS b) { return a / b; }
+static inline XS xs_sqrt(XS a) { return sqrtf(a); }
+static inline XS xs_min(XS a, XS b) { return a < b ? a : b; }
+static inline XS xs_max(XS a, XS b) { return a > b ? a : b; }
+static inline int xs_lt(XS a, XS b) { return a < b; }
+static inline int xs_le(XS a, XS b) { return a <= b; }
+static inline int xs_gt(XS a, XS b) { return a > b; }
+static inline int xs_ge(XS a, XS b) { return a >= b; }
+static inline int xs_eq(XS a, XS b) { return a == b; }
+static inline int xs_unord(XS a, XS b) { return a != a || b != b; }
+static inline XS xs_of_i32(int32_t i) { return (float)i; }
+static inline uint32_t xs_trunc_i32(XS v) {             /* as x86_f2i_trunc */
+    return (v != v || v >= 2147483648.0f || v < -2147483648.0f) ? 0x80000000u : (uint32_t)(int32_t)v;
+}
+static inline XS xs_cmpmask(XS a, XS b, int imm) {
+    int r;
+    switch (imm & 3) {
+    case 0: r = a == b; break;
+    case 1: r = a < b; break;
+    case 2: r = a <= b; break;
+    default: r = a != a || b != b; break;
+    }
+    if (imm & 4) r = !r;
+    return U2F(r ? 0xffffffffu : 0u);
+}
+#endif
+
+/* comiss/ucomiss fused with their consumer on X86Xmm floats (translate.py fuse_float_compare) */
+static inline int x86_unord(float a, float b) { return a != a || b != b; }
+
 /* x87 */
 #define ST(i) c->st[(c->top + (i)) & 7]
 static inline void X87_PUSH(X86* c, double v) { c->top = (c->top - 1) & 7; c->st[c->top] = v; }

@@ -26,6 +26,7 @@ TAG = os.environ.get('ISAAC360_TAG', '')
 EXE = os.path.join(ROOT, os.environ.get('ISAAC360_IMAGE', os.path.join('game', 'isaac-ng.exe')))
 PROG = os.path.join(ROOT, 'build', 'recomp', TAG, 'program.json') if TAG else os.path.join(ROOT, 'build', 'recomp', 'program.json')
 OUT = os.path.join(ROOT, 'build', 'recomp', 'out_' + TAG) if TAG else os.path.join(ROOT, 'build', 'recomp', 'out')
+OUT = os.environ.get('ISAAC360_TRANSLATE_OUT', OUT)      # a trial of --only elsewhere (it rewrites the folder)
 SUFFIX = ('_' + TAG) if TAG else ''
 # ISAAC360_TRACE_FUNCS=addr,addr: those functions log their entry (arguments) and returns (eax) at run time
 # Check builds for the register flow (regflow.py). ISAAC360_REGCHECK=1: each call gives what it does not save a poison
@@ -42,7 +43,9 @@ POISON, PRESERVE = REGCHECK == '1', REGCHECK == '2'
 # calls and the function table, calls F_x_f with the CPU state's ecx and esp; every exit still writes all eight
 # registers to the CPU state. Off in the register check builds and with ISAAC360_FAST_CALLS=0.
 FAST = not (POISON or PRESERVE) and os.environ.get('ISAAC360_FAST_CALLS', '1') != '0'
-TRACE = set(int(x, 16) for x in os.environ.get('ISAAC360_TRACE_FUNCS', '').split(',') if x)
+# Scalar floats in VMX on the console (x86.h's XS, Fn.sse_scalar); ISAAC360_SCALAR_FLOATS=0 keeps lane 0 in X86Xmm.
+SFO = os.environ.get('ISAAC360_SCALAR_FLOATS', '1') != '0'
+TRACE =set(int(x, 16) for x in os.environ.get('ISAAC360_TRACE_FUNCS', '').split(',') if x)
 
 # Instructions of isaac-ng.exe replaced by other C (the exe only, TAG ''): address -> code.
 PATCHES = {
@@ -138,10 +141,19 @@ class Img:
         pe = pefile.PE(EXE, fast_load=True)
         self.base = pe.OPTIONAL_HEADER.ImageBase
         self.data = pe.get_memory_mapped_image()
+        # sections nothing writes (no IMAGE_SCN_MEM_WRITE): constant data the translation may read ahead
+        self.readonly = [(self.base + s.VirtualAddress, self.base + s.VirtualAddress + max(s.Misc_VirtualSize, s.SizeOfRawData))
+                         for s in pe.sections if not s.Characteristics & 0x80000000 and s.Characteristics & 0x40000000]
 
     def u32(self, va):
         o = va - self.base
         return int.from_bytes(self.data[o:o + 4], 'little')
+
+    def ro_u32(self, va):
+        """The 32-bit word at va if it lies in a read-only section of the image, else None."""
+        if any(lo <= va and va + 4 <= hi for lo, hi in self.readonly) and va + 4 - self.base <= len(self.data):
+            return self.u32(va)
+        return None
 
 
 class Fn:
@@ -154,6 +166,7 @@ class Fn:
         self.insns = {}
         self.succ = {}
         self.labels = set()
+        self.xst = [0] * 8                             # lane 0's place per XMM register (sse_scalar)
 
     # ------------------------------------------------------------------ discovery (instruction graph)
     def discover(self):
@@ -304,14 +317,267 @@ class Fn:
                 if va in exits:
                     out |= written                             # stored to the CPU state there
                 if ins is not None and ins.flow_control in (FC.CALL, FC.INDIRECT_CALL):
-                    new_in = rd[va]                            # its stores and reloads stand between
+                    # its stores and reloads stand between for the registers the callee can reach; the others keep
+                    # their locals through it (compute_xmm_reach)
+                    new_in = rd[va] | (out & ~self.call_reach(ins))
                 else:
                     new_in = rd[va] | (out & ~kill[va])
                 if out != live_out[va] or new_in != live_in[va]:
                     live_out[va], live_in[va] = out, new_in
                     changed = True
         self.xlive_out = live_out
+        self.xlive_in = live_in
         self.xentry = live_in.get(self.start, 0)
+
+    # Scalar floats in VMX (x86.h's XS). Each XMM register's lane 0 may also be held in a local xs_N: on the console a
+    # VMX register, where the game's little-endian floats load and store in a few cycles (lvx/vperm, vperm/stvewx)
+    # instead of a ~31-51 cycle trip between a GPR and a float register through memory for every operand and result
+    # (boot 21: a big Caves room's game code 21 ms a frame, the float forms its largest share). Per register, while
+    # translating straight-line code: C, lane 0 in the X86Xmm local x_N only; X, in xs_N only (x_N's stale); B, both.
+    # A scalar float operation works on xs_N (one transfer in if the register was C); a movss load goes to xs_N
+    # when a scalar operation reads the value later in the block, else stays an integer load; a store takes the
+    # cheaper side. Anything else that reads the register gets lane 0 back in x_N first (one transfer). Where the
+    # straight line ends (a branch, a label) the X registers live past it go back to x_N and every register starts C
+    # again; calls and returns store an X register's lane 0 to the CPU state from xs_N (a store, no transfer). The
+    # other lanes always stay in x_N, kept as x86 keeps them (movss from memory clears them, scalar operations leave
+    # them). ISAAC360_SCALAR_FLOATS=0: lane 0 stays in x_N.
+    XC, XX, XB = 0, 1, 2
+    SFO_FORMS = {M.MOVSS, M.ADDSS, M.SUBSS, M.MULSS, M.DIVSS, M.MINSS, M.MAXSS, M.SQRTSS, M.COMISS, M.UCOMISS,
+                 M.CVTSI2SS, M.CVTTSS2SI, M.CVTSS2SI, M.CMPSS, M.MOVD, M.XORPS, M.ANDPS, M.ORPS, M.ANDNPS, M.MOVAPS,
+                 M.MOVUPS, M.CVTSS2SD, M.CVTSD2SS}
+    # forms that read lane 0 as a float of the register in op0 (and op1 when it is one), the reason to load to xs_N
+    SFO_ARITH = {M.ADDSS, M.SUBSS, M.MULSS, M.DIVSS, M.MINSS, M.MAXSS, M.COMISS, M.UCOMISS, M.CMPSS}
+    _info = ix.InstructionInfoFactory()
+
+    def xs_need(self, n):
+        """Code that makes xs_N hold lane 0 (C -> B)."""
+        if self.xst[n] == self.XC:
+            self.xst[n] = self.XB
+            return 'xs_%d=xs_of_bits(x_%d.u[0]);' % (n, n)
+        return ''
+
+    def x_need(self, n):
+        """Code that makes x_N hold lane 0 (X -> B)."""
+        if self.xst[n] == self.XX:
+            self.xst[n] = self.XB
+            return 'x_%d.u[0]=xs_bits(xs_%d);' % (n, n)
+        return ''
+
+    def x_flush(self, mask):
+        return ''.join(self.x_need(n) for n in range(8) if mask >> n & 1)
+
+    def x_reset(self, va=None):
+        """A straight line starts (at va): lane 0 in x_N, or in xs_N for the registers its label takes so
+        (label_states)."""
+        self.xst = [self.XC] * 8
+        m = self.label_xs.get(va, 0) if va is not None else 0
+        for n in range(8):
+            if m >> n & 1:
+                self.xst[n] = self.XX
+
+    def label_states(self):
+        """Per label, the XMM registers that start its straight line in xs_N: live there and read first by a scalar
+        float operation. Jumps and fallthroughs into it hand lane 0 over that way (x_require), so a float value
+        kept in a VMX register across a branch stays there (the function's entry starts every register in x_N)."""
+        self.label_xs = {}
+        if not SFO:
+            return
+        for L in self.labels:
+            if L == self.start or self.insns.get(L) is None:
+                continue
+            live = self.xlive_in.get(L, 0)
+            m = 0
+            for n in range(8):
+                if live >> n & 1 and self.arith_follows(L, n, at=True):
+                    m |= 1 << n
+            if m:
+                self.label_xs[L] = m
+
+    def x_require(self, targets):
+        """Before control goes to targets: lane 0 of each register live there where that target's straight line takes
+        it (xs_N for label_xs, else x_N; both where targets differ)."""
+        out = ''
+        for tgt in targets:
+            live = self.xlive_in.get(tgt, 0)
+            xs = self.label_xs.get(tgt, 0)
+            for n in range(8):
+                if live >> n & 1:
+                    out += self.xs_need(n) if xs >> n & 1 else self.x_need(n)
+        return out
+
+    def arith_follows(self, va, n, at=False):
+        """True if a scalar float operation reads register n's value after va (at: from va on) in the same straight
+        line, before the register is written again."""
+        cur = va
+        for k in range(48):
+            if not (at and k == 0):
+                ins = self.insns[cur]
+                nxt = cur + ins.len
+                if self.succ.get(cur) != [nxt] or nxt in self.labels or self.insns.get(nxt) is None:
+                    return False
+                cur = nxt
+            ni = self.insns.get(cur)
+            if ni is None:
+                return False
+            regs = [XMM[ni.op_register(i)] for i in range(ni.op_count)
+                    if ni.op_kind(i) == OK.REGISTER and ni.op_register(i) in XMM]
+            if n not in regs:
+                if ni.flow_control != FC.NEXT:
+                    return False
+                continue
+            mn = ni.mnemonic
+            if mn in self.SFO_ARITH:
+                return True
+            if mn in (M.SQRTSS, M.CVTTSS2SI, M.CVTSS2SI, M.CVTSS2SD) and ni.op_count > 1 and \
+                    ni.op1_kind == OK.REGISTER and XMM.get(ni.op1_register) == n:
+                return True
+            if mn in (M.XORPS, M.ANDPS, M.ORPS, M.ANDNPS) and regs[0] == n and not (len(regs) == 2 and regs[1] == n):
+                return True                            # a sign or abs mask on the value
+            if mn == M.MOVSS and ni.op0_kind == OK.REGISTER and ni.op1_kind == OK.REGISTER:
+                if XMM[ni.op0_register] == n and XMM[ni.op1_register] != n:
+                    return False                        # overwritten
+                continue                                # copied on (the copy decides for itself)
+            return False                                # stored, moved out, or overwritten
+
+    def xs_src(self, ins, i):
+        """Operand i as an XS value: a register's xs_N (made valid first by the caller), a constant from the image,
+        or a load of the game's float."""
+        if ins.op_kind(i) == OK.REGISTER:
+            return 'xs_%d' % XMM[ins.op_register(i)]
+        k = self.ro_const(ins)
+        if k is not None:
+            return 'XS_K(0x%xu)' % k
+        return 'xs_ld(%s)' % self.ea(ins)
+
+    def ro_const(self, ins, off=0):
+        """A memory operand's word read from the image when it is an absolute address in constant data, else None."""
+        if ins.memory_base != R.NONE or ins.memory_index != R.NONE or ins.memory_segment in (R.FS, R.GS) or \
+                getattr(self, 'no_fold', False):        # difftest.py fills operands with random bytes
+            return None
+        a = (ins.memory_displacement + off) & 0xffffffff
+        if a in self.tr.imports:
+            return None
+        return self.tr.img.ro_u32(a)
+
+    def sse_other(self, ins):
+        """An SSE form that works on x_N: lane 0 of each XMM register it reads goes back to x_N first; each one it
+        writes is C after (returned as (pre, written mask))."""
+        pre, wr = '', 0
+        for u in self._info.info(ins).used_registers():
+            n = XMM.get(u.register)
+            if n is None:
+                continue
+            if u.access in (ix.OpAccess.READ, ix.OpAccess.COND_READ, ix.OpAccess.READ_WRITE, ix.OpAccess.READ_COND_WRITE):
+                pre += self.x_need(n)
+            if u.access in (ix.OpAccess.WRITE, ix.OpAccess.COND_WRITE, ix.OpAccess.READ_WRITE, ix.OpAccess.READ_COND_WRITE):
+                wr |= 1 << n
+        return pre, wr
+
+    def sse_scalar(self, va, ins):
+        """A scalar float form with lane 0 in xs_N where that is cheaper; None: not one (sse_other's path)."""
+        mn = ins.mnemonic
+        if mn not in self.SFO_FORMS:
+            return None
+        k0, k1 = ins.op0_kind, ins.op1_kind if ins.op_count > 1 else None
+        d = XMM.get(ins.op0_register) if k0 == OK.REGISTER else None
+        s = XMM.get(ins.op1_register) if k1 == OK.REGISTER else None
+        X, B, C = self.XX, self.XB, self.XC
+        st = self.xst
+        if mn == M.MOVSS:
+            if k0 == OK.MEMORY:
+                if st[s] == X:
+                    return 'xs_st(%s,xs_%d);' % (self.ea(ins), s)
+                return 'WR32(%s,x_%d.u[0]);' % (self.ea(ins), s)
+            if k1 == OK.MEMORY:
+                if self.arith_follows(va, d):
+                    st[d] = X
+                    return 'xs_%d=%s;x_%d.u[1]=x_%d.u[2]=x_%d.u[3]=0;' % (d, self.xs_src(ins, 1), d, d, d)
+                st[d] = C
+                return '{X86Xmm* d_=&x_%d;d_->u[0]=RD32(%s);d_->u[1]=d_->u[2]=d_->u[3]=0;}' % (d, self.ea(ins))
+            if d == s:
+                return ''
+            if st[s] == X:
+                st[d] = X
+                return 'xs_%d=xs_%d;' % (d, s)
+            if st[s] == B and self.arith_follows(va, d):
+                st[d] = B
+                return 'x_%d.u[0]=x_%d.u[0];xs_%d=xs_%d;' % (d, s, d, s)
+            st[d] = C
+            return 'x_%d.u[0]=x_%d.u[0];' % (d, s)
+        if mn in (M.ADDSS, M.SUBSS, M.MULSS, M.DIVSS, M.MINSS, M.MAXSS):
+            op = {M.ADDSS: 'XS_ADD', M.SUBSS: 'XS_SUB', M.MULSS: 'XS_MUL', M.DIVSS: 'xs_div', M.MINSS: 'xs_min',
+                  M.MAXSS: 'xs_max'}[mn]
+            pre = self.xs_need(d) + (self.xs_need(s) if s is not None else '')
+            st[d] = X
+            return '%sxs_%d=%s(xs_%d,%s);' % (pre, d, op, d, self.xs_src(ins, 1))
+        if mn == M.SQRTSS:
+            pre = self.xs_need(s) if s is not None else ''
+            st[d] = X
+            return '%sxs_%d=xs_sqrt(%s);' % (pre, d, self.xs_src(ins, 1))
+        if mn in (M.COMISS, M.UCOMISS):
+            pre = self.xs_need(d) + (self.xs_need(s) if s is not None else '')
+            if va in self.fusable:
+                return pre                              # the consumer compares (fuse_float_compare)
+            return ('%s{XS a_=xs_%d,b_=%s;if(xs_unord(a_,b_)){zf=pf=cf=1;}else{zf=xs_eq(a_,b_);pf=0;cf=xs_lt(a_,b_);}'
+                    'of=sf=af=0;}' % (pre, d, self.xs_src(ins, 1)))
+        if mn == M.CMPSS:
+            pre = self.xs_need(d) + (self.xs_need(s) if s is not None else '')
+            st[d] = X
+            return '%sxs_%d=xs_cmpmask(xs_%d,%s,%d);' % (pre, d, d, self.xs_src(ins, 1), ins.immediate(2) & 7)
+        if mn == M.CVTSI2SS:
+            st[d] = X
+            return 'xs_%d=xs_of_i32((int32_t)%s);' % (d, self.get(ins, 1, 4))
+        if mn == M.CVTTSS2SI:
+            if s is not None and st[s] == C:
+                return None
+            return self.put(ins, 0, 4, 'xs_trunc_i32(%s)' % self.xs_src(ins, 1))
+        if mn == M.CVTSS2SI:
+            if s is None or st[s] == C:
+                return None
+            return self.put(ins, 0, 4, 'x86_f2i_round((double)xs_f(xs_%d))' % s)
+        if mn == M.CVTSS2SD:
+            if s is None or st[s] != X or s == d:
+                return None
+            st[d] = C
+            return 'x_%d.d[0]=(double)xs_f(xs_%d);' % (d, s)
+        if mn == M.MOVD:
+            if d is not None or s is None or st[s] != X:
+                return None                             # into a register: an integer, C
+            if k0 == OK.MEMORY:
+                return 'xs_st(%s,xs_%d);' % (self.ea(ins), s)
+            return self.put(ins, 0, 4, 'xs_bits(xs_%d)' % s)
+        if mn in (M.MOVAPS, M.MOVUPS):
+            if d is None or s is None:
+                return None
+            st[d] = st[s]
+            return 'x_%d=x_%d;' % (d, s) + ('xs_%d=xs_%d;' % (d, s) if st[s] != C else '')
+        if mn in (M.XORPS, M.ANDPS, M.ORPS, M.ANDNPS):
+            if d is None:
+                return None
+            if s == d:
+                if mn in (M.XORPS, M.ANDNPS):
+                    st[d] = B
+                    return 'xs_%d=XS_ZERO();x_%d.q[0]=0;x_%d.q[1]=0;' % (d, d, d)
+                return ''                               # x & x, x | x
+            if st[d] != X and (s is None or st[s] != X):
+                return None                             # on x_N as before
+            op = {M.XORPS: 'XS_XOR', M.ANDPS: 'XS_AND', M.ORPS: 'XS_OR', M.ANDNPS: 'XS_ANDN'}[mn]
+            if s is not None:
+                lanes = ['x_%d.u[%d]' % (s, i) for i in (1, 2, 3)]
+            else:
+                lanes = []
+                for i in (1, 2, 3):
+                    k = self.ro_const(ins, 4 * i)
+                    lanes.append('0x%xu' % k if k is not None else 'RD32((uint32_t)(%s+%du))' % (self.ea(ins), 4 * i))
+            if mn == M.ANDNPS:
+                up = ''.join('x_%d.u[%d]=~x_%d.u[%d]&%s;' % (d, i, d, i, v) for i, v in zip((1, 2, 3), lanes))
+            else:
+                c = {M.XORPS: '^', M.ANDPS: '&', M.ORPS: '|'}[mn]
+                up = ''.join('x_%d.u[%d]%s=%s;' % (d, i, c, v) for i, v in zip((1, 2, 3), lanes))
+            pre = self.xs_need(d) + (self.xs_need(s) if s is not None else '')
+            st[d] = X
+            return '%sxs_%d=%s(xs_%d,%s);%s' % (pre, d, op, d, self.xs_src(ins, 1), up)
+        return None
 
     # x87 float copies: MSVC copies floats with fld m32; fstp m32 and widens them with fld m32; fstp m64 (an
     # argument for a double function), and the hottest functions of a heavy room do ~130,000 a frame (boot 20's Caves
@@ -349,13 +615,29 @@ class Fn:
                     break
                 cur = nxt
 
-    def xspill(self):
-        """Before a call, tail call or return: the XMM registers this function writes, to the CPU state."""
-        return ''.join('c->x[%d]=x_%d;' % (n, n) for n in range(8) if self.xwritten >> n & 1)
+    def call_reach(self, ins):
+        """The XMM registers a call can read or change: a direct call's callee's (call_direct), else all eight."""
+        if ins.mnemonic == M.CALL and ins.op0_kind in (OK.NEAR_BRANCH32, OK.NEAR_BRANCH16):
+            t = ins.near_branch_target
+            if self.tr.func_name(t) is not None:
+                return getattr(self.tr, 'xmm_reach', {}).get(t, 0xff)
+        return 0xff
 
-    def xfill(self, va):
-        """After the call at va: the XMM registers read again before written, from the CPU state."""
-        live = self.xlive_out.get(va, 0) & self.xused
+    def xspill(self, reach=0xff):
+        """Before a call, tail call or return: the XMM registers this function writes, to the CPU state (a scalar
+        float register's lane 0 from its xs_N, over the X86Xmm's stale one); before a direct call only those its
+        callee can reach (Translator.compute_xmm_reach)."""
+        m = self.xwritten & reach
+        return ''.join('c->x[%d]=x_%d;' % (n, n) + ('xs_stcpu(&c->x[%d].u[0],xs_%d);' % (n, n) if self.xst[n] == self.XX else '')
+                       for n in range(8) if m >> n & 1)
+
+    def xfill(self, va, reach=0xff):
+        """After the call at va: the XMM registers read again before written, from the CPU state (after a direct
+        call only those its callee can reach: it leaves the others as they were)."""
+        live = self.xlive_out.get(va, 0) & self.xused & reach
+        for n in range(8):
+            if reach >> n & 1:
+                self.xst[n] = self.XC                  # reloaded, or dead
         return ''.join('x_%d=c->x[%d];' % (n, n) for n in range(8) if live >> n & 1)
 
     def xdecls(self):
@@ -367,6 +649,8 @@ class Fn:
                 out.append('X86Xmm x_%d=c->x[%d];' % (n, n))
             else:
                 out.append('X86Xmm x_%d;x_%d.q[0]=0;x_%d.q[1]=0;' % (n, n, n))
+            if SFO:
+                out.append('XS xs_%d=XS_ZERO();' % n)
         return ''.join(out)
 
     # ------------------------------------------------------------------ operands
@@ -510,6 +794,7 @@ class Fn:
         if name is None:
             return 'esp-=4;WR32(esp,0x%xu);%s%sx86_call(c,0x%xu);%s%s' % (ret, spill_of(site, True), self.xspill(),
                                                                           target, fill_of(site, va), self.xfill(va))
+        reach = getattr(self.tr, 'xmm_reach', {}).get(target, 0xff)
         if FAST:
             # ecx and esp in, eax and esp back in a 64-bit value (fast_note); the rest as before through c->r
             if site is None:
@@ -519,9 +804,9 @@ class Fn:
                                if site[2] >> i & 1 and i not in (0, 4))
                 fill = ('eax=(uint32_t)r_;' if site[2] & 1 else '') + 'esp=(uint32_t)(r_>>32);' + fill
             return 'esp-=4;WR32(esp,0x%xu);%s%s{uint64_t r_=%s_f(c,ecx,esp);%s}%s' % (
-                ret, spill_of(site, True), self.xspill(), name, fill, self.xfill(va))
-        return 'esp-=4;WR32(esp,0x%xu);%s%s%s(c);%s%s' % (ret, spill_of(site, True), self.xspill(), name,
-                                                          fill_of(site, va), self.xfill(va))
+                ret, spill_of(site, True), self.xspill(reach), name, fill, self.xfill(va, reach))
+        return 'esp-=4;WR32(esp,0x%xu);%s%s%s(c);%s%s' % (ret, spill_of(site, True), self.xspill(reach), name,
+                                                          fill_of(site, va), self.xfill(va, reach))
 
     def exit_regs(self):
         """FAST: the registers a return writes to the CPU state: its own changes, its callees' (whose returns wrote
@@ -1022,11 +1307,28 @@ class Fn:
         return 'X86Xmm s_;RDX(%s,&s_);' % a, 's_'
 
     def sse(self, va, ins, name, cname, need):
+        if name.startswith('V'):
+            return 'x86_unimpl(c,0x%xu,"%s");' % (va, name)            # AVX: behind CPUID, never taken
+        if not SFO:
+            return self.sse_x(va, ins, name, cname, need)
+        r = self.sse_scalar(va, ins)                                   # lane 0 in xs_N where cheaper
+        if r is not None:
+            return r
+        r = self.sse_x(va, ins, name, cname, need)
+        if r is None:
+            return None
+        pre, wr = self.sse_other(ins)                                  # lane 0 back in x_N first
+        for n in range(8):
+            if wr >> n & 1:
+                self.xst[n] = self.XC
+        return pre + r
+
+    def sse_x(self, va, ins, name, cname, need):
         mn = ins.mnemonic
         k0, k1 = ins.op0_kind, ins.op1_kind if ins.op_count > 1 else None
         def dst(): return self.xmm(ins, 0)
-        if name.startswith('V'):
-            return 'x86_unimpl(c,0x%xu,"%s");' % (va, name)            # AVX: behind CPUID, never taken
+        if mn in (M.COMISS, M.UCOMISS, M.COMISD, M.UCOMISD) and va in self.fusable:
+            return ''                                                 # folded into the consumer (find_fusions)
         # moves
         if mn in (M.MOVAPS, M.MOVUPS, M.MOVDQA, M.MOVDQU, M.MOVAPD, M.MOVUPD, M.LDDQU):
             if k0 == OK.MEMORY:
@@ -1395,6 +1697,9 @@ class Fn:
         self.fused = {}
         for va in self.order:
             ins = self.insns[va]
+            if ins is not None and ins.mnemonic in (M.COMISS, M.UCOMISS):
+                self.fuse_float_compare(va, ins)
+                continue
             if ins is None or ins.mnemonic not in (M.CMP, M.TEST):
                 continue
             nxt = va + ins.len
@@ -1434,28 +1739,74 @@ class Fn:
             self.fusable.add(va)
             self.fused[nxt] = '(' + e + ')'
 
+    def fuse_float_compare(self, va, ins):
+        """comiss/ucomiss straight into a jcc, setcc or cmovcc that alone reads its flags: the condition as one compare
+        (on scalar float registers a VMX compare the branch takes from CR6, no flag variables in between). The flags:
+        unordered ZF PF CF 1 1 1, less 0 0 1, equal 1 0 0, greater 0 0 0."""
+        nxt = va + ins.len
+        if self.succ.get(va) != [nxt] or nxt in self.labels:
+            return
+        nins = self.insns.get(nxt)
+        if nins is None:
+            return
+        nm = MNAME[nins.mnemonic]
+        cc = cond_of(nm) if nins.flow_control == FC.CONDITIONAL_BRANCH or nm.startswith(('SET', 'CMOV')) else None
+        if not cc or nm in ('JECXZ', 'JCXZ') or nm.startswith('LOOP') or self.live_out[nxt] & rf_to_mask(ins.rflags_modified):
+            return
+        d = XMM[ins.op0_register]
+        if SFO:                                        # sse_scalar made both xs_N valid at the compare
+            a, b = 'xs_%d' % d, self.xs_src(ins, 1)
+            gt, ge, lt, un = 'xs_gt(%s,%s)', 'xs_ge(%s,%s)', 'xs_lt(%s,%s)', 'xs_unord(%s,%s)'
+        else:
+            a = 'x_%d.f[0]' % d
+            b = 'x_%d.f[0]' % XMM[ins.op1_register] if ins.op1_kind == OK.REGISTER else 'RDF(%s)' % self.ea(ins)
+            gt, ge, lt, un = '(%s>%s)', '(%s>=%s)', '(%s<%s)', 'x86_unord(%s,%s)'
+        e = {'A': gt % (a, b), 'AE': ge % (a, b), 'B': '!' + ge % (a, b), 'BE': '!' + gt % (a, b),
+             'E': '!(%s||%s)' % (gt % (a, b), lt % (a, b)), 'NE': '(%s||%s)' % (gt % (a, b), lt % (a, b)),
+             'P': un % (a, b), 'NP': '!' + un % (a, b)}.get(cc)
+        if e is None:
+            return
+        self.fusable.add(va)
+        self.fused[nxt] = '(' + e + ')'
+
     # ------------------------------------------------------------------ the whole function
     def translate(self):
         self.discover()
         self.liveness()
         self.xmm_flow()
+        self.label_states()
+        self.x_reset()
         self.find_x87_pairs()
         self.find_fusions()
         name = self.tr.func_name(self.start)
         body = []
         unhandled = Counter()
         prev_falls = None
+        next_of = {self.order[i]: self.order[i + 1] for i in range(len(self.order) - 1)}
         for va in self.order:
             ins = self.insns[va]
             if prev_falls is not None and prev_falls != va:
                 body.append('goto L_%x;' % prev_falls if prev_falls in self.insns and self.insns[prev_falls] is not None
                             else 'x86_unreachable(c,0x%xu);' % prev_falls)
+            fell_in = prev_falls == va
             prev_falls = None
             body.append('L_%x:' % va)
+            if va in self.labels or not fell_in:
+                self.x_reset(va)                       # a straight line starts (sse_scalar, label_states)
             if ins is None:
                 body.append('x86_unreachable(c,0x%xu);' % va)
                 continue
             self.out = []
+            succ = self.succ.get(va, [])
+            fc = ins.flow_control
+            tail = bool(succ) and isinstance(succ[0], tuple)
+            if SFO and not tail and (fc in (FC.CONDITIONAL_BRANCH, FC.UNCONDITIONAL_BRANCH) or
+                                     (fc == FC.INDIRECT_BRANCH and self.tr.jump_tables.get(va))):
+                # lane 0 as each target's straight line takes it (a fallthrough on in the same line keeps its state)
+                targets = [s_ for s_ in succ if not isinstance(s_, tuple) and
+                           (s_ in self.labels or s_ != next_of.get(va) or fc != FC.CONDITIONAL_BRANCH)]
+                self.out = [self.x_require(targets)]
+            saved = list(self.xst)
             try:
                 if va in PATCHES and not TAG:
                     self.out = [PATCHES[va]]
@@ -1470,6 +1821,7 @@ class Fn:
                     self.translate_insn(va, ins, va + ins.len)
             except Unhandled as e:
                 unhandled[str(e)] += 1
+                self.xst = saved
                 self.out = ['x86_unimpl(c,0x%xu,"%s");' % (va, str(e).replace('"', ''))]
             # lock-prefixed read-modify-writes (and xchg with memory, locked on x86) under the runtime's one guest
             # lock, which also orders memory as x86 does around them (the console's PowerPC orders more weakly)
@@ -1477,14 +1829,18 @@ class Fn:
                     ins.op_kind(i) == OK.MEMORY for i in range(ins.op_count))):
                 self.out = ['x86_lock();'] + self.out + ['x86_unlock();']
             body.append(''.join(self.out))
-            succ = self.succ.get(va, [])
-            fc = ins.flow_control
             if fc in (FC.NEXT, FC.CALL, FC.INDIRECT_CALL, FC.CONDITIONAL_BRANCH) and succ and not isinstance(succ[0], tuple):
                 prev_falls = va + ins.len
+                if SFO and (prev_falls in self.labels or next_of.get(va) != prev_falls):
+                    body.append(self.x_require([prev_falls]))   # the straight line ends here
+                    self.x_reset()
             elif succ and isinstance(succ[0], tuple) and fc == FC.NEXT:
                 n = self.tr.func_name(succ[0][1])
                 sp = self.regcheck(va) + spill_of(self.site(va), True) + self.xspill()
                 body.append(sp + self.tail_fast(n, succ[0][1]) if FAST else '%s%s(c);return;' % (sp, n))
+                self.x_reset()
+            else:
+                self.x_reset()
         if prev_falls is not None:
             body.append('goto L_%x;' % prev_falls if prev_falls in self.insns and self.insns[prev_falls] is not None
                         else 'x86_unreachable(c,0x%xu);' % prev_falls)
@@ -1594,6 +1950,29 @@ class Translator:
     def func_name(self, va):
         return 'F_%x' % va if va in self.funcs else None
 
+    def compute_xmm_reach(self):
+        """Each function's XMM registers with everything it calls (0xff: unknown, through a pointer or an import):
+        a direct call stores and reloads only those of the caller's (Fn.xspill, xfill). Before, every call stored
+        every XMM register the caller wrote and reloaded every one live after it, ~10 memory operations a call,
+        whose reloads right after the stores stall on the console when the callee is short (most are leaves)."""
+        rf = self.rf
+        reach = {}
+        for st, f in rf.flows.items():
+            reach[st] = 0xff if f.opaque or f.has_icall or f.has_itail or (not TAG and st in HOST) else f.xmm
+        changed = True
+        while changed:
+            changed = False
+            for st, f in rf.flows.items():
+                m = reach[st]
+                if m == 0xff:
+                    continue
+                for g in f.callees | f.tails:
+                    m |= reach.get(g, 0xff)
+                if m != reach[st]:
+                    reach[st] = m
+                    changed = True
+        self.xmm_reach = reach
+
     def exit_mask(self, start):
         """FAST: the registers a return of the function at start writes to the CPU state (Fn.exit_regs); None: all."""
         rf = self.rf
@@ -1664,6 +2043,7 @@ def main():
             print('flow %d/%d' % (i, len(starts)), file=sys.stderr)
     steps = rf.run()
     tr.rf = rf
+    tr.compute_xmm_reach()
     kinds = {int(k, 16): v.get('kind') for k, v in tr.p['functions'].items()}
     odd = rf.report(kinds)
     print('register flow: %d steps; %d address-taken functions read or change past eax/ecx/edx or read flags'

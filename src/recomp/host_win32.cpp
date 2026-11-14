@@ -51,6 +51,8 @@ void audio_out_open(int rate) {
     const char* dump = getenv("ISAAC360_AUDIO_DUMP");
     if (dump && !g_audioDump && (g_audioDump = fopen(dump, "wb+")) != 0) audio_dump_header();
 }
+// the PC's mixer paces itself (shims_al.cpp mixer_thread), so its dumps follow the game's timeline
+bool audio_out_pull(void (*)(int16_t*, int)) { return false; }
 void audio_out_submit(const int16_t* stereo, int frames) {
     if (!g_audioDump || frames <= 0) return;
     fwrite(stereo, 4, (size_t)frames, g_audioDump);

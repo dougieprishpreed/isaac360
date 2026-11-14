@@ -132,24 +132,44 @@ void ThreadStarted(const char* role) {
 }
 
 // ------------------------------------------------------------------------------------------------ audio
-// The mixer (shims_al.cpp) runs at 44.1 kHz stereo and hands blocks to audio_out_submit; a feeder thread fills the
-// kernel's render frames (256 samples of 6 channels at 48 kHz, floats, a channel after another) from a ring,
-// resampled, 12 frames (64 ms) ahead.
+// The mixer (shims_al.cpp) runs at 44.1 kHz stereo; a feeder thread fills the kernel's render frames (256 samples
+// of 6 channels at 48 kHz, floats, a channel after another) from a ring, resampled, 12 frames (64 ms) ahead. The
+// feeder mixes into the ring itself as it runs low (audio_out_pull), so a sound the game starts is heard 64-70 ms
+// later. Boot 21: a mixer thread of its own, paced by a clock, filled the ring after every stall and kept it full,
+// so every sound came ~430 ms after the game played it.
 const int kRing = 16384;                             // stereo frames, ~370 ms at 44.1 kHz
+const int kPullFrames = 256;                         // mixed at a time: a render frame's worth and a little more
 short gRing[kRing * 2];
 volatile unsigned int gWrite = 0, gRead = 0;
 volatile bool gAudioRunning = false;
 double gSourcePos = 0;
 double gStep = 44100.0 / 48000.0;
+void (*gMixPull)(int16_t* stereo, int frames) = 0;
 
 unsigned int Filled() { return gWrite - gRead; }
+
+void RingPut(const int16_t* stereo, int frames) {
+    for (int i = 0; i < frames; ++i) {
+        const unsigned int at = (gWrite + (unsigned int)i) % kRing;
+        gRing[at * 2] = stereo[i * 2];
+        gRing[at * 2 + 1] = stereo[i * 2 + 1];
+    }
+    __sync_synchronize();
+    gWrite += (unsigned int)frames;
+}
 
 void* Feed(void*) {
     xsdk_thread_move(4);
     unsigned int frames = 0, starved = 0;
+    int16_t pulled[kPullFrames * 2];
     while (gAudioRunning) {
         float* out = 0;
         if (xsdk_audio_next_frame(100, &out) != 0 || !out) continue;
+        // a render frame takes ~235 of the mixer's frames: mix more first while the ring holds less
+        while (gMixPull && Filled() < (unsigned int)(XSDK_AUDIO_FRAME_SAMPLES * gStep) + 2) {
+            gMixPull(pulled, kPullFrames);
+            RingPut(pulled, kPullFrames);
+        }
         memset(out, 0, XSDK_AUDIO_FRAME_FLOATS * sizeof(float));
         float* left = out + XSDK_AUDIO_FRONT_LEFT * XSDK_AUDIO_FRAME_SAMPLES;
         float* right = out + XSDK_AUDIO_FRONT_RIGHT * XSDK_AUDIO_FRAME_SAMPLES;
@@ -335,20 +355,22 @@ void audio_out_open(int rate) {
     recomp_log("audio: xsdk feeder, %d Hz mix resampled to 48 kHz, 12 frames ahead", rate);
 }
 
-// blocks while the ring is full, so the mixer runs at the output's pace
+// blocks while the ring is full, so the mixer runs at the output's pace (unused while the feeder pulls)
 void audio_out_submit(const int16_t* stereo, int frames) {
     if (!gAudioRunning || frames <= 0) return;
     while (gAudioRunning && Filled() + (unsigned int)frames > (unsigned int)kRing) {
         timespec ts = {0, 2000000};
         nanosleep(&ts, 0);
     }
-    for (int i = 0; i < frames; ++i) {
-        const unsigned int at = (gWrite + (unsigned int)i) % kRing;
-        gRing[at * 2] = stereo[i * 2];
-        gRing[at * 2 + 1] = stereo[i * 2 + 1];
-    }
+    RingPut(stereo, frames);
+}
+
+// the feeder mixes on demand: the mixer thread hands it the mix and stops
+bool audio_out_pull(void (*mix)(int16_t* stereo, int frames)) {
+    if (!gAudioRunning) return false;
     __sync_synchronize();
-    gWrite += (unsigned int)frames;
+    gMixPull = mix;
+    return true;
 }
 
 int main() {

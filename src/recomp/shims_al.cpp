@@ -22,6 +22,7 @@
 
 void audio_out_open(int rate);                       // platform: start the device (no-op when muted)
 void audio_out_submit(const int16_t* stereo, int frames);   // platform: blocks until the device takes it
+bool audio_out_pull(void (*mix)(int16_t* stereo, int frames));  // platform: true if it mixes as it needs, through mix
 uint32_t gl_frame_count();                           // shims_gl.cpp
 
 namespace {
@@ -217,6 +218,9 @@ void mixer_thread(void*) {
     if (getenv("ISAAC360_VOLUME")) g_master = atoi(getenv("ISAAC360_VOLUME")) / 100.0f;
     std::vector<int16_t> block(1024 * 2);
     audio_out_open(kRate);
+    // the console's feeder mixes as its output runs low, a sound heard ~64 ms after the game plays it; a mixer paced
+    // by its own clock ran up to a full ring ahead after any stall (~430 ms late on the console, boot 21)
+    if (audio_out_pull(mix)) return;
     // ISAAC360_AUDIO_DUMP=path: the mix as a 44.1 kHz stereo WAV (header sizes left 0: read it as raw after 44 bytes)
     FILE* dump = getenv("ISAAC360_AUDIO_DUMP") ? fopen(getenv("ISAAC360_AUDIO_DUMP"), "wb") : 0;
     if (dump) {

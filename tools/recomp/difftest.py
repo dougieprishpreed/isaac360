@@ -89,10 +89,23 @@ def collect_pairs(tr, per_form):
     return forms
 
 
+def xmm_wrap(fn, body, xs_init):
+    """The XMM locals around translated code (translate.py keeps them per function: xmm_flow, sse_scalar), loaded
+    from and stored back to the CPU state; xs_init: lane 0 starts in both x_N and xs_N (else in x_N only)."""
+    pre = ''.join('X86Xmm x_%d=c->x[%d];XS xs_%d=%s;' % (n, n, n, 'xs_ldcpu(&c->x[%d].u[0])' % n if xs_init else 'XS_ZERO()')
+                  for n in range(8))
+    post = fn.x_flush(0xff) + ''.join('c->x[%d]=x_%d;' % (n, n) for n in range(8))
+    return T.lanes('{%s\n%s\n%s}' % (pre, body, post))
+
+
+def scalar_form(ins):
+    """True if translate.py's sse_scalar may take this instruction (worth a second run with lane 0 in xs_N)."""
+    return ins.mnemonic in T.Fn.SFO_FORMS
+
 class Pair(T.Fn):
     """Two instructions, the first fused into the second; a taken branch leaves through x86_unreachable."""
 
-    def __init__(self, tr, va, a, b):
+    def __init__(self, tr, va, a, b, xs_init=False):
         super().__init__(tr, va)
         vb = va + a.len
         self.insns = {va: a, vb: b}
@@ -102,6 +115,9 @@ class Pair(T.Fn):
         self.fusable = set()
         self.fused = {}
         self.labels = set()
+        self.xs_init = xs_init
+        self.xst = [self.XB if xs_init else self.XC] * 8
+        self.no_fold = True
 
     def code(self):
         self.liveness_fixed = True
@@ -111,13 +127,16 @@ class Pair(T.Fn):
             self.out = []
             self.translate_insn(v, self.insns[v], v + self.insns[v].len)
             out.append(''.join(self.out))
-        return '\n'.join(out), bool(self.fusable)
+        return xmm_wrap(self, '\n'.join(out), self.xs_init), bool(self.fusable)
+
+    def arith_follows(self, va, n):
+        return self.xs_init                            # a movss load goes to xs_N in the second run
 
 
 class Unit(T.Fn):
     """A one-instruction function: all flags live after it, no fusion."""
 
-    def __init__(self, tr, va, ins):
+    def __init__(self, tr, va, ins, xs_init=False):
         super().__init__(tr, va)
         self.insns = {va: ins}
         self.order = [va]
@@ -125,11 +144,17 @@ class Unit(T.Fn):
         self.live_out = {va: T.ALLF}
         self.fusable = set()
         self.fused = {}
+        self.xs_init = xs_init
+        self.xst = [self.XB if xs_init else self.XC] * 8
+        self.no_fold = True
 
     def code(self):
         self.out = []
         self.translate_insn(self.start, self.insns[self.start], self.start + self.insns[self.start].len)
-        return ''.join(self.out)
+        return xmm_wrap(self, ''.join(self.out), self.xs_init)
+
+    def arith_follows(self, va, n):
+        return self.xs_init                            # a movss load goes to xs_N in the second run
 
 
 HARNESS = r'''
@@ -244,27 +269,35 @@ def main():
     only = set(args.only.split(',')) if args.only else None
     tr = T.Translator()
     units = []
+    sfo_units = 0
     if args.pairs:
         forms = collect_pairs(tr, args.per_form)
         for key, samples in forms.items():
             for va, a, b in samples:
-                try:
-                    code, fused = Pair(tr, va, a, b).code()
-                except T.Unhandled:
-                    continue
-                if fused and 'x86_unimpl' not in code:
-                    units.append((va, (a, b), code))
+                # each pair as translated with X86Xmm registers and, for float compares, with scalar float ones
+                for xs in (False, True) if a.mnemonic in (T.M.COMISS, T.M.UCOMISS) else (False,):
+                    try:
+                        code, fused = Pair(tr, va, a, b, xs).code()
+                    except T.Unhandled:
+                        continue
+                    if fused and 'x86_unimpl' not in code:
+                        units.append((va, (a, b), code))
+                        sfo_units += xs
     else:
         forms = collect(tr, args.per_form, only)
         for key, samples in forms.items():
             for va, ins in samples:
-                try:
-                    code = Unit(tr, va, ins).code()
-                except T.Unhandled:
-                    continue
-                if 'x86_unimpl' in code:
-                    continue
-                units.append((va, ins, code))
+                # each instruction as translated with X86Xmm registers and, where its form allows, scalar float ones
+                for xs in (False, True) if scalar_form(ins) else (False,):
+                    try:
+                        code = Unit(tr, va, ins, xs).code()
+                    except T.Unhandled:
+                        continue
+                    if 'x86_unimpl' in code:
+                        continue
+                    units.append((va, ins, code))
+                    sfo_units += xs
+    print('%d with lane 0 starting in xs_N' % sfo_units)
     print('%d forms, %d samples' % (len(forms), len(units)))
     dll = ctypes.CDLL(build(units, OUTD))
     dll.run_test.argtypes = [ctypes.c_int, ctypes.POINTER(Ctx), ctypes.c_void_p, ctypes.c_char_p]

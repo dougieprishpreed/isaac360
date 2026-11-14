@@ -29,6 +29,84 @@
 
 uint32_t shim_proc_address(const std::string& module, const std::string& name);   // shims_all.cpp
 
+// ------------------------------------------------------------------------------------------------ biased locks
+// (guest_lock.h) The handover of the main thread's biased locks to another thread that wants one: the asker lists
+// the lock and waits until the main thread has served the list (between its lock operations, guest_lock_main_check)
+// or, while the main thread is parked in a wait, serves it itself. Serving clears the biased bit of each listed lock;
+// the main thread's plain stores before it are published by the release that ends the serving.
+uint32_t g_lockMainId = 0;
+std::atomic<uint32_t> g_lockRevokePending(0);
+namespace {
+std::mutex g_revokeLock;
+std::vector<GuestLock*> g_revokeList;
+uint64_t g_revokeAsked = 0;                             // under g_revokeLock
+std::atomic<uint64_t> g_revokeDone(0);
+std::atomic<int> g_mainState(0);                        // 0 running, 1 parked (blocked in a wait), 2 being served
+std::atomic<uint32_t> g_revoked(0), g_revokeSlowMs(0);
+
+void serve_listed() {                                   // with g_revokeLock
+    for (size_t i = 0; i < g_revokeList.size(); ++i) {
+        GuestLock* l = g_revokeList[i];
+        l->word.store(l->word.load(std::memory_order_relaxed) & ~(uint32_t)kLockBiased, std::memory_order_relaxed);
+    }
+    g_revoked.fetch_add((uint32_t)g_revokeList.size(), std::memory_order_relaxed);
+    g_revokeList.clear();
+    g_lockRevokePending.store(0, std::memory_order_relaxed);
+    g_revokeDone.store(g_revokeAsked, std::memory_order_release);
+}
+}  // namespace
+
+void guest_lock_set_main(uint32_t id) { g_lockMainId = id; }
+
+void guest_lock_serve() {
+    std::lock_guard<std::mutex> g(g_revokeLock);
+    serve_listed();
+}
+
+void guest_lock_revoke_slow(GuestLock& l, uint32_t me) {
+    (void)me;
+    uint64_t ticket;
+    {
+        std::lock_guard<std::mutex> g(g_revokeLock);
+        if (!(l.word.load(std::memory_order_relaxed) & kLockBiased)) return;
+        g_revokeList.push_back(&l);
+        ticket = ++g_revokeAsked;
+        g_lockRevokePending.store(1, std::memory_order_relaxed);
+    }
+    std::chrono::steady_clock::time_point t0 = std::chrono::steady_clock::now();
+    for (uint32_t spins = 0;; ++spins) {
+        if (g_revokeDone.load(std::memory_order_acquire) >= ticket) break;
+        int parked = 1;
+        if (g_mainState.compare_exchange_strong(parked, 2, std::memory_order_acquire)) {
+            {
+                std::lock_guard<std::mutex> g(g_revokeLock);
+                serve_listed();
+            }
+            g_mainState.store(1, std::memory_order_release);
+            break;
+        }
+        if (spins > 200) std::this_thread::yield();
+    }
+    // a main thread that neither locks nor waits for long (a spin on guest memory) would hold the asker here
+    uint32_t ms = (uint32_t)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
+    if (ms > g_revokeSlowMs.load(std::memory_order_relaxed)) {
+        g_revokeSlowMs.store(ms, std::memory_order_relaxed);
+        if (ms >= 50) recomp_log("locks: a thread waited %u ms for the main thread to hand over a lock", ms);
+    }
+}
+
+void guest_lock_main_park() { g_mainState.store(1, std::memory_order_release); }
+
+void guest_lock_main_unpark() {
+    for (;;) {
+        int parked = 1;
+        if (g_mainState.compare_exchange_weak(parked, 0, std::memory_order_acquire)) return;
+        std::this_thread::yield();                      // another thread is serving the list meanwhile
+    }
+}
+
+uint32_t shims_locks_handed_over() { return g_revoked.load(std::memory_order_relaxed); }
+
 namespace {
 // ------------------------------------------------------------------------------------------------ sync
 // A critical section is a GuestLock (guest_lock.h) found by the guest structure's address. The game enters and
@@ -75,6 +153,21 @@ CsSlot* cs_slot(uint32_t a) {
     return more;
 }
 GuestLock* cs_of(uint32_t a) { return cs_slot(a)->m; }
+
+// the main thread's own lookups first: a direct-mapped cache only it reads and writes (no atomic, no barrier; the
+// table's acquire load is a sync on the console), right as table slots never move or go
+const uint32_t kMainCache = 1024;
+uint32_t g_mainCacheKey[kMainCache];
+CsSlot* g_mainCacheSlot[kMainCache];
+inline CsSlot* cs_find(uint32_t a, bool main) {
+    if (!main) return cs_slot(a);
+    uint32_t h = (a >> 2) * 2654435761u >> 22;           // 10 bits
+    if (g_mainCacheKey[h] == a && a) return g_mainCacheSlot[h];
+    CsSlot* s = cs_slot(a);
+    g_mainCacheKey[h] = a;
+    g_mainCacheSlot[h] = s;
+    return s;
+}
 void k_InitializeCriticalSection(X86* c) { cs_of(ARG(c, 0)); RET_STD(c, 1, 0); }
 void k_InitializeCriticalSectionAndSpinCount(X86* c) { cs_of(ARG(c, 0)); RET_STD(c, 2, 1); }
 void k_DeleteCriticalSection(X86* c) { RET_STD(c, 1, 0); }
@@ -98,7 +191,11 @@ uint64_t g_mainEnters = 0;
 
 void cs_enter(X86* c, uint32_t a, CsSlot* slot) {
     uint32_t me = guest_thread(c)->id;
-    if (recomp_is_main_cpu(c)) ++g_mainEnters;
+    if (me == g_lockMainId) {
+        ++g_mainEnters;
+        // the main thread's own lock: nobody can be holding it, nothing to record
+        if ((slot->m->word.load(std::memory_order_relaxed) & kLockBiased) && guest_lock_try(*slot->m, me)) return;
+    }
     if (g_lockProfile < 0) g_lockProfile = getenv("ISAAC360_PROFILE") ? 1 : 0;
     if (!g_lockProfile) {
         guest_lock_enter(*slot->m, me);
@@ -130,14 +227,18 @@ void cs_enter(X86* c, uint32_t a, CsSlot* slot) {
 }
 void k_EnterCriticalSection(X86* c) {
     uint32_t a = ARG(c, 0);
-    cs_enter(c, a, cs_slot(a));
+    cs_enter(c, a, cs_find(a, guest_thread(c)->id == g_lockMainId));
     RET_STD(c, 1, 0);
 }
 void k_LeaveCriticalSection(X86* c) {
-    guest_lock_leave(*cs_of(ARG(c, 0)), guest_thread(c)->id);
+    uint32_t me = guest_thread(c)->id;
+    guest_lock_leave(*cs_find(ARG(c, 0), me == g_lockMainId)->m, me);
     RET_STD(c, 1, 0);
 }
-void k_TryEnterCriticalSection(X86* c) { RET_STD(c, 1, guest_lock_try(*cs_of(ARG(c, 0)), guest_thread(c)->id) ? 1 : 0); }
+void k_TryEnterCriticalSection(X86* c) {
+    uint32_t me = guest_thread(c)->id;
+    RET_STD(c, 1, guest_lock_try(*cs_find(ARG(c, 0), me == g_lockMainId)->m, me) ? 1 : 0);
+}
 
 struct Event {
     std::mutex m;
@@ -191,8 +292,16 @@ uint32_t wait(uint32_t h, uint32_t ms) {
     if (!e->manual) e->set = false;
     return 0;
 }
-void k_WaitForSingleObject(X86* c) { RET_STD(c, 2, wait(ARG(c, 0), ARG(c, 1))); }
-void k_WaitForSingleObjectEx(X86* c) { RET_STD(c, 3, wait(ARG(c, 0), ARG(c, 1))); }
+// the main thread parks while it waits (guest_lock.h): the thread it waits for may want one of its locks
+uint32_t wait_parked(X86* c, uint32_t h, uint32_t ms) {
+    bool main = guest_thread(c)->id == g_lockMainId;
+    if (main) guest_lock_main_park();
+    uint32_t r = wait(h, ms);
+    if (main) guest_lock_main_unpark();
+    return r;
+}
+void k_WaitForSingleObject(X86* c) { RET_STD(c, 2, wait_parked(c, ARG(c, 0), ARG(c, 1))); }
+void k_WaitForSingleObjectEx(X86* c) { RET_STD(c, 3, wait_parked(c, ARG(c, 0), ARG(c, 1))); }
 void k_CloseHandle(X86* c) { RET_STD(c, 1, 1); }
 
 // ------------------------------------------------------------------------------------------------ TLS
@@ -220,7 +329,12 @@ std::chrono::steady_clock::time_point g_t0 = std::chrono::steady_clock::now();
 uint64_t now_us() {
     return (uint64_t)std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - g_t0).count();
 }
-void k_QueryPerformanceCounter(X86* c) { WR64(ARG(c, 0), now_us()); RET_STD(c, 1, 1); }
+// the frame limiter polls it in a loop without locking (40,000 times a frame): the main thread serves handovers here
+void k_QueryPerformanceCounter(X86* c) {
+    if (guest_thread(c)->id == g_lockMainId) guest_lock_main_check();
+    WR64(ARG(c, 0), now_us());
+    RET_STD(c, 1, 1);
+}
 void k_QueryPerformanceFrequency(X86* c) { WR64(ARG(c, 0), 1000000); RET_STD(c, 1, 1); }
 void k_GetSystemTimeAsFileTime(X86* c) {
     uint64_t t = (uint64_t)std::chrono::duration_cast<std::chrono::microseconds>(
@@ -248,8 +362,12 @@ void k_Sleep(X86* c) {
     uint32_t ms = ARG(c, 0);
     bool main = recomp_is_main_cpu(c);
     uint64_t start = main ? now_us() : 0;
+    bool park = main && ms;                         // a sleep may outlast what another thread waits on it for
+    if (park) guest_lock_main_park();
+    else if (main) guest_lock_main_check();
     if (ms) std::this_thread::sleep_for(std::chrono::milliseconds(ms));
     else std::this_thread::yield();
+    if (park) guest_lock_main_unpark();
     if (main) g_mainSleepUs += now_us() - start;
     RET_STD(c, 1, 0);
 }
@@ -633,6 +751,9 @@ void shims_lock_stats_dump(void (*line)(const char*)) {
         top.push_back(std::make_pair(it->second.ms, it->first));
     std::sort(top.rbegin(), top.rend());
     char buf[256];
+    snprintf(buf, sizeof(buf), "locks: %u of the main thread's handed over to other threads so far (guest_lock.h)",
+             shims_locks_handed_over());
+    line(buf);
     for (size_t i = 0; i < top.size() && i < 8; ++i) {
         const LockStats& st = stats[top[i].second];
         snprintf(buf, sizeof(buf), "locks: %08x waited %u times, %.1f ms (longest %.1f ms: waiting from %08x %08x, held "
@@ -664,11 +785,19 @@ void shims_bench_locks(X86* c, uint32_t scratch) {
         word.store(0, std::memory_order_release);
     }
     double atomic = std::chrono::duration<double, std::nano>(Clock::now() - t0).count() / n;
-    GuestLock guest;
+    GuestLock guest;                                // the main thread's, biased (guest_lock.h)
+    const uint32_t me = guest_thread(c)->id;
     t0 = Clock::now();
     for (uint32_t i = 0; i < n; ++i) {
-        guest_lock_enter(guest, 1);
-        guest_lock_leave(guest, 1);
+        guest_lock_enter(guest, me);
+        guest_lock_leave(guest, me);
+    }
+    double biased = std::chrono::duration<double, std::nano>(Clock::now() - t0).count() / n;
+    guest.word.store(0);                            // as one another thread has asked for
+    t0 = Clock::now();
+    for (uint32_t i = 0; i < n; ++i) {
+        guest_lock_enter(guest, me);
+        guest_lock_leave(guest, me);
     }
     double light = std::chrono::duration<double, std::nano>(Clock::now() - t0).count() / n;
     // the section, then the reference-counted object: its count at +4, its lock object at +8 (the vtable at
@@ -709,8 +838,8 @@ void shims_bench_locks(X86* c, uint32_t scratch) {
     c->r[4] = esp;
     c->r[5] = ebp;
     recomp_log("bench: a critical section entered and left %.1f ns on a host mutex (an atomic swap and store %.1f ns, "
-               "a GuestLock %.1f ns), %.1f ns through the game's imports (%.1f profiled); the game's add-ref %.1f ns",
-               host, atomic, light, shims[0], shims[1], addRef);
+               "a GuestLock %.1f ns shared, %.1f biased to the main thread), %.1f ns through the game's imports (%.1f "
+               "profiled); the game's add-ref %.1f ns", host, atomic, light, biased, shims[0], shims[1], addRef);
 }
 
 // The engine's lock object (vtable 0xb3d508: a ready flag at +4, its critical section at +8, whose byte at +0x18
@@ -722,7 +851,7 @@ extern "C" int hle_lockobj_lock(X86* c) {
     uint32_t self = c->r[1], esp = c->r[4];
     if (!RD8(self + 4) || RD32(esp + 4) != 0xffffffffu) return 0;
     uint32_t cs = RD32(self + 8);
-    CsSlot* slot = cs_slot(cs);
+    CsSlot* slot = cs_find(cs, guest_thread(c)->id == g_lockMainId);
     cs_enter(c, cs, slot);
     if (RD8(cs + 0x18)) {
         guest_lock_leave(*slot->m, guest_thread(c)->id);
@@ -739,7 +868,8 @@ extern "C" int hle_lockobj_unlock(X86* c) {
     if (!RD8(self + 4)) return 0;
     uint32_t cs = RD32(self + 8);
     WR8(cs + 0x18, 0);
-    guest_lock_leave(*cs_of(cs), guest_thread(c)->id);
+    uint32_t me = guest_thread(c)->id;
+    guest_lock_leave(*cs_find(cs, me == g_lockMainId)->m, me);
     c->r[0] = 0;
     c->r[4] += 4;
     return 1;
@@ -754,7 +884,7 @@ extern "C" int hle_lockobj_unlock(X86* c) {
 static CsSlot* refcount_lock(X86* c, uint32_t lockObj, uint32_t* cs) {
     if (RD32(lockObj) != 0x00b3d508u || !RD8(lockObj + 4)) return 0;
     *cs = RD32(lockObj + 8);
-    CsSlot* slot = cs_slot(*cs);
+    CsSlot* slot = cs_find(*cs, guest_thread(c)->id == g_lockMainId);
     cs_enter(c, *cs, slot);
     if (RD8(*cs + 0x18)) {
         guest_lock_leave(*slot->m, guest_thread(c)->id);

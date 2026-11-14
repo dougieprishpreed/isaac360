@@ -121,6 +121,7 @@ class Flow:
         self.capture = False
         self.safe_wr = {}                           # lanes written with a constant, a stack address or xor r,r
         self.callees, self.tails = set(), set()
+        self.xmm = 0                                # the XMM registers its instructions name (translate.py xmm_reach)
         for va in fn.order:
             ins = fn.insns[va]
             succ = fn.succ.get(va, [])
@@ -129,6 +130,9 @@ class Flow:
             if ins is None:
                 self.rd[va] = self.wr[va] = self.frd[va] = self.fwr[va] = 0
                 continue
+            for i in range(ins.op_count):
+                if ins.op_kind(i) == OK.REGISTER and ix.RegisterExt.is_xmm(ins.op_register(i)):
+                    self.xmm |= 1 << (ins.op_register(i) - R.XMM0)
             self.rd[va], self.wr[va] = effects(ins)
             self.frd[va], self.fwr[va] = flags_of(ins)
             kind = None
