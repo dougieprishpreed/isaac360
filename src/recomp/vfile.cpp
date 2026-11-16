@@ -23,12 +23,14 @@ namespace {
 volatile uint64_t g_opens = 0, g_bytes = 0, g_disk = 0;
 double g_diskMs = 0;                                 // time in drive reads, all threads (the slow frame lines)
 
-// Blocks of 64 KB: a room's textures and animations are small entries spread over the archives, and 256 KB blocks
-// read ~4 MB from the drive for the ~600 KB a door's room needed (the console's USB gives ~10 MB/s). A miss right
-// after the block before it reads four blocks in one request (an entry read through), else one.
-enum { BLOCK = 64 << 10, AHEAD = 4, DIRECT = 1 << 20 };
+// Blocks of 16 KB: a room's textures and animations are small entries spread over the archives. The console's USB
+// reads ~20 MB/s with little cost a request (boot 23's slow frames: 64 KB in 3.5 ms, 320 KB in 16 ms), so a block
+// costs its size: with 64 KB blocks a door read 320 KB from the drive for 7 KB the game asked for (16 ms), and the
+// run's load 7.2 MB for 1.3 MB (373 ms). A miss after blocks already read reads on as many as it follows (an entry
+// read through: 1, 1, 2, 4, 8, then 16 blocks, 256 KB, a request), else one.
+enum { BLOCK = 16 << 10, AHEAD = 16, DIRECT = 1 << 20 };
 
-// blocks each reader keeps (ISAAC360_READ_CACHE, 64: 4 MB) and all readers together (ISAAC360_READ_BUDGET MB, 24):
+// blocks each reader keeps (ISAAC360_READ_CACHE, 256: 4 MB) and all readers together (ISAAC360_READ_BUDGET MB, 24):
 // vf_trim drops the least recently read past the budget, and any block unread for a minute
 int g_cacheBlocks = -1;
 uint32_t g_budgetBlocks = 0;
@@ -80,7 +82,8 @@ struct Reader {
 
     // a block for index at the front (the oldest one's storage once the reader holds its share)
     Block& fresh(int64_t index) {
-        if (g_cacheBlocks < 0) g_cacheBlocks = getenv("ISAAC360_READ_CACHE") ? atoi(getenv("ISAAC360_READ_CACHE")) : 64;
+        if (g_cacheBlocks < 0)
+            g_cacheBlocks = getenv("ISAAC360_READ_CACHE") ? atoi(getenv("ISAAC360_READ_CACHE")) : (4 << 20) / BLOCK;
         if (blocks.size() >= (size_t)(g_cacheBlocks < 1 ? 1 : g_cacheBlocks)) {
             blocks.splice(blocks.begin(), blocks, --blocks.end());
         } else {
@@ -94,10 +97,11 @@ struct Reader {
 
     const std::vector<uint8_t>& block(int64_t index) {
         if (Block* b = find(index)) return b->data;
-        // read on through what follows a block just read, in one request
-        int64_t count = 1, last = (size - 1) / BLOCK;
-        if (index > 0 && find(index - 1))
-            while (count < AHEAD && index + count <= last && !find(index + count)) ++count;
+        // read on through what follows blocks just read, in one request: as many blocks as it follows
+        int64_t count = 1, last = (size - 1) / BLOCK, before = 0;
+        while (before < AHEAD && index - before > 0 && find(index - before - 1)) ++before;
+        if (before > 1)
+            while (count < before && index + count <= last && !find(index + count)) ++count;
         int64_t off = index * BLOCK;
         size_t want = (size_t)((index + count - 1 >= last ? size : (index + count) * BLOCK) - off);
         std::vector<uint8_t> run(want);

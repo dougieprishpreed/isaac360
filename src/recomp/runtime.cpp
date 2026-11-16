@@ -830,9 +830,12 @@ static void profile_thread(void*) {
     }
 }
 
+static bool g_countSlow;
 void recomp_profile_start() {
 #if defined(_WIN32)
-    x86_counting = getenv("ISAAC360_COUNT_CALLS") && atoi(getenv("ISAAC360_COUNT_CALLS")) != 0;
+    const char* counting = getenv("ISAAC360_COUNT_CALLS");
+    x86_counting = counting && (atoi(counting) != 0 || !strcmp(counting, "slow"));
+    g_countSlow = counting && !strcmp(counting, "slow");
 #endif
     const char* mode = getenv("ISAAC360_PROFILE");
     if (!mode) return;
@@ -950,40 +953,79 @@ struct CallCount {
 static const uint32_t kCountSlots = 1u << 16;
 static CallCount g_callCounts[kCountSlots];
 static uint64_t g_countedCalls = 0, g_countedIndirect = 0, g_countedImports = 0;
+// ISAAC360_COUNT_CALLS=slow: each frame's calls kept apart and added to the totals only when the frame's work (its
+// game part less the game's sleeps) passes ISAAC360_COUNT_SLOW_MS (6): what a door's or a load's frame runs, summed
+// over the run (recomp_count_frame)
+static CallCount g_frameCalls[kCountSlots];
+static std::vector<uint32_t> g_frameUsed;
+static uint64_t g_frameCalled = 0;
+static uint32_t g_slowCounted = 0;
 
-extern "C" void x86_count_enter(X86* c, uint32_t fn) {
-    if (!recomp_is_main_cpu(c)) return;
-    ++g_countedCalls;
+static void count_into(CallCount* table, uint32_t fn, uint32_t add, std::vector<uint32_t>* used) {
     uint32_t i = (fn * 2654435761u) >> 16;
     for (uint32_t n = 0; n < kCountSlots; ++n, i = (i + 1) & (kCountSlots - 1)) {
-        if (g_callCounts[i].fn == fn) {
-            ++g_callCounts[i].n;
+        if (table[i].fn == fn) {
+            table[i].n += add;
             return;
         }
-        if (!g_callCounts[i].fn) {
-            g_callCounts[i].fn = fn;
-            g_callCounts[i].n = 1;
+        if (!table[i].fn) {
+            table[i].fn = fn;
+            table[i].n = add;
+            if (used) used->push_back(i);
             return;
         }
     }
 }
 
+extern "C" void x86_count_enter(X86* c, uint32_t fn) {
+    if (!recomp_is_main_cpu(c)) return;
+    if (g_countSlow) {
+        ++g_frameCalled;
+        count_into(g_frameCalls, fn, 1, &g_frameUsed);
+        return;
+    }
+    ++g_countedCalls;
+    count_into(g_callCounts, fn, 1, 0);
+}
+
+void recomp_count_frame(double workMs) {
+    if (!g_countSlow) return;
+    static const double slowMs = getenv("ISAAC360_COUNT_SLOW_MS") ? atof(getenv("ISAAC360_COUNT_SLOW_MS")) : 6.0;
+    bool keep = workMs > slowMs;
+    for (size_t k = 0; k < g_frameUsed.size(); ++k) {
+        CallCount& e = g_frameCalls[g_frameUsed[k]];
+        if (keep) count_into(g_callCounts, e.fn, e.n, 0);
+        e.fn = e.n = 0;
+    }
+    g_frameUsed.clear();
+    if (keep) {
+        g_countedCalls += g_frameCalled;
+        ++g_slowCounted;
+    }
+    g_frameCalled = 0;
+}
+
 void recomp_count_dump(uint32_t frames, void (*line)(const char*)) {
 #if defined(_WIN32)
     if (!x86_counting || !frames) return;
+    if (g_countSlow) {                              // the run's slow frames so far, averaged over them
+        if (!g_slowCounted) return;
+        frames = g_slowCounted;
+    }
     std::vector<std::pair<uint32_t, uint32_t> > top;
     for (uint32_t i = 0; i < kCountSlots; ++i)
         if (g_callCounts[i].fn) top.push_back(std::make_pair(g_callCounts[i].n, g_callCounts[i].fn));
     std::sort(top.rbegin(), top.rend());
     char buf[200];
-    snprintf(buf, sizeof(buf), "calls: %.0f a frame on the main thread (%.0f indirect, %.0f into imports), %u functions",
+    snprintf(buf, sizeof(buf), "calls: %.0f a frame on the main thread (%.0f indirect, %.0f into imports), %u functions%s",
              (double)g_countedCalls / frames, (double)g_countedIndirect / frames, (double)g_countedImports / frames,
-             (unsigned)top.size());
+             (unsigned)top.size(), g_countSlow ? " (slow frames only)" : "");
     line(buf);
     for (size_t i = 0; i < top.size() && i < 400; ++i) {
         snprintf(buf, sizeof(buf), "calls: %8.1f a frame F_%x", (double)top[i].first / frames, top[i].second);
         line(buf);
     }
+    if (g_countSlow) return;                        // the totals go on: the last block is the run's
     memset(g_callCounts, 0, sizeof(g_callCounts));
     g_countedCalls = g_countedIndirect = g_countedImports = 0;
 #else

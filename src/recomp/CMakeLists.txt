@@ -20,7 +20,7 @@ target_include_directories(isaac360_guest PRIVATE "${CMAKE_CURRENT_LIST_DIR}" "$
 # the translated code is large and flat: -O1 keeps compile times reasonable; no warnings for generated code
 target_compile_options(isaac360_guest PRIVATE /O1 /w /fp:precise -fno-strict-aliasing)
 
-add_executable(isaac360_recomp host_win32.cpp runtime.cpp gl_vk.cpp vfile.cpp lz.cpp hle_vorbis.cpp hle_png.cpp hle_inflate.cpp hle_image.cpp ${SHIM_SOURCES}
+add_executable(isaac360_recomp host_win32.cpp runtime.cpp gl_vk.cpp vfile.cpp lz.cpp hle_vorbis.cpp hle_png.cpp hle_inflate.cpp hle_image.cpp hle_archive.cpp ${SHIM_SOURCES}
                "${ROOT}/src/third_party/miniz/miniz_tinfl.c")
 # gl_shaders.inc: the game's shaders converted by tools/recomp/shaders.py
 target_include_directories(isaac360_recomp PRIVATE "${CMAKE_CURRENT_LIST_DIR}" "${ROOT}/build/recomp" "${ROOT}/src/third_party/vulkan-headers/include")

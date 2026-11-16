@@ -698,6 +698,7 @@ void gl_present() {
             end = Clock::now();
         }
         lastEnd = end;
+        recomp_count_frame(game - slept);
         log_slow_frame(game, present);
         room_frame(game + present, game, present, slept);
         audit_frame(game - slept);

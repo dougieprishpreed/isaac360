@@ -37,7 +37,8 @@ def main():
     ap.add_argument('--shots', type=int, default=900, help='a screenshot every N frames (0: none)')
     ap.add_argument('--mod', default='main', help='the script in tools/recomp/coverage_mod: main (the walk) or '
                     'sound_stress (sound channels, music, cutscenes and restarts against the sound thread), or walk '
-                    '(the stick held right, down, left and up in the first room: the player moves)')
+                    '(the stick held right, down, left and up in the first room: the player moves), or doors (every room of '
+                    'the first floors entered twice: the door frames)')
     ap.add_argument('--heap-check', action='store_true', help='ISAAC360_HEAP_CHECK=1: guard bytes and held frees')
     args = ap.parse_args()
     if os.path.isdir(SAVE):

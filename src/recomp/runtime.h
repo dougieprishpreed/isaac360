@@ -117,6 +117,7 @@ void recomp_profile_frame(bool slow);    // ISAAC360_PROFILE=slow: a frame ended
 bool recomp_profile_by_room();           // ISAAC360_PROFILE=room: samples logged per room (shims_gl.cpp)
 void recomp_profile_clear();             // drops the samples since the last dump
 void recomp_count_dump(uint32_t frames, void (*line)(const char*));   // ISAAC360_COUNT_CALLS (PC): calls a frame
+void recomp_count_frame(double workMs);     // ISAAC360_COUNT_CALLS=slow: the frame ended with workMs of the game's work
 void gl_room_entered(const char* name);  // the game logged "Room type.variant(name)" (shims_crt.cpp)
 void gl_game_exiting();                  // the game's exit(): the last room's line (shims_crt.cpp)
 void gl_audit_mark(const char* what);    // an audit script's mark: the frames since the last get a line (shims_gl.cpp)

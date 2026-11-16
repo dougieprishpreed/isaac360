@@ -81,6 +81,12 @@ HOST = {
     0x959c30: 'hle_refcount_peek',            # a {pointer, count} pair's count read (cdecl)
     0x98cd10: 'hle_image_load',               # an image's load-from-file (this ecx, path): cached decodes
     0x99d030: 'hle_image_pixels',             # its pixel hand-off, where a decode goes into the cache: hle_image.cpp
+    # the archive reader (src/recomp/hle_archive.cpp): ~150 entries opened, ~240 blocks and ~19,000 reads a door
+    0x9aee80: 'hle_isaac_seed',               # an entry's keystream generator seeded (this ecx, seed; ret 4)
+    0x9aef40: 'hle_isaac_round',              # an ISAAC round (this ecx)
+    0x99ce00: 'hle_isaac_xor',                # a block XORed with the keystream (this ecx, buf, len; ret 8)
+    0x99b210: 'hle_tinfl',                    # miniz's tinfl_decompress on a block (r ecx, in edx, 5 more; plain ret)
+    0x988670: 'hle_archive_read',             # the stream's Read (this ecx, dst, size, count; ret 12)
 }
 
 M = ix.Mnemonic
