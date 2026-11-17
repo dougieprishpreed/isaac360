@@ -213,7 +213,10 @@ void s_vsprintf(X86* c) {
         recomp_log("printf> %s", s.substr(0, 200).c_str());
     }
     // the game's log line for each room it enters ("Room %d.%d(%s)\n" in isaac-ng.exe): the room lines' boundary
-    if (ARG(c, 4) == 0xb2e1cc) gl_room_entered(s.c_str());
+    if (ARG(c, 4) == 0xb2e1cc) {
+        gl_room_entered(s.c_str());
+        looks_room_entered();
+    }
     // an audit script's marks (Lua "audit: <what>"): the frames since the last one get their line (shims_gl.cpp)
     size_t mark = s.find("Lua Debug: audit: ");
     if (mark != std::string::npos) gl_audit_mark(s.c_str() + mark + 18);
@@ -652,10 +655,10 @@ void s_strftime(X86* c) {
     RET_CDECL(c, (uint32_t)n);
 }
 
-// setjmp returns 0 on the direct path; a longjmp back into a translated frame needs translator support
-// (docs/RECOMP_PLAN.md): it stops with its caller until then
+// translate.py turns each direct call to setjmp into the host's (x86_setjmp_at): this import only runs for a call
+// through a pointer, which records nothing, so a longjmp to its buffer stops with a FATAL line
 void s_setjmp3(X86* c) { RET_CDECL(c, 0); }
-void s_longjmp(X86* c) { recomp_fatal(c, "longjmp (Lua error or libpng error path) is not supported yet"); }
+void s_longjmp(X86* c) { recomp_longjmp(c, ARG(c, 0), ARG(c, 1)); }
 
 const ShimDef kCrt[] = {
     {"vcruntime140.dll!_setjmp3", s_setjmp3},

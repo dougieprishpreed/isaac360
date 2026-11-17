@@ -6,6 +6,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <math.h>
+#include <setjmp.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -258,6 +259,18 @@ void x86_unimpl(X86* c, uint32_t eip, const char* what) __attribute__((noreturn)
 void x86_bad_jump(X86* c, uint32_t eip, uint32_t target) __attribute__((noreturn));
 void x86_unreachable(X86* c, uint32_t eip) __attribute__((noreturn));
 void x86_import(X86* c, uint32_t slot);                  /* call through an IAT slot */
+/* setjmp and longjmp (libpng's error exit, Lua's errors): translate.py turns each call to a setjmp import into the
+ * host's setjmp in the translated function, beside a record of the guest's callee-saved registers (x86_setjmp_at,
+ * runtime.cpp); longjmp finds the record by the guest jmp_buf and jumps back into that function, which takes the
+ * registers back and the value as setjmp's return. */
+typedef struct X86Jmp {
+    jmp_buf host;
+    uint32_t buf, esp, ebx, ebp, esi, edi;       /* the guest jmp_buf; esp after the call; callee-saved registers */
+    uint32_t site, seh, hostCalls, value;        /* the return address; fs:[0]; guest_call depth; longjmp's value */
+    const char* thunkName;                       /* the import the thread was in (runtime.cpp's GuestThread) */
+} X86Jmp;
+X86Jmp* x86_setjmp_at(X86* c, uint32_t buf, uint32_t esp, uint32_t site, uint32_t ebx, uint32_t ebp, uint32_t esi,
+                      uint32_t edi);
 /* ISAAC360_REGCHECK translations: a function returned with a register it is taken to preserve changed (regflow.py) */
 void x86_regcheck(X86* c, uint32_t fn, uint32_t eip, int reg, uint32_t entry, uint32_t now);
 /* ISAAC360_REGCHECK=1 translations: after a call, esp outside the thread's stack (the call at eip came back wrong) */

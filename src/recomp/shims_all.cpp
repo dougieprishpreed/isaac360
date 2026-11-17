@@ -60,4 +60,7 @@ void shims_register_all() {
     shims_crt3_register();
 }
 
-void shims_after_load() { shims_crt_init(); }
+void shims_after_load() {
+    shims_crt_init();
+    looks_trace_init();
+}

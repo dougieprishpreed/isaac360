@@ -23,16 +23,19 @@ set(CMAKE_C_COMPILER_LAUNCHER python3 "${ROOT}/tools/xsdk/record_forms.py")
 set(CMAKE_CXX_COMPILER_LAUNCHER python3 "${ROOT}/tools/xsdk/record_forms.py")
 
 # char signed as on the PC, no strict aliasing (guest memory is read through casts and memcpy), no fused
-# multiply-adds, so floats come out as on the PC's /fp:precise
-set(COMMON_FLAGS -fsigned-char -fno-strict-aliasing -ffp-contract=off -ffunction-sections -fdata-sections)
+# multiply-adds, so floats come out as on the PC's /fp:precise. No counted (mtctr/bdnz) loops: the toolchain's
+# GCC 15.3 gets the "runs once" guard it puts before some of them wrong (li rN,1; mtctr rN; b), so such a loop
+# copies or visits fewer items than it should, on the console only.
+set(COMMON_FLAGS -fsigned-char -fno-strict-aliasing -ffp-contract=off -ffunction-sections -fdata-sections
+                 -fno-branch-count-reg)
 
 # the translated images, one library each (each folder has its own decls.h)
 foreach(SET out out_lua out_msvcp)
     file(GLOB GEN_${SET} "${ROOT}/build/recomp/${SET}/f*.c")
     add_library(guest_${SET} STATIC ${GEN_${SET}} "${ROOT}/build/recomp/${SET}/functions.c")
     target_include_directories(guest_${SET} PRIVATE "${RECOMP}" "${ROOT}/build/recomp/${SET}")
-    # no unwind tables: nothing unwinds through translated frames (a guest throw or longjmp stops the game), and
-    # .eh_frame held 1.8 MB of the console's memory for them
+    # no unwind tables: nothing unwinds through translated frames (a guest throw stops the game; newlib's longjmp
+    # only loads the registers setjmp saved), and .eh_frame held 1.8 MB of the console's memory for them
     target_compile_options(guest_${SET} PRIVATE ${BOI_GEN_OPT} ${COMMON_FLAGS} -std=gnu99 -w
                            -fno-asynchronous-unwind-tables -fno-unwind-tables)
 endforeach()

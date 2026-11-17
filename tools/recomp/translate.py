@@ -87,6 +87,8 @@ HOST = {
     0x99ce00: 'hle_isaac_xor',                # a block XORed with the keystream (this ecx, buf, len; ret 8)
     0x99b210: 'hle_tinfl',                    # miniz's tinfl_decompress on a block (r ecx, in edx, 5 more; plain ret)
     0x988670: 'hle_archive_read',             # the stream's Read (this ecx, dst, size, count; ret 12)
+    # ISAAC360_TRACE_LOOKS (src/recomp/shims_looks.cpp): logs, then lets the game's code run
+    0x710f70: 'hle_trace_costume',            # the player's AddCostume (this ecx, item config, a flag; ret 8)
 }
 
 M = ix.Mnemonic
@@ -871,11 +873,22 @@ class Fn:
             E('%sesp+=%d;%s%s%s%s' % (self.regcheck(va), 4 + pop, spill, self.xspill(), trace, self.ret_locals()))
             return
         if mn == M.CALL:
-            if ins.op0_kind in (OK.NEAR_BRANCH32, OK.NEAR_BRANCH16):
+            ret = va + ins.len
+            direct = ins.op0_kind in (OK.NEAR_BRANCH32, OK.NEAR_BRANCH16)
+            iat = ins.op0_kind == OK.MEMORY and ins.memory_base == R.NONE and ins.memory_index == R.NONE
+            if ((direct and tr.is_setjmp(ins.near_branch_target)) or
+                    (iat and tr.is_setjmp_import(ins.memory_displacement & 0xffffffff))):
+                # setjmp (x86.h X86Jmp): the host's, here, so a longjmp comes back into this function; the guest's
+                # callee-saved registers and esp come back from the record (the locals changed since are lost), eax
+                # takes longjmp's value; the call's net esp is 0 (cdecl, the caller pops the buffer)
+                E('{X86Jmp* j_=x86_setjmp_at(c,RD32(esp),esp,0x%xu,ebx,ebp,esi,edi);if(setjmp(j_->host)){'
+                  'eax=j_->value;ebx=j_->ebx;ebp=j_->ebp;esi=j_->esi;edi=j_->edi;esp=j_->esp;}else eax=0;}'
+                  ' /* setjmp */' % ret)
+                return
+            if direct:
                 E(self.call_direct(va, ins, ins.near_branch_target))
                 return
-            ret = va + ins.len
-            if ins.op0_kind == OK.MEMORY and ins.memory_base == R.NONE and ins.memory_index == R.NONE:
+            if iat:
                 slot = ins.memory_displacement & 0xffffffff
                 if slot in tr.imports:
                     site = self.site(va)
@@ -1959,6 +1972,17 @@ class Translator:
 
     def func_name(self, va):
         return 'F_%x' % va if va in self.funcs else None
+
+    def is_setjmp_import(self, slot):
+        return self.imports.get(slot, '').split('!')[-1] in ('_setjmp3', '_setjmp')
+
+    def is_setjmp(self, va):
+        """va is a thunk that jumps through a setjmp import (jmp [slot])."""
+        if not self.in_text(va):
+            return False
+        ins = self.decode(va)
+        return (ins.mnemonic == M.JMP and ins.op0_kind == OK.MEMORY and ins.memory_base == R.NONE and
+                ins.memory_index == R.NONE and self.is_setjmp_import(ins.memory_displacement & 0xffffffff))
 
     def compute_xmm_reach(self):
         """Each function's XMM registers with everything it calls (0xff: unknown, through a pointer or an import):

@@ -73,7 +73,11 @@ struct GuestThread {
     int sampleSlot;                         // its slot in the profiler and watchdog samples, or -1
     uint32_t id;                            // from 1: the owner its critical sections record (guest_lock.h)
     uint32_t tls[128];                      // TlsGetValue / TlsSetValue slots (more go to a map)
+    X86Jmp* jmps;                           // its live setjmp records, outermost first (x86_setjmp_at)
+    int jmpCount;
+    uint32_t hostCalls;                     // guest_call depth: a longjmp never skips a host function
 };
+[[noreturn]] void recomp_longjmp(X86* c, uint32_t buf, uint32_t value);
 GuestThread* guest_thread(X86* c);
 uint32_t thread_create(uint32_t entry, uint32_t arg, uint32_t* tid_out);   // returns a handle
 X86* cpu_new_thread();
@@ -119,6 +123,8 @@ void recomp_profile_clear();             // drops the samples since the last dum
 void recomp_count_dump(uint32_t frames, void (*line)(const char*));   // ISAAC360_COUNT_CALLS (PC): calls a frame
 void recomp_count_frame(double workMs);     // ISAAC360_COUNT_CALLS=slow: the frame ended with workMs of the game's work
 void gl_room_entered(const char* name);  // the game logged "Room type.variant(name)" (shims_crt.cpp)
+void looks_trace_init();                 // ISAAC360_TRACE_LOOKS (shims_looks.cpp): after the image loads
+void looks_room_entered();               // and at each room the game enters
 void gl_game_exiting();                  // the game's exit(): the last room's line (shims_crt.cpp)
 void gl_audit_mark(const char* what);    // an audit script's mark: the frames since the last get a line (shims_gl.cpp)
 int recomp_guest_returns(X86* c, uint32_t* out, int n);    // the innermost guest return addresses on c's stack

@@ -1431,7 +1431,10 @@ uint32_t guest_call(X86* c, uint32_t fn, int nargs, const uint32_t* args, bool s
     sp -= 4;
     WR32(sp, 0xF00DF00Du);                  // host return marker: never dispatched, the C call returns
     c->r[4] = sp;
+    GuestThread* th = guest_thread(c);
+    ++th->hostCalls;
     x86_call(c, fn);
+    --th->hostCalls;
     uint32_t ret = c->r[0];
     if (!stdcall) c->r[4] += 4 + 4 * nargs;
     if (c->r[4] != saved[4]) {
@@ -1443,6 +1446,74 @@ uint32_t guest_call(X86* c, uint32_t fn, int nargs, const uint32_t* args, bool s
     c->r[6] = saved[6];
     c->r[7] = saved[7];
     return ret;
+}
+
+// ------------------------------------------------------------------------------------------------ setjmp, longjmp
+// A guest thread's records are a stack by guest esp, the outermost first (x86.h X86Jmp). A setjmp call drops the
+// records of functions that have returned (deeper than it) and an earlier one from the same call or on the same
+// buffer, as a jmp_buf holds the last setjmp's state. The guest's jmp_buf gets what MSVC's _setjmp3 puts first
+// (ebp, ebx, edi, esi, esp, eip, the exception registration); only the host's longjmp reads it back.
+static const int kJmpRecords = 64;
+
+X86Jmp* x86_setjmp_at(X86* c, uint32_t buf, uint32_t esp, uint32_t site, uint32_t ebx, uint32_t ebp, uint32_t esi,
+                      uint32_t edi) {
+    GuestThread* th = guest_thread(c);
+    if (!th->jmps) {
+        th->jmps = (X86Jmp*)calloc(kJmpRecords, sizeof(X86Jmp));
+        if (!th->jmps) recomp_fatal(c, "setjmp: no host memory for its records");
+    }
+    int n = th->jmpCount;
+    while (n > 0 && (th->jmps[n - 1].esp < esp || (th->jmps[n - 1].esp == esp && th->jmps[n - 1].site == site))) --n;
+    for (int i = n - 1; i >= 0; --i)
+        if (th->jmps[i].buf == buf) {
+            memmove(&th->jmps[i], &th->jmps[i + 1], (size_t)(n - 1 - i) * sizeof(X86Jmp));
+            --n;
+        }
+    if (n >= kJmpRecords) recomp_fatal(c, "setjmp at %08x: more than %d live", site, kJmpRecords);
+    X86Jmp* j = &th->jmps[n];
+    th->jmpCount = n + 1;
+    j->buf = buf;
+    j->esp = esp;
+    j->ebx = ebx;
+    j->ebp = ebp;
+    j->esi = esi;
+    j->edi = edi;
+    j->site = site;
+    j->seh = RD32(c->fs_base);
+    j->hostCalls = th->hostCalls;
+    j->value = 0;
+    j->thunkName = th->thunkName;
+    const uint32_t fields[7] = {ebp, ebx, edi, esi, esp - 4, site, j->seh};
+    for (int i = 0; i < 7; ++i) WR32(buf + 4 * i, fields[i]);
+    return j;
+}
+
+// longjmp(buf, value) from a shim: back into the translated function whose setjmp filled buf, which restores the
+// guest's callee-saved registers and esp from its record and returns value (1 for 0) from that setjmp
+void recomp_longjmp(X86* c, uint32_t buf, uint32_t value) {
+    GuestThread* th = guest_thread(c);
+    const uint32_t from = RD32(c->r[4]);
+    int i = th->jmpCount - 1;
+    while (i >= 0 && th->jmps[i].buf != buf) --i;
+    if (i < 0) recomp_fatal(c, "longjmp from %08x to a buffer no live setjmp filled (%08x)", from, buf);
+    X86Jmp* j = &th->jmps[i];
+    if (j->esp <= c->r[4]) recomp_fatal(c, "longjmp from %08x into a function that returned (setjmp at %08x)", from, j->site);
+    if (j->hostCalls != th->hostCalls)
+        recomp_fatal(c, "longjmp from %08x to %08x past a host function (host call depth %u -> %u)", from, j->site,
+                     th->hostCalls, j->hostCalls);
+    th->jmpCount = i + 1;                          // the records of the functions it leaves go with them
+    static std::atomic<int> logged(0);
+    uint32_t seh = RD32(c->fs_base);
+    if (logged < 32) {
+        ++logged;
+        recomp_log("longjmp from %08x to the setjmp at %08x (value %u)%s", from, j->site, value,
+                   seh != j->seh ? "; past guest exception frames, whose unwinding does not run" : "");
+    }
+    WR32(c->fs_base, j->seh);
+    th->thunkName = j->thunkName;
+    if (th->sampleSlot >= 0) g_sampleThunk[th->sampleSlot] = j->thunkName;
+    j->value = value ? value : 1;
+    longjmp(j->host, 1);
 }
 
 // ------------------------------------------------------------------------------------------------ threads
