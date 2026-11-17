@@ -352,9 +352,14 @@ VFile* vf_open(const std::string& hostPath, const std::string& mode, bool shared
         push_write(op);
         return v;
     }
-    vf_drain();                         // it may read what the writer still holds
-    if (shared && readOnlyBinary) v->r = reader_for(hostPath);
-    else v->f = fopen(hostPath.c_str(), mode.c_str());
+    // the game's data (resources/, never written) needn't wait for the writer: the console's doors waited on the game's
+    // log flushes in each archive open (boot 24: 11% of slow frames in fopen)
+    if (shared && readOnlyBinary) {
+        v->r = reader_for(hostPath);
+    } else {
+        vf_drain();                     // it may read what the writer still holds
+        v->f = fopen(hostPath.c_str(), mode.c_str());
+    }
     if (!v->f && !v->r) {
         delete v;
         return 0;

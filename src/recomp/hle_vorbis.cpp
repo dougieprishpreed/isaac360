@@ -405,6 +405,7 @@ struct Stream {
     bool opened = false, failed = false, atEnd = false, restart = false, busy = false, gone = false;
     bool owned = false;                                 // the game's decoder was left unpumped for the host
     uint64_t served = 0, lastRead = 0;
+    int waiting = 0;                                    // reads waiting for its samples (decoded first)
 };
 
 std::mutex g_lock;
@@ -415,6 +416,7 @@ bool g_threadStarted = false;
 int g_check = -1;
 uint32_t g_opened = 0;
 uint64_t g_reads = 0;
+double g_mainWaitMs = 0;                                // the main thread's waits for samples (the slow frame lines)
 thread_local bool t_bypass = false;
 // The decoder objects the host serves, for the free() shim to look through without a lock: the game closes a
 // streamed decoder with stb_vorbis_close inlined, whose last step frees the object, and no vorbis_deinit call
@@ -676,13 +678,21 @@ void decoder_thread(void*) {
             g_retired[i]->v = 0;
             g_retired.erase(g_retired.begin() + (long)i);
         }
+        // a stream a read waits on first, then one to open or restart, then the one holding the fewest frames: in map
+        // order a door that started two tracks waited for the first one's whole 1.5 s before the second opened
         std::shared_ptr<Stream> s;
+        int best = 0;
+        uint32_t fewest = 0;
         for (std::map<uint32_t, std::shared_ptr<Stream> >::iterator it = g_streams.begin(); it != g_streams.end(); ++it) {
             Stream& x = *it->second;
             if (x.failed) continue;
             if (!x.opened || x.restart || (!x.atEnd && kRingFrames - x.count >= kStepFrames + kMaxFrame)) {
-                s = it->second;
-                break;
+                int rank = x.waiting ? 3 : !x.opened || x.restart ? 2 : 1;
+                if (rank > best || (rank == best && x.count < fewest)) {
+                    s = it->second;
+                    best = rank;
+                    fewest = x.count;
+                }
             }
         }
         if (!s) {
@@ -704,6 +714,9 @@ void decoder_thread(void*) {
         if (ok && s->v) {
             step.resize((size_t)(kStepFrames + kMaxFrame) * channels);
             got = decode(*s, &step[0], kStepFrames + kMaxFrame);
+            // ISAAC360_VORBIS_STEP_MS=N: each step takes N ms more, the console's slower decoder on the PC
+            static const int stepMs = getenv("ISAAC360_VORBIS_STEP_MS") ? atoi(getenv("ISAAC360_VORBIS_STEP_MS")) : 0;
+            if (stepMs > 0) std::this_thread::sleep_for(std::chrono::milliseconds(stepMs));
         }
         l.lock();
         s->busy = false;
@@ -776,11 +789,23 @@ extern "C" int hle_vorbis_get_samples(X86* c) {
     }
     s->lastRead = ++g_reads;
     uint32_t want = (uint32_t)(shorts / channels), got = 0;
+    // A read returns once it holds a decode step's frames (or the stream's end), not all it asked for: a track's start
+    // queues four buffers of 16384 frames on the main thread, which waited for the host to decode the whole 1.5 s
+    // (boot 24: slow frames that started music 211 ms, others 88). The game queues what it gets (0 alone is the end).
+    // The check compares whole reads with the game's decoder.
+    const uint32_t enough = g_check ? want : want < kStepFrames ? want : kStepFrames;
+    const bool mainThread = recomp_is_main_cpu(c);
     std::vector<int16_t> mine;
     while (got < want) {
         if (!s->opened || s->restart || (!s->count && !s->atEnd && !s->failed)) {
+            if (got >= enough) break;
+            ++s->waiting;
             g_work.notify_one();
+            std::chrono::steady_clock::time_point t0 = std::chrono::steady_clock::now();
             g_ready.wait(l);
+            if (mainThread)
+                g_mainWaitMs += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+            --s->waiting;
             continue;
         }
         if (s->failed || !s->count) break;              // the host can't decode it, or the stream's end
@@ -854,6 +879,12 @@ extern "C" int hle_vorbis_get_samples(X86* c) {
     c->r[0] = got;
     c->r[4] = esp + 4;
     return 1;
+}
+
+// ms the main thread has waited for music samples so far (the slow frame lines)
+double hle_vorbis_main_wait_ms() {
+    std::lock_guard<std::mutex> l(g_lock);
+    return g_mainWaitMs;
 }
 
 // set_file_offset(f in ecx, loc in edx): seek_start's first half (the game inlines the rest); the game's decoder

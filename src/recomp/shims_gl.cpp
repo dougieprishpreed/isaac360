@@ -183,6 +183,8 @@ uint32_t gl_get_proc(const std::string& name) {
 }
 
 uint32_t gl_frame_count() { return g_frames; }
+void hle_archive_streams(uint32_t* now, uint32_t* most);   // hle_archive.cpp
+double hle_vorbis_main_wait_ms();                          // hle_vorbis.cpp
 uint32_t (*g_hostFreeMemory)() = 0;                // the console's free memory in bytes (host_xsdk.cpp), for the log
 uint32_t (*g_hostHeapBytes)() = 0;                 // the console's C heap and big blocks (host_xsdk.cpp)
 // A quit the platform asked for (the console's Back + Start) happens here, at a frame's end with the GPU idle: the
@@ -506,9 +508,9 @@ static void room_frame(double ms, double game, double present, double slept) {
 static void log_slow_frame(double game, double present) {
     static uint64_t lastBytes = 0, lastDiskBytes = 0;
     static GlVkWork last;
-    static double lastLocks = 0, lastDisk = 0;
+    static double lastLocks = 0, lastDisk = 0, lastMusic = 0;
     static bool profiling = getenv("ISAAC360_PROFILE") != 0;
-    double diskMs = vf_disk_ms();
+    double diskMs = vf_disk_ms(), musicMs = hle_vorbis_main_wait_ms();
     uint64_t opens, bytes, disk;
     vf_stats(&opens, &bytes, &disk);
     GlVkWork w;
@@ -526,15 +528,16 @@ static void log_slow_frame(double game, double present) {
         recomp_log("slow frame %u: game %.1f ms, present %.1f; read %llu KB (%llu KB from the drive in %.1f ms), %u images "
                    "made (%llu as an earlier load left them), %llu KB uploaded; textures %.1f ms for %llu KB, packed images "
                    "%.1f; waited for the GPU %.1f, read-backs %.1f, locks %.1f ms; the game's ANM2 loading %u ms, entity "
-                   "spawns %u ms; %u pipelines made in %.1f ms", g_frames, game, present,
+                   "spawns %u ms; %u pipelines made in %.1f ms; music waits %.1f ms", g_frames, game, present,
                    (unsigned long long)((bytes - lastBytes) >> 10),
                    (unsigned long long)((disk - lastDiskBytes) >> 10), diskMs - lastDisk, w.imagesMade - last.imagesMade,
                    (unsigned long long)(w.reused - last.reused), (unsigned long long)((w.uploaded - last.uploaded) >> 10),
                    w.texMs - last.texMs, (unsigned long long)((w.texBytes - last.texBytes) >> 10),
                    w.materializeMs - last.materializeMs, w.waitFence - last.waitFence, w.waitIdle - last.waitIdle,
                    locks - lastLocks, anm2 - lastAnm2, spawn - lastSpawn, w.pipesMade - last.pipesMade,
-                   w.pipeMs - last.pipeMs);
+                   w.pipeMs - last.pipeMs, musicMs - lastMusic);
     }
+    lastMusic = musicMs;
     lastAnm2 = anm2;
     lastSpawn = spawn;
     lastBytes = bytes;
@@ -691,9 +694,11 @@ void gl_present() {
         if (game + present > 34.0) ++t.over34;
         ++t.frames;
         // ISAAC360_STALL_MS=N: a frame the PC finds slow (a load, a death, 25 ms of the game's part) waits N ms more,
-        // so the console's long load frames and what they do to streams and timers show on the PC
+        // so the console's long load frames and what they do to streams and timers show on the PC; with
+        // ISAAC360_STALL_EVERY=K every Kth frame waits instead (the console's hitches in play)
         static const int stallMs = getenv("ISAAC360_STALL_MS") ? atoi(getenv("ISAAC360_STALL_MS")) : 0;
-        if (stallMs > 0 && game - slept > 25.0 && g_frames > 3) {
+        static const int stallEvery = getenv("ISAAC360_STALL_EVERY") ? atoi(getenv("ISAAC360_STALL_EVERY")) : 0;
+        if (stallMs > 0 && g_frames > 3 && (stallEvery > 0 ? g_frames % stallEvery == 0 : game - slept > 25.0)) {
             std::this_thread::sleep_for(std::chrono::milliseconds(stallMs));
             end = Clock::now();
         }
@@ -724,10 +729,13 @@ void gl_present() {
         if (g_hostFreeMemory) sprintf(free, ", free %u MB", g_hostFreeMemory() >> 20);
         // where memory goes: the guest heap's high mark (committed on the console), the host's C heap, the archive
         // readers' cached blocks, the GL layer's buffers
-        char mem[128];
-        snprintf(mem, sizeof(mem), "; heap top %u MB, host heap %u MB, read cache %u MB, GL buffers %u MB",
-                 (guest_heap_top() - kGuestHeapLow) >> 20, g_hostHeapBytes ? g_hostHeapBytes() >> 20 : 0,
-                 vf_cached_bytes() >> 20, (unsigned)(gl_vk_buffer_bytes() >> 20));
+        char mem[192];
+        uint32_t streams = 0, streamsMost = 0;
+        hle_archive_streams(&streams, &streamsMost);
+        snprintf(mem, sizeof(mem), "; heap top %u MB, host heap %u MB, read cache %u MB, GL buffers %u MB, archive "
+                 "states %u (at most %u)", (guest_heap_top() - kGuestHeapLow) >> 20,
+                 g_hostHeapBytes ? g_hostHeapBytes() >> 20 : 0, vf_cached_bytes() >> 20,
+                 (unsigned)(gl_vk_buffer_bytes() >> 20), streams, streamsMost);
         char counts[160] = "";
         if (gl_vk_enabled()) {
             counts[0] = ';';

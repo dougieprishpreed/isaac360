@@ -15,6 +15,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <deque>
+#include <new>
 #include <thread>
 #include <unordered_map>
 #include <vector>
@@ -230,6 +231,28 @@ void guest_backtrace(X86* c) {
             ++shown;
         }
     }
+}
+
+// The host's memory gone (a C++ allocation failed): a line straight to the log, allocating nothing, then out to the
+// dashboard. The console has no fault handler, and the abort or null pointer after a failed allocation froze it.
+extern uint32_t (*g_hostFreeMemory)();               // shims_gl.cpp (set by host_xsdk.cpp)
+extern uint32_t (*g_hostHeapBytes)();
+static void out_of_host_memory() {
+    static std::atomic<int> once(0);
+    if (once.fetch_add(1) == 0) {
+        char line[256];
+        snprintf(line, sizeof(line), "FATAL out of host memory (an allocation failed): free %u MB, host heap %u MB, guest "
+                 "heap %u MB\n", g_hostFreeMemory ? g_hostFreeMemory() >> 20 : 0,
+                 g_hostHeapBytes ? g_hostHeapBytes() >> 20 : 0, guest_heap_used() >> 20);
+        fputs(line, stdout);
+        fflush(stdout);
+        if (g_log) {
+            fputs(line, g_log);
+            fflush(g_log);
+        }
+    }
+    recomp_log_drain();
+    _exit(3);
 }
 
 void recomp_fatal(X86* c, const char* fmt, ...) {
@@ -1516,6 +1539,7 @@ static bool map_imports(Image& im) {
 int recomp_run(const RecompConfig& cfg) {
     g_cfg = cfg;
     if (cfg.logPath) g_log = fopen(cfg.logPath, "wt");
+    std::set_new_handler(out_of_host_memory);
     g_mem_size = cfg.memSize;
     if (cfg.reserveMemory && cfg.commitMemory) {
         // the image area (isaac-ng.exe, the rebased DLLs) committed now, the heap as it grows

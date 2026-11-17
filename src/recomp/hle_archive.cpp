@@ -13,8 +13,9 @@
 //   F_988670 Read (this ecx, dst, size, count; ret 12): from the 1 KB window at +0x81C (position +0xC1C, length
 //            +0xC20, the end flag +0xC28, the stream's position +0x18), the next block by the game's F_988190
 // tinfl's state stays on the host, keyed by the game's decompressor: the game's tinfl_init (its m_state, the first
-// word, set to 0) starts a stream again, and the host marks the word non-zero after each call. ISAAC360_ARCHIVE_CHECK=1
-// runs the game's code as well (its results kept) and logs any difference from the host's.
+// word, set to 0) starts a stream again, the host marks the word after each call, and the stream's end (tinfl's DONE)
+// frees the host's state. ISAAC360_ARCHIVE_CHECK=1 runs the game's code as well (its results kept) and logs any
+// difference from the host's.
 #include "runtime.h"
 #include <stdlib.h>
 #include <string.h>
@@ -27,6 +28,7 @@ namespace {
 enum { RANDSIZ = 256, CTX_RSL = 4, CTX_MEM = 0x404, CTX_A = 0x804, CTX_B = 0x808, CTX_C = 0x80c, CTX_BYTES = 0x810 };
 enum { WINDOW = 0x81c, WIN_POS = 0xc1c, WIN_LEN = 0xc20, AT_END = 0xc28, STREAM_POS = 0x18 };
 const uint32_t kHostMark = 0x48535431u;                 // the decompressor's m_state while the host holds its stream
+const uint32_t kDoneMark = 0x48535444u;                 // and once it has ended (the host's state freed)
 
 int g_check = -1;
 thread_local bool t_inCheck = false;                   // read only while checking (a call into emutls on the console)
@@ -138,16 +140,18 @@ struct Stream {
     tinfl_decompressor d;
     uint8_t window[1024];                               // ISAAC360_ARCHIVE_CHECK: the host's own copy of the window
 };
-std::mutex g_streamsLock;
+std::mutex g_streamsLock;                               // held through each call: the map and the states it holds
 std::unordered_map<uint32_t, Stream*> g_streams;
+uint32_t g_streamsMost = 0;                             // the most held at once (the frame lines)
 
-// the game frees each stream's decompressor with the stream and the heap gives the address to the next: the map stays
-// small, and past 64 it drops the decompressors the host no longer holds (their mark gone: freed and reused, or begun
-// again)
-Stream* stream_for(uint32_t r) {
-    std::lock_guard<std::mutex> l(g_streamsLock);
+// The guest heap leaves a freed block's bytes as they were, so a mark outlives its stream until the memory is used
+// again, and a held state can't be told dead by its mark: boot 24's host heap grew 11 MB over a run. A stream's
+// state goes at its end (the game reads its entries whole), and past 64 held, those whose word was written since
+// (the memory reused) go too.
+Stream* held(uint32_t r, bool make) {                   // with g_streamsLock
     std::unordered_map<uint32_t, Stream*>::iterator it = g_streams.find(r);
     if (it != g_streams.end()) return it->second;
+    if (!make) return 0;
     if (g_streams.size() >= 64)
         for (it = g_streams.begin(); it != g_streams.end();) {
             if (RD32(it->first) != kHostMark) {
@@ -157,9 +161,18 @@ Stream* stream_for(uint32_t r) {
                 ++it;
             }
         }
-    Stream* s = new Stream;
+    Stream* s = new Stream();
     g_streams[r] = s;
+    if (g_streams.size() > g_streamsMost) g_streamsMost = (uint32_t)g_streams.size();
+    if (g_streams.size() == 256) recomp_log("archive: 256 tinfl states held (~3 MB): streams left unfinished pile up");
     return s;
+}
+
+void drop(uint32_t r) {                                 // with g_streamsLock
+    std::unordered_map<uint32_t, Stream*>::iterator it = g_streams.find(r);
+    if (it == g_streams.end()) return;
+    delete it->second;
+    g_streams.erase(it);
 }
 }  // namespace
 
@@ -221,7 +234,13 @@ extern "C" int hle_isaac_xor(X86* c) {
     Isaac g;
     g.load(ctx);
     bool check = checking();
-    std::vector<uint8_t> bytes(g_mem + buf, g_mem + buf + len);
+    // in place, or into a copy to compare with the game's
+    std::vector<uint8_t> copy;
+    uint8_t* bytes = g_mem + buf;
+    if (check && len) {
+        copy.assign(g_mem + buf, g_mem + buf + len);
+        bytes = &copy[0];
+    }
     uint32_t w = 0;
     for (uint32_t i = 0; i < len; ++i) {
         if (!(i & 3)) {
@@ -243,11 +262,10 @@ extern "C" int hle_isaac_xor(X86* c) {
         guest_call(c, 0x99ce00, 2, args, true);
         memcpy(c->r, regs, sizeof(regs));
         t_inCheck = false;
-        if (len && memcmp(&bytes[0], g_mem + buf, len)) differ("a keystream XOR", buf);
+        if (len && memcmp(&copy[0], g_mem + buf, len)) differ("a keystream XOR", buf);
         if (!same_ctx(ctx, g)) differ("the generator after an XOR", ctx);
         checked();
     } else {
-        if (len) memcpy(g_mem + buf, &bytes[0], len);
         g.store(ctx);
     }
     c->r[4] = esp + 12;
@@ -269,11 +287,37 @@ extern "C" int hle_tinfl(X86* c) {
         if (RD32(r) == kHostMark) recomp_log("archive: a stream the host inflates asked for another window (%08x)", r);
         return 0;
     }
-    Stream& s = *stream_for(r);
-    bool fresh = RD32(r) == 0;
+    uint32_t word = RD32(r);
+    bool check = checking();
+    if (word == kDoneMark && !check) {                  // after its end tinfl gives DONE, taking and giving nothing
+        WR32(inSizeAt, 0);
+        WR32(outSizeAt, 0);
+        c->r[0] = (uint32_t)TINFL_STATUS_DONE;
+        c->r[4] = esp + 4;
+        return 1;
+    }
+    std::lock_guard<std::mutex> l(g_streamsLock);
+    bool fresh = word == 0;
+    Stream* found = held(r, fresh);
+    if (!fresh && (check ? !found : word != kHostMark)) {
+        // a state the game's code holds (begun before the host saw it), or one the check has no copy of
+        if (found) drop(r);
+        return 0;
+    }
+    if (!found) {
+        static bool logged = false;
+        if (!logged) recomp_log("archive: the host has no state for a stream it marked (%08x)", r);
+        logged = true;
+        WR32(inSizeAt, 0);
+        WR32(outSizeAt, 0);
+        c->r[0] = (uint32_t)TINFL_STATUS_FAILED;
+        c->r[4] = esp + 4;
+        return 1;
+    }
+    Stream& s = *found;
     if (fresh) tinfl_init(&s.d);
     size_t inBytes = inSize, outBytes = outSize;
-    if (checking()) {
+    if (check) {
         if (fresh) memset(s.window, 0, sizeof(s.window));
         int mine = tinfl_decompress(&s.d, g_mem + in, &inBytes, s.window, s.window + (outNext - outStart), &outBytes,
                                     flags);
@@ -288,6 +332,7 @@ extern "C" int hle_tinfl(X86* c) {
             memcmp(s.window + (outNext - outStart), g_mem + outNext, outBytes))
             differ("a block's inflate", r);
         checked();
+        if (mine == TINFL_STATUS_DONE) drop(r);
         c->r[0] = (uint32_t)theirs;
         c->r[4] = esp + 4;
         return 1;
@@ -295,10 +340,22 @@ extern "C" int hle_tinfl(X86* c) {
     int st = tinfl_decompress(&s.d, g_mem + in, &inBytes, g_mem + outStart, g_mem + outNext, &outBytes, flags);
     WR32(inSizeAt, (uint32_t)inBytes);
     WR32(outSizeAt, (uint32_t)outBytes);
-    WR32(r, kHostMark);
+    if (st == TINFL_STATUS_DONE) {
+        drop(r);
+        WR32(r, kDoneMark);
+    } else {
+        WR32(r, kHostMark);
+    }
     c->r[0] = (uint32_t)st;
     c->r[4] = esp + 4;
     return 1;
+}
+
+// the host's tinfl states: held now and the most at once (the frame lines)
+void hle_archive_streams(uint32_t* now, uint32_t* most) {
+    std::lock_guard<std::mutex> l(g_streamsLock);
+    *now = (uint32_t)g_streams.size();
+    *most = g_streamsMost;
 }
 
 // F_988670: Read(dst, size, count) from the stream's window, a block at a time through the game's F_988190; eax the
