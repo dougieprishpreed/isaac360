@@ -7,7 +7,9 @@ console has 512 MB for everything. So its copy of the archives keeps each effect
 resources/packed/sfx.pcm, which holds every effect's original samples, as the game ships them (identical ones
 once). The OpenAL shim (src/recomp/shims_al.cpp) reads an effect from there when it is first played and keeps the
 recently played ones in memory. The sound is the original; only where it waits differs. Every other entry of the
-archives is copied byte for byte, with the archive's checksums recomputed; the PC keeps the original archives.
+archives is copied byte for byte, with the archive's checksums recomputed, but for palette PNGs with samples under
+8 bits (png_to_8bit: one, the Womb's L room floor), which the game's loader refuses: the same pixels at 8 bits.
+The PC keeps the original archives.
 
 Archive entries (tools/recomp/archives.py has the decoder): version 0 stores an entry word-scrambled with a
 seed from its name hash; version 2 stores 1 KB blocks (u32 header: final << 31 | size), deflated, or after a
@@ -37,7 +39,8 @@ class PcmStore:
     """The effects' samples, one after another; the same samples are stored once."""
 
     def __init__(self, path):
-        self.f = open(path, 'wb')
+        self.path = path
+        self.f = open(path + '.new', 'wb')
         self.at = 0
         self.seen = {}
 
@@ -54,6 +57,16 @@ class PcmStore:
 
     def close(self):
         self.f.close()
+        write_if_changed(self.path, open(self.path + '.new', 'rb').read())
+        os.remove(self.path + '.new')
+
+
+def write_if_changed(path, data):
+    """Unchanged outputs keep their time stamps, so tools/stage_console.py copies only what changed."""
+    if os.path.isfile(path) and os.path.getsize(path) == len(data) and open(path, 'rb').read() == data:
+        return False
+    open(path, 'wb').write(data)
+    return True
 
 
 def convert_wav(data, store):
@@ -78,6 +91,75 @@ def convert_wav(data, store):
         out.write(cid + struct.pack('<I', len(body)) + body + (b'\0' if len(body) & 1 else b''))
     payload = out.getvalue()
     return b'RIFF' + struct.pack('<I', 4 + len(payload)) + b'WAVE' + payload
+
+
+PNG_SIG = b'\x89PNG\r\n\x1a\n'
+
+
+def png_chunks(data):
+    chunks, p = [], 8
+    while p + 12 <= len(data):
+        n = struct.unpack_from('>I', data, p)[0]
+        chunks.append((data[p + 4:p + 8], data[p + 8:p + 8 + n]))
+        p += 12 + n
+    return chunks
+
+
+def png_indices(data):
+    """A palette PNG's (width, height, rows of one index a byte), any bit depth, not interlaced."""
+    chunks = png_chunks(data)
+    w, h, depth, ctype, _, _, inter = struct.unpack('>IIBBBBB', chunks[0][1])
+    if ctype != 3 or inter:
+        raise ValueError('not a plain palette PNG')
+    raw = zlib.decompress(b''.join(body for kind, body in chunks if kind == b'IDAT'))
+    stride, bpp = (w * depth + 7) // 8, max(1, depth // 8)
+    rows, prev, p = [], bytearray(stride), 0
+    for _ in range(h):
+        f, line = raw[p], bytearray(raw[p + 1:p + 1 + stride])
+        p += 1 + stride
+        for i in range(stride):
+            a = line[i - bpp] if i >= bpp else 0
+            b, c = prev[i], prev[i - bpp] if i >= bpp else 0
+            if f == 1:
+                line[i] = (line[i] + a) & 255
+            elif f == 2:
+                line[i] = (line[i] + b) & 255
+            elif f == 3:
+                line[i] = (line[i] + (a + b) // 2) & 255
+            elif f == 4:
+                pa, pb, pc = abs(b - c), abs(a - c), abs(a + b - 2 * c)
+                line[i] = (line[i] + (a if pa <= pb and pa <= pc else b if pb <= pc else c)) & 255
+        prev = line
+        per, mask = 8 // depth, (1 << depth) - 1
+        rows.append(bytes((line[x // per] >> (8 - depth * (x % per + 1))) & mask for x in range(w)) if depth < 8
+                    else bytes(line[:w]))
+    return w, h, rows
+
+
+def png_to_8bit(data):
+    """A palette PNG with 1-, 2- or 4-bit samples -> the same image with 8-bit ones (the game's PNG loader takes
+    8-bit samples only: it refuses afterbirthp.a's gfx/backdrop/07_lthe wombfloor.png, the Womb's L room floor),
+    every other chunk as it was; None for any other PNG."""
+    if data[:8] != PNG_SIG:
+        return None
+    chunks = png_chunks(data)
+    w, h, depth, ctype, comp, filt, inter = struct.unpack('>IIBBBBB', chunks[0][1])
+    if depth >= 8 or ctype != 3 or inter:
+        return None
+    _, _, rows = png_indices(data)
+    idat = zlib.compress(b''.join(b'\0' + row for row in rows), 9)
+    out, wrote = bytearray(PNG_SIG), False
+    for kind, body in chunks:
+        if kind == b'IHDR':
+            body = struct.pack('>IIBBBBB', w, h, 8, ctype, comp, filt, inter)
+        elif kind == b'IDAT':
+            if wrote:
+                continue
+            body, wrote = idat, True
+        out += struct.pack('>I', len(body)) + kind + body + struct.pack('>I', zlib.crc32(kind + body) & 0xffffffff)
+    if png_indices(bytes(out))[2] != rows:
+        raise SystemExit('a PNG widened to 8 bits does not read back the same')
+    return bytes(out)
 
 
 def encode_entry(version, data, hash2):
@@ -148,7 +230,19 @@ def rewrite(src, dst, table, store):
         h1, h2, off, size, check = e
         name = table.get((h1, h2), '')
         enc = None
-        if name.lower().endswith('.wav'):
+        if name.lower().endswith('.png'):
+            stream = io.BytesIO(data)
+            stream.seek(off)
+            png = ar.decode_entry(stream, version, size, h2)
+            new = png_to_8bit(png)
+            if new is not None:
+                enc = encode_entry(version, new, h2)
+                if ar.decode_entry(io.BytesIO(enc), version, len(new), h2) != new:
+                    raise SystemExit('entry encoding does not round-trip: ' + name)
+                e[3] = len(new)
+                e[4] = ar.checksum(new)
+                print('  %s: %d-bit samples widened to 8 (%d -> %d bytes)' % (name, png[24], len(png), len(new)))
+        elif name.lower().endswith('.wav'):
             stream = io.BytesIO(data)
             stream.seek(off)
             wav = ar.decode_entry(stream, version, size, h2)
@@ -174,7 +268,7 @@ def rewrite(src, dst, table, store):
         out += struct.pack('<IIIII', *e)
     out += data[table_offset + 20 * count:]          # anything after the table, as it was
     os.makedirs(os.path.dirname(dst), exist_ok=True)
-    open(dst, 'wb').write(bytes(out))
+    write_if_changed(dst, bytes(out))
     print('%-14s %4d WAVs %6.1f MB -> %5.1f MB; archive %6.1f MB -> %6.1f MB' % (
         os.path.basename(src), converted, before / 1048576, after / 1048576, len(data) / 1048576, len(out) / 1048576))
 

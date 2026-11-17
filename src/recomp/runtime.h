@@ -122,9 +122,13 @@ bool recomp_profile_by_room();           // ISAAC360_PROFILE=room: samples logge
 void recomp_profile_clear();             // drops the samples since the last dump
 void recomp_count_dump(uint32_t frames, void (*line)(const char*));   // ISAAC360_COUNT_CALLS (PC): calls a frame
 void recomp_count_frame(double workMs);     // ISAAC360_COUNT_CALLS=slow: the frame ended with workMs of the game's work
+void recomp_count_mark(bool on, void (*line)(const char*));   // ISAAC360_COUNT_CALLS=mark: a script's "count: on/off"
+bool recomp_count_window();              // inside a marked window (ISAAC360_TRACE_ENTRIES)
 void gl_room_entered(const char* name);  // the game logged "Room type.variant(name)" (shims_crt.cpp)
 void looks_trace_init();                 // ISAAC360_TRACE_LOOKS (shims_looks.cpp): after the image loads
 void looks_room_entered();               // and at each room the game enters
+void warm_log_line(const char* s);       // shims_warm.cpp: each line the game formats
+void warm_frame_end();                   // and each frame's end, before its picture is shown
 void gl_game_exiting();                  // the game's exit(): the last room's line (shims_crt.cpp)
 void gl_audit_mark(const char* what);    // an audit script's mark: the frames since the last get a line (shims_gl.cpp)
 int recomp_guest_returns(X86* c, uint32_t* out, int n);    // the innermost guest return addresses on c's stack

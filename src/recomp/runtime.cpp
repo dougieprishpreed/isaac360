@@ -854,11 +854,14 @@ static void profile_thread(void*) {
 }
 
 static bool g_countSlow;
+static bool g_countMark = false;                   // ISAAC360_COUNT_CALLS=mark (recomp_count_mark)
+static bool g_countOn = false;
 void recomp_profile_start() {
 #if defined(_WIN32)
     const char* counting = getenv("ISAAC360_COUNT_CALLS");
-    x86_counting = counting && (atoi(counting) != 0 || !strcmp(counting, "slow"));
-    g_countSlow = counting && !strcmp(counting, "slow");
+    x86_counting = counting && (atoi(counting) != 0 || !strcmp(counting, "slow") || !strcmp(counting, "mark"));
+    g_countMark = counting && !strcmp(counting, "mark");
+    g_countSlow = counting && (!strcmp(counting, "slow") || g_countMark);
 #endif
     const char* mode = getenv("ISAAC360_PROFILE");
     if (!mode) return;
@@ -1000,8 +1003,12 @@ static void count_into(CallCount* table, uint32_t fn, uint32_t add, std::vector<
     }
 }
 
+// ISAAC360_COUNT_CALLS=mark: the slow mode between a Lua script's marks, "count: on" and "count: off"
+// (recomp_count_mark), each window's totals logged at its end: one door's calls, apart from the start-up loads
+
 extern "C" void x86_count_enter(X86* c, uint32_t fn) {
     if (!recomp_is_main_cpu(c)) return;
+    if (g_countMark && !g_countOn) return;
     if (g_countSlow) {
         ++g_frameCalled;
         count_into(g_frameCalls, fn, 1, &g_frameUsed);
@@ -1009,6 +1016,18 @@ extern "C" void x86_count_enter(X86* c, uint32_t fn) {
     }
     ++g_countedCalls;
     count_into(g_callCounts, fn, 1, 0);
+}
+
+bool recomp_count_window() { return g_countOn; }
+
+void recomp_count_mark(bool on, void (*line)(const char*)) {
+    if (!g_countMark || on == g_countOn) return;
+    g_countOn = on;
+    if (on) return;
+    recomp_count_dump(1, line);
+    memset(g_callCounts, 0, sizeof(g_callCounts));
+    g_countedCalls = g_countedIndirect = g_countedImports = 0;
+    g_slowCounted = 0;
 }
 
 void recomp_count_frame(double workMs) {
@@ -1033,7 +1052,13 @@ void recomp_count_dump(uint32_t frames, void (*line)(const char*)) {
     if (!x86_counting || !frames) return;
     if (g_countSlow) {                              // the run's slow frames so far, averaged over them
         if (!g_slowCounted) return;
-        frames = g_slowCounted;
+        if (g_countMark) {                          // a window's totals
+            char head[96];
+            snprintf(head, sizeof(head), "calls: a marked window's %u slow frames, totals:", g_slowCounted);
+            line(head);
+        } else {
+            frames = g_slowCounted;
+        }
     }
     std::vector<std::pair<uint32_t, uint32_t> > top;
     for (uint32_t i = 0; i < kCountSlots; ++i)

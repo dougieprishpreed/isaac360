@@ -651,6 +651,7 @@ void load_frames_present() {
 }  // namespace
 
 void gl_present() {
+    warm_frame_end();                               // the game's work, so before the frame's game time ends
     static Clock::time_point lastEnd = Clock::now();
     Clock::time_point start = Clock::now();
     static uint32_t profileFrame = getenv("ISAAC360_HEAP_PROFILE") ? (uint32_t)atoi(getenv("ISAAC360_HEAP_PROFILE")) : 0;

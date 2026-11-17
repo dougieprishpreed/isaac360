@@ -20,6 +20,8 @@
 void hle_vorbis_freed(uint32_t p);                  // hle_vorbis.cpp
 
 namespace {
+void count_line(const char* s) { recomp_log("%s", s); }   // ISAAC360_COUNT_CALLS=mark lines
+
 // ------------------------------------------------------------------------------------------------ files
 std::mutex g_fileLock;
 std::map<uint32_t, VFile*> g_files;         // guest FILE* (a small guest block) -> host stream
@@ -217,9 +219,12 @@ void s_vsprintf(X86* c) {
         gl_room_entered(s.c_str());
         looks_room_entered();
     }
+    warm_log_line(s.c_str());
     // an audit script's marks (Lua "audit: <what>"): the frames since the last one get their line (shims_gl.cpp)
     size_t mark = s.find("Lua Debug: audit: ");
     if (mark != std::string::npos) gl_audit_mark(s.c_str() + mark + 18);
+    if (s.find("Lua Debug: count: on") != std::string::npos) recomp_count_mark(true, count_line);
+    if (s.find("Lua Debug: count: off") != std::string::npos) recomp_count_mark(false, count_line);
     if (buf && count) guest_write_str(buf, s, count);
     RET_CDECL(c, (uint32_t)s.size());
 }

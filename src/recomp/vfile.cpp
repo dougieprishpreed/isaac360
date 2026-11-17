@@ -408,6 +408,11 @@ size_t vf_read(VFile* v, void* buf, size_t size, size_t n) {
         v->unget = -1;
         v->pos += 1;
     }
+    // ISAAC360_TRACE_ENTRIES=1 (with ISAAC360_COUNT_CALLS=mark): each read inside a script's marked window, its
+    // archive and offset (tools: the entries a door reads, by their offsets in the archives' tables)
+    static const bool traceEntries = getenv("ISAAC360_TRACE_ENTRIES") != 0;
+    if (traceEntries && recomp_count_window())
+        recomp_log("entry read %s +%lld %u", v->path.c_str(), (long long)v->pos, (unsigned)(want - got));
     size_t r = v->r->read(v->pos, out + got, want - got);
     v->pos += (int64_t)r;
     got += r;
