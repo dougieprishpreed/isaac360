@@ -34,3 +34,5 @@ target_compile_options(isaac360_guest_msvcp PRIVATE /O1 /w /fp:precise -fno-stri
 
 target_link_libraries(isaac360_recomp PRIVATE isaac360_guest isaac360_guest_lua isaac360_guest_msvcp user32 gdi32 winmm opengl32)
 set_target_properties(isaac360_recomp PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${ROOT}/build/recomp")
+# a link map beside it: host addresses (crash and ISAAC360_WATCH lines) to translated functions
+target_link_options(isaac360_recomp PRIVATE "/MAP:${ROOT}/build/recomp/isaac360_recomp.map")

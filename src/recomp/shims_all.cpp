@@ -63,4 +63,5 @@ void shims_register_all() {
 void shims_after_load() {
     shims_crt_init();
     looks_trace_init();
+    hle_archive_install();
 }

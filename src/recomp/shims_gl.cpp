@@ -650,8 +650,7 @@ void load_frames_present() {
 }
 }  // namespace
 
-void gl_present() {
-    warm_frame_end();                               // the game's work, so before the frame's game time ends
+static void present_and_log() {
     static Clock::time_point lastEnd = Clock::now();
     Clock::time_point start = Clock::now();
     static uint32_t profileFrame = getenv("ISAAC360_HEAP_PROFILE") ? (uint32_t)atoi(getenv("ISAAC360_HEAP_PROFILE")) : 0;
@@ -758,6 +757,15 @@ void gl_present() {
             if (profiling) shims_lock_stats_dump(log_line);
         }
     }
+}
+
+// the frame's picture shown, then the warm loads (shims_warm.cpp): game code, whose clock reads let the loading
+// screen's chore present again (load_frames_chore), so it runs after the present, at the next frame's start, as the
+// game's own loading does; run inside the present, an injected present there hung the next frame (PC, 2 runs of 6)
+void gl_present() {
+    present_and_log();
+    if (g_frames % 30 == 0) guest_heap_frame();     // free runs back to the console while it is short of memory
+    warm_frame_end();
 }
 
 void shims_gl_register() {

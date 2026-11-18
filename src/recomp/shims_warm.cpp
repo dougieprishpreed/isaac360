@@ -1,4 +1,4 @@
-// Loads the game makes at a run's first door, made at the end of the frame that entered the run's first room instead:
+// Loads the game makes at a run's first door, made right after the frame that entered the run's first room instead:
 // that frame is the run's start-up load (~1.7 s on the console), which the player waits through anyway, where the
 // first door was a hitch in play (boots 24 and 25: 219 + 364 ms, against 100-200 for later new rooms; the PC's first
 // door ran 544,000 translated calls against 185,000 for a later new room, its reads mostly the boss intro's).
@@ -7,7 +7,9 @@
 // (+0x38) unless that sprite is loaded (its flag +0x109, so +0x141), and the run's first door is the first to call
 // it. Here the same Sprite::Load (F_406d50: thiscall, a const std::string& path and loadGraphics; ret 8) runs with
 // the same arguments when the run's first floor (the game's "Level::Init m_Stage 1," line) enters its start room,
-// so the first door finds the sprite loaded, as every later door does. ISAAC360_WARM=0 turns it off.
+// so the first door finds the sprite loaded, as every later door does. It runs after that frame's present, not in
+// it: its clock reads let the loading screen's chore present (shims_gl.cpp), which inside the present hung the next
+// frame. ISAAC360_WARM=0 turns it off.
 #include "runtime.h"
 #include <chrono>
 #include <stdlib.h>
@@ -70,7 +72,7 @@ void warm_log_line(const char* s) {
     }
 }
 
-// the frame's end, before its picture is shown (shims_gl.cpp's gl_present, on the game's main thread)
+// after the frame's picture is shown (shims_gl.cpp's gl_present, on the game's main thread)
 void warm_frame_end() {
     if (!g_pending) return;
     g_pending = false;

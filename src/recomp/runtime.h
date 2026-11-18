@@ -42,6 +42,9 @@ static inline void* G(uint32_t a) { return g_mem + a; }
 // guest heap (16-byte aligned blocks)
 uint32_t guest_malloc(uint32_t size);
 void guest_free(uint32_t p);
+void guest_heap_frame();                 // every 30 frames: free runs back to the console when memory is short
+bool guest_page_given(uint32_t a);       // on a page the heap gave back (host reads of freed memory check)
+uint32_t guest_given_bytes();
 uint32_t guest_realloc(uint32_t p, uint32_t size);
 uint32_t guest_calloc(uint32_t n, uint32_t size);
 uint32_t guest_block_size(uint32_t p);
@@ -99,9 +102,14 @@ struct RecompConfig {
     // game uses); without them it is allocated whole
     uint8_t* (*reserveMemory)(uint32_t size);
     bool (*commitMemory)(uint8_t* base, uint32_t offset, uint32_t size);
+    // optional: guest pages the heap has free given back, and the console's free memory (runtime.cpp's
+    // maybe_give_back)
+    bool (*decommitMemory)(uint8_t* base, uint32_t offset, uint32_t size);
+    uint32_t (*freeMemory)();
     // optional: told when a host thread starts running guest code ("main", "guest", "audio")
     void (*threadStarted)(const char* role);
-    RecompConfig() : memSize(0), logPath(0), reserveMemory(0), commitMemory(0), threadStarted(0) {}
+    RecompConfig() : memSize(0), logPath(0), reserveMemory(0), commitMemory(0), decommitMemory(0), freeMemory(0),
+                     threadStarted(0) {}
 };
 // a host thread with a stack of its own size (guest threads, the audio mixer)
 void host_thread_start(void (*fn)(void*), void* arg, uint32_t stackBytes);
@@ -126,9 +134,11 @@ void recomp_count_mark(bool on, void (*line)(const char*));   // ISAAC360_COUNT_
 bool recomp_count_window();              // inside a marked window (ISAAC360_TRACE_ENTRIES)
 void gl_room_entered(const char* name);  // the game logged "Room type.variant(name)" (shims_crt.cpp)
 void looks_trace_init();                 // ISAAC360_TRACE_LOOKS (shims_looks.cpp): after the image loads
+void hle_archive_install();               // hle_archive.cpp: the archive stream's seek, after the image loads
 void looks_room_entered();               // and at each room the game enters
+void looks_probe(const char* what);      // and at a test script's "looks: probe"
 void warm_log_line(const char* s);       // shims_warm.cpp: each line the game formats
-void warm_frame_end();                   // and each frame's end, before its picture is shown
+void warm_frame_end();                   // and after each frame's picture is shown
 void gl_game_exiting();                  // the game's exit(): the last room's line (shims_crt.cpp)
 void gl_audit_mark(const char* what);    // an audit script's mark: the frames since the last get a line (shims_gl.cpp)
 int recomp_guest_returns(X86* c, uint32_t* out, int n);    // the innermost guest return addresses on c's stack

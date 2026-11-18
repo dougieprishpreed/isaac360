@@ -62,6 +62,96 @@ void audio_out_submit(const int16_t* stereo, int frames) {
 
 static void log_line(const char* line) { recomp_log("%s", line); }
 
+uint32_t gl_frame_count();                          // shims_gl.cpp
+
+// ISAAC360_GIVE_BACK=1: guest memory reserved and committed as on the console, and the free memory reported short,
+// so the guest heap gives its free runs back at every big allocation (runtime.cpp's give_back_runs): a read of a
+// page given back faults here (host_fault) where the console would freeze
+static uint8_t* reserve_memory(uint32_t size) { return (uint8_t*)VirtualAlloc(0, size, MEM_RESERVE, PAGE_READWRITE); }
+static bool commit_memory(uint8_t* base, uint32_t offset, uint32_t size) {
+    if (!VirtualAlloc(base + offset, size, MEM_COMMIT, PAGE_READWRITE)) return false;
+    memset(base + offset, 0, size);
+    return true;
+}
+static bool decommit_memory(uint8_t* base, uint32_t offset, uint32_t size) {
+    return VirtualFree(base + offset, size, MEM_DECOMMIT) != 0;
+}
+static uint32_t short_of_memory() { return 16u << 20; }
+
+// ISAAC360_WATCH=OFFSET (hex): a hardware write watch on the player's object at that offset (the player as the looks
+// trace last saw it, shims_looks.cpp), on the game's main thread: each write logged with the translated function that
+// made it (dbghelp, the PDB) and the value written. A test tool for a field something writes that nothing traces.
+#include <dbghelp.h>
+#pragma comment(lib, "dbghelp.lib")
+uint32_t looks_player();                            // shims_looks.cpp
+static HANDLE g_mainThread = 0;
+static volatile uint32_t* g_watched = 0;
+static LONG WINAPI watch_hit(EXCEPTION_POINTERS* e) {
+    if (e->ExceptionRecord->ExceptionCode != EXCEPTION_SINGLE_STEP || !(e->ContextRecord->Dr6 & 1))
+        return EXCEPTION_CONTINUE_SEARCH;
+    e->ContextRecord->Dr6 = 0;
+    static int hits = 0;
+    if (hits++ < 400) {
+        char buf[sizeof(SYMBOL_INFO) + 256];
+        SYMBOL_INFO* sym = (SYMBOL_INFO*)buf;
+        memset(buf, 0, sizeof(buf));
+        sym->SizeOfStruct = sizeof(SYMBOL_INFO);
+        sym->MaxNameLen = 255;
+        DWORD64 disp = 0;
+        const char* name = SymFromAddr(GetCurrentProcess(), (DWORD64)e->ExceptionRecord->ExceptionAddress, &disp, sym)
+                               ? sym->Name : "?";
+        uint32_t v = *g_watched;
+        float f;
+        memcpy(&f, &v, 4);
+        recomp_log("watch: frame %u, exe+%llx (%s+%llx) wrote %08x (%.3f)", gl_frame_count(),
+                   (unsigned long long)((char*)e->ExceptionRecord->ExceptionAddress - (char*)GetModuleHandleA(0)), name,
+                   (unsigned long long)disp, v, f);
+    }
+    return EXCEPTION_CONTINUE_EXECUTION;
+}
+
+static DWORD WINAPI watch_arm(void* arg) {
+    uint32_t offset = (uint32_t)(uintptr_t)arg;
+    uint32_t p = 0;
+    while (!(p = looks_player())) Sleep(100);
+    SymSetOptions(SYMOPT_UNDNAME | SYMOPT_DEFERRED_LOADS);
+    SymInitialize(GetCurrentProcess(), 0, TRUE);
+    g_watched = (volatile uint32_t*)(g_mem + p + offset);
+    AddVectoredExceptionHandler(1, watch_hit);
+    SuspendThread(g_mainThread);
+    CONTEXT ctx;
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.ContextFlags = CONTEXT_DEBUG_REGISTERS;
+    GetThreadContext(g_mainThread, &ctx);
+    ctx.Dr0 = (DWORD64)(uintptr_t)g_watched;
+    ctx.Dr7 = 1ull | (1ull << 16) | (3ull << 18);  // local 0, on writes, 4 bytes
+    SetThreadContext(g_mainThread, &ctx);
+    ResumeThread(g_mainThread);
+    recomp_log("watch: the player %08x + %x (host %p) watched for writes", p, offset, (void*)g_watched);
+    return 0;
+}
+
+// as on the console (host_xsdk.cpp): when no frame ends for 5 s, each guest thread's shim and stack, every 5 s
+static DWORD WINAPI watchdog(void*) {
+    uint32_t last = gl_frame_count();
+    int still = 0;
+    for (;;) {
+        Sleep(100);
+        uint32_t f = gl_frame_count();
+        if (f != last) {
+            last = f;
+            still = 0;
+            continue;
+        }
+        still += 100;
+        if (still % 5000 == 0) {
+            recomp_log("watchdog: no frame for %d ms at frame %u", still, f);
+            recomp_sample_threads(log_line);
+        }
+    }
+    return 0;
+}
+
 // a host fault nothing handled (a guest pointer gone wrong in translated code): where each guest thread was
 static LONG WINAPI host_fault(EXCEPTION_POINTERS* e) {
     recomp_log("host fault %08lx at %p (exe +%llx; address %p)", e->ExceptionRecord->ExceptionCode,
@@ -99,7 +189,19 @@ int main(int argc, char** argv) {
         hooks.validation = getenv("ISAAC360_VK_VALIDATION") != 0;
         gl_vk_configure(hooks);
     }
+    if (getenv("ISAAC360_GIVE_BACK") && atoi(getenv("ISAAC360_GIVE_BACK"))) {
+        cfg.reserveMemory = reserve_memory;
+        cfg.commitMemory = commit_memory;
+        cfg.decommitMemory = decommit_memory;
+        cfg.freeMemory = short_of_memory;
+    }
     shims_register_all();
+    CreateThread(0, 0, watchdog, 0, 0, 0);
+    if (const char* w = getenv("ISAAC360_WATCH")) {
+        DuplicateHandle(GetCurrentProcess(), GetCurrentThread(), GetCurrentProcess(), &g_mainThread, 0, FALSE,
+                        DUPLICATE_SAME_ACCESS);
+        CreateThread(0, 0, watch_arm, (void*)(uintptr_t)strtoul(w, 0, 16), 0, 0);
+    }
     int code = recomp_run(cfg);
     recomp_log_drain();
     return code;

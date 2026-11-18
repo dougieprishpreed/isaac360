@@ -223,6 +223,8 @@ void s_vsprintf(X86* c) {
     // an audit script's marks (Lua "audit: <what>"): the frames since the last one get their line (shims_gl.cpp)
     size_t mark = s.find("Lua Debug: audit: ");
     if (mark != std::string::npos) gl_audit_mark(s.c_str() + mark + 18);
+    size_t probe = s.find("Lua Debug: looks: probe ");
+    if (probe != std::string::npos) looks_probe(s.c_str() + probe + 24);
     if (s.find("Lua Debug: count: on") != std::string::npos) recomp_count_mark(true, count_line);
     if (s.find("Lua Debug: count: off") != std::string::npos) recomp_count_mark(false, count_line);
     if (buf && count) guest_write_str(buf, s, count);

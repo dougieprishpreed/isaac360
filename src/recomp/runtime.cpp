@@ -351,6 +351,75 @@ std::unordered_map<uint32_t, std::string> g_heapSites;      // block -> "made fr
 const uint32_t kFreed = 0x44454144;                          // 'DEAD': a held block
 const uint32_t kHoldBytes = 32u << 20;
 
+// Free runs given back to the console (RecompConfig::decommitMemory, the console only). The heap commits as it grows
+// and kept all of it: the ending's video and credits took its high mark from 111 to 142 MB, and the menu after them
+// had 33 MB of the console free when it froze (boot 26). While the console's free memory is under kGiveBackBelow
+// (checked at each allocation of a megabyte or more and every 30 frames), the whole 64 KB pages of each free run of
+// kGiveBackRun or more go back (Windows' heap decommits a big free block's pages the same way); a block taken from
+// such a run commits its pages again first (fresh, zeroed). Nothing changes while memory is plentiful.
+const uint32_t kPage = 64u << 10, kGiveBackRun = 256u << 10, kGiveBackBelow = 48u << 20;
+std::vector<uint8_t> g_pageGiven;                            // per 64 KB page of guest memory: given back
+uint32_t g_givenBytes = 0;
+
+// the pages [first, last) given back again, committed (the heap lock held)
+void take_back_pages(uint32_t first, uint32_t last) {
+    for (uint32_t p = first; p < last;) {
+        if (!g_pageGiven[p]) {
+            ++p;
+            continue;
+        }
+        uint32_t q = p;
+        while (q < last && g_pageGiven[q]) g_pageGiven[q++] = 0;
+        if (!g_cfg.commitMemory(g_mem, p * kPage, (q - p) * kPage))
+            recomp_log("guest memory: committing %u KB again at %08x failed", (q - p) * (kPage >> 10), p * kPage);
+        g_givenBytes -= (q - p) * kPage;
+        p = q;
+    }
+}
+
+// before a block [block, block + total) taken from a free run is used (the heap lock held)
+void recommit(uint32_t block, uint32_t total) {
+    if (!g_givenBytes) return;
+    take_back_pages(block / kPage, (block + total + kPage - 1) / kPage);
+}
+
+// each free run's whole pages, for runs of kGiveBackRun or more (the heap lock held)
+void give_back_runs() {
+    uint32_t gave = 0;
+    for (std::map<uint32_t, uint32_t>::iterator it = g_freeBig.begin(); it != g_freeBig.end(); ++it) {
+        uint32_t a = (it->first + kPage - 1) / kPage, b = (it->first + it->second) / kPage;
+        if (b <= a || (b - a) * kPage < kGiveBackRun) continue;
+        for (uint32_t p = a; p < b;) {
+            if (g_pageGiven[p]) {
+                ++p;
+                continue;
+            }
+            uint32_t q = p;
+            while (q < b && !g_pageGiven[q]) g_pageGiven[q++] = 1;
+            if (g_cfg.decommitMemory(g_mem, p * kPage, (q - p) * kPage)) {
+                gave += (q - p) * kPage;
+            } else {
+                for (uint32_t i = p; i < q; ++i) g_pageGiven[i] = 0;
+            }
+            p = q;
+        }
+    }
+    g_givenBytes += gave;
+    if (gave) {
+        static int logged = 0;
+        if (logged++ < 40)
+            recomp_log("guest memory: %u MB of free runs given back to the console (%u MB given back in all)", gave >> 20,
+                       g_givenBytes >> 20);
+    }
+}
+
+// the check (the heap lock held)
+void maybe_give_back() {
+    if (!g_cfg.decommitMemory || !g_cfg.freeMemory || g_heapCheck) return;
+    if (g_pageGiven.empty()) g_pageGiven.assign(g_mem_size / kPage + 1, 0);
+    if (g_cfg.freeMemory() < kGiveBackBelow) give_back_runs();
+}
+
 uint32_t carve(uint32_t total) {
     for (;;) {
         uint32_t at = g_heapTop;
@@ -456,12 +525,14 @@ static uint32_t take_block(uint32_t need, uint32_t& total) {
         return block;
     }
     ++g_heapStats.big;
+    if (total >= (1u << 20)) maybe_give_back();
     for (std::map<uint32_t, uint32_t>::iterator it = g_freeBig.begin(); it != g_freeBig.end(); ++it, ++g_heapStats.scanned)
         if (it->second >= total) {
             uint32_t block = it->first, rest = it->second - total;
             g_freeBig.erase(it);
             if (rest >= 4096) g_freeBig[block + total] = rest;
             else total += rest;
+            recommit(block, total);
             return block;
         }
     return carve(total);
@@ -499,6 +570,19 @@ uint32_t guest_malloc(uint32_t size) {
 // the requested size under ISAAC360_HEAP_CHECK (its 0xFD bytes follow it), else the block's whole size
 uint32_t guest_block_size(uint32_t p) { return p ? RD32(p - 16 + (g_heapCheck ? 8 : 0)) : 0; }
 uint32_t guest_heap_used() { return g_used; }
+
+// every 30 frames (shims_gl.cpp): the free-memory check of maybe_give_back
+void guest_heap_frame() {
+    std::lock_guard<std::mutex> g(g_heapLock);
+    maybe_give_back();
+}
+
+// a guest address on a page given back (host code reading memory the game may have freed checks this first)
+bool guest_page_given(uint32_t a) {
+    uint32_t p = a / kPage;
+    return g_givenBytes && p < g_pageGiven.size() && g_pageGiven[p];
+}
+uint32_t guest_given_bytes() { return g_givenBytes; }
 uint32_t guest_heap_top() { return g_heapTop; }
 
 void guest_free(uint32_t p) {
@@ -1645,6 +1729,7 @@ int recomp_run(const RecompConfig& cfg) {
         if (!g_mem) {
             recomp_log("guest memory: reserving %u MB failed; allocating it whole", g_mem_size >> 20);
             g_cfg.commitMemory = 0;
+            g_cfg.decommitMemory = 0;
             g_mem = (uint8_t*)calloc(1, g_mem_size);
             g_committed = g_mem_size;
         }

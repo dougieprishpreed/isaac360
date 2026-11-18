@@ -815,6 +815,11 @@ void run_now(void (*fn)(VkCommandBuffer, void*), void* arg) {
 // half the ring gets a buffer of its own; when there is no memory for one (console boot 18: the epilogue's 1024x1024
 // sheets, 4 MB each, with the heap fragmented), it goes through the ring in bands of rows, waiting for the GPU between
 // them, rather than being dropped (the cutscene showed its first frame only).
+// Uploads start on 4 KB in the ring: vulkan4xenon draws a copy on the GPU only from a 4 KB-aligned source
+// (drawn_upload's FETCH_ALIGNMENT) and otherwise tiles it on the CPU when the frame is submitted, ~60 ns a texel:
+// the ending video's 960x544 frame a 125 ms present each (console boot 26).
+const VkDeviceSize kUploadAlign = 4096;
+
 void upload_rgba(Image& im, int x, int y, int w, int h, const uint8_t* rgba, bool fresh) {
     begin_recording();
     end_pass();
@@ -822,7 +827,7 @@ void upload_rgba(Image& im, int x, int y, int w, int h, const uint8_t* rgba, boo
     VkDeviceSize bytes = (VkDeviceSize)w * h * 4;
     g_uploaded += bytes;
     Buffer* src = &f.upload;
-    VkDeviceSize off = (f.uOff + 15) & ~(VkDeviceSize)15;
+    VkDeviceSize off = (f.uOff + kUploadAlign - 1) & ~(kUploadAlign - 1);
     Buffer big;
     memset(&big, 0, sizeof(big));
     bool banded = false;
@@ -857,7 +862,7 @@ void upload_rgba(Image& im, int x, int y, int w, int h, const uint8_t* rgba, boo
     for (int r = 0; r < h; r += band) {
         int n = h - r < band ? h - r : band;
         if (banded) {
-            off = (f.uOff + 15) & ~(VkDeviceSize)15;
+            off = (f.uOff + kUploadAlign - 1) & ~(kUploadAlign - 1);
             if (off + n * row > f.upload.size) {
                 flush_wait();
                 off = 0;
@@ -2028,6 +2033,7 @@ bool materialize(Texture& t) {
 // at once rather than when the frame retires. True if any went. A target without an image would draw nothing and
 // read as the 1x1 white placeholder (the white playfield of console boot 10).
 bool reclaim_images() {
+    guest_heap_frame();                                  // the guest heap's free runs go back first while memory is short
     release_kept_raw(0);
     uint64_t freed = g_poolBytes;
     pool_trim(0);
@@ -3034,19 +3040,32 @@ bool to_rgba(uint32_t format, uint32_t type, int w, int h, uint32_t src, std::ve
         for (int y = 0; y < h; ++y) memcpy(&out[(size_t)y * w * 4], g_mem + src + (size_t)y * pitch, (size_t)w * 4);
         return true;
     }
+    if (format != GL_BGRA && format != GL_RGB && format != GL_LUMINANCE && format != GL_LUMINANCE_ALPHA &&
+        format != GL_ALPHA) {
+        log_once("texture format 0x%x", format);
+        return false;
+    }
+    // one loop a format (the ending video's 960x544 RGB frames, 30 a second, went through a switch a texel)
     for (int y = 0; y < h; ++y) {
         const uint8_t* s = g_mem + src + (size_t)y * pitch;
         uint8_t* d = &out[(size_t)y * w * 4];
-        for (int x = 0; x < w; ++x, s += comps, d += 4) {
-            switch (format) {
-            case GL_RGBA: d[0] = s[0]; d[1] = s[1]; d[2] = s[2]; d[3] = s[3]; break;
-            case GL_BGRA: d[0] = s[2]; d[1] = s[1]; d[2] = s[0]; d[3] = s[3]; break;
-            case GL_RGB: d[0] = s[0]; d[1] = s[1]; d[2] = s[2]; d[3] = 255; break;
-            case GL_LUMINANCE: d[0] = d[1] = d[2] = s[0]; d[3] = 255; break;
-            case GL_LUMINANCE_ALPHA: d[0] = d[1] = d[2] = s[0]; d[3] = s[1]; break;
-            case GL_ALPHA: d[0] = d[1] = d[2] = 0; d[3] = s[0]; break;
-            default: log_once("texture format 0x%x", format); return false;
-            }
+        uint8_t* const end = d + (size_t)w * 4;
+        switch (format) {
+        case GL_BGRA:
+            for (; d < end; s += 4, d += 4) { d[0] = s[2]; d[1] = s[1]; d[2] = s[0]; d[3] = s[3]; }
+            break;
+        case GL_RGB:
+            for (; d < end; s += 3, d += 4) { d[0] = s[0]; d[1] = s[1]; d[2] = s[2]; d[3] = 255; }
+            break;
+        case GL_LUMINANCE:
+            for (; d < end; s += 1, d += 4) { d[0] = d[1] = d[2] = s[0]; d[3] = 255; }
+            break;
+        case GL_LUMINANCE_ALPHA:
+            for (; d < end; s += 2, d += 4) { d[0] = d[1] = d[2] = s[0]; d[3] = s[1]; }
+            break;
+        default:                                        // GL_ALPHA
+            for (; d < end; s += 1, d += 4) { d[0] = d[1] = d[2] = 0; d[3] = s[0]; }
+            break;
         }
     }
     return true;

@@ -154,7 +154,7 @@ Stream* held(uint32_t r, bool make) {                   // with g_streamsLock
     if (!make) return 0;
     if (g_streams.size() >= 64)
         for (it = g_streams.begin(); it != g_streams.end();) {
-            if (RD32(it->first) != kHostMark) {
+            if (guest_page_given(it->first) || RD32(it->first) != kHostMark) {   // freed and given back: not read
                 delete it->second;
                 it = g_streams.erase(it);
             } else {
@@ -395,4 +395,78 @@ extern "C" int hle_archive_read(X86* c) {
     c->r[0] = total;
     c->r[4] = esp + 16;
     return 1;
+}
+
+// ------------------------------------------------------------------------------------------------ seeks
+// The stream's Seek (F_9885b0: this ecx, offset, whence; ret 8; slot 3 of its vtable at 0xB44954) goes back to the
+// entry's start for a target before its position (F_988090) and then, like a target after it, reads every block in
+// between through the next block (F_988190), unscrambled or inflated. The ending video (videos.a, version 0) went
+// through its 5.6 MB seven times in its first frame: 39 MB read, 2.1 s of the console's drive and the unscrambling
+// besides (boot 26: a 5 s frame). A version 0 entry's blocks are the file's next 1 KB XORed with a keystream that
+// steps 256 words a block from (name hash ^ 0xF9524287) | 1, whatever the block's size, so any block's state is
+// known without reading: for a target before the position, or more than a block past the window, the stream is set
+// at the target's block (the file seeked as F_988090 seeks it, the keystream stepped, the position that block's
+// start, the window empty) and the game's Seek goes the last bytes. Other versions (deflated, LZW: no such state)
+// go to the game's Seek alone. ISAAC360_ARCHIVE_SEEK=0 turns it off.
+extern "C" void F_9885b0(X86* c);
+
+namespace {
+const uint32_t kStreamVtable = 0xb44954, kSeekSlot = kStreamVtable + 3 * 4, kGameSeek = 0x9885b0;
+enum { ST_FILE = 0x8, ST_ENTRY = 0xc, ST_SEED = 0xc24 };
+uint64_t g_seekJumps = 0, g_seekBytes = 0;
+
+uint32_t v0_keystream(uint32_t hash2, uint32_t words) {
+    uint32_t s = (hash2 ^ 0xF9524287u) | 1u;
+    for (uint32_t i = 0; i < words; ++i) {
+        uint32_t e = (s << 8) ^ s;
+        e ^= e >> 9;
+        s = (e << 23) ^ e;
+    }
+    return s;
+}
+
+void archive_seek(X86* c) {
+    static const bool on = !getenv("ISAAC360_ARCHIVE_SEEK") || atoi(getenv("ISAAC360_ARCHIVE_SEEK")) != 0;
+    uint32_t self = c->r[1], sp = c->r[4];
+    uint32_t entry = RD32(self + ST_ENTRY), archive = RD32(self + 4);
+    uint32_t version = archive ? RD8(archive + 4) : 1;
+    if (on && entry && version != 1 && version != 2 && version != 5) {
+        uint32_t off = RD32(sp + 4), whence = RD32(sp + 8);
+        uint32_t pos = RD32(self + STREAM_POS), size = RD32(entry + 0x10);
+        // the target as the game's Seek takes it (its whence 2 adds the position too)
+        uint32_t target = whence == 1 ? pos + off : whence == 2 ? size + pos + off : off;
+        uint32_t len = RD32(self + WIN_LEN), wpos = RD32(self + WIN_POS);
+        uint32_t ahead = wpos < len ? len - wpos : 0;
+        if (target < size && (target < pos || target - pos > ahead + 1024)) {
+            uint32_t block = target / 1024;
+            uint32_t file = RD32(self + ST_FILE);
+            X86 saved;
+            memcpy(&saved, c, sizeof(X86));
+            c->r[1] = file;
+            const uint32_t args[2] = {RD32(entry + 0xc) + block * 1024, 0};
+            guest_call(c, RD32(RD32(file) + 0xc), 2, args, true);
+            memcpy(c, &saved, sizeof(X86));
+            WR32(self + STREAM_POS, block * 1024);
+            WR32(self + WIN_POS, 0);
+            WR32(self + WIN_LEN, 0);
+            WR8(self + AT_END, 0);
+            WR32(self + ST_SEED, v0_keystream(RD32(entry + 8), block * 256));
+            ++g_seekJumps;
+            g_seekBytes += target < pos ? block * 1024 : block * 1024 - pos;
+            if (g_seekJumps <= 8 || g_seekJumps % 1000 == 0)
+                recomp_log("archive seek: %llu jumps, %llu MB not read again (this one to %u of %u)",
+                           (unsigned long long)g_seekJumps, (unsigned long long)(g_seekBytes >> 20), target, size);
+        }
+    }
+    F_9885b0(c);                                    // the rest of the way (at most a block), and the return
+}
+}  // namespace
+
+// after the image loads: the stream's vtable slot to the seek above
+void hle_archive_install() {
+    if (RD32(kSeekSlot) != kGameSeek) {
+        recomp_log("archive seek: the stream's vtable slot holds %08x, not its Seek: left alone", RD32(kSeekSlot));
+        return;
+    }
+    WR32(kSeekSlot, thunk_for(archive_seek, "isaac360 archive seek"));
 }

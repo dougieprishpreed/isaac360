@@ -100,6 +100,15 @@ bool CommitMemory(uint8_t* base, uint32_t offset, uint32_t size) {
     return true;
 }
 
+// pages the guest heap has free, back to the console (runtime.cpp's give_back_runs)
+bool DecommitMemory(uint8_t* base, uint32_t offset, uint32_t size) {
+    void* p = base + offset;
+    uint32_t n = size;
+    return NT_SUCCESS(NtFreeVirtualMemory(&p, &n, MEM_DECOMMIT, 0));
+}
+
+uint32_t FreeMemory();
+
 // ------------------------------------------------------------------------------------------------ pads
 volatile uint16_t gHeld = 0;                         // every pad's buttons (the quit chord)
 
@@ -290,6 +299,8 @@ void* GameMain(void*) {
     cfg.logPath = "isaac360.log";
     cfg.reserveMemory = ReserveMemory;
     cfg.commitMemory = CommitMemory;
+    cfg.decommitMemory = DecommitMemory;
+    cfg.freeMemory = FreeMemory;
     cfg.threadStarted = ThreadStarted;
     std::vector<std::string> args;
     ReadArgs(args);
