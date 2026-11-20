@@ -68,6 +68,8 @@ void guest_lock_serve() {
     if ((chores & kChoreFrames) && g_framesChore) g_framesChore();
 }
 
+void (*guest_main_frames_chore_now())() { return g_framesChore; }
+
 void guest_main_frames_chore(void (*fn)()) {
     g_framesChore = fn;
     if (fn) g_mainChores.fetch_or(kChoreFrames, std::memory_order_relaxed);

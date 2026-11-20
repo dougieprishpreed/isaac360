@@ -7,9 +7,14 @@
 // (+0x38) unless that sprite is loaded (its flag +0x109, so +0x141), and the run's first door is the first to call
 // it. Here the same Sprite::Load (F_406d50: thiscall, a const std::string& path and loadGraphics; ret 8) runs with
 // the same arguments when the run's first floor (the game's "Level::Init m_Stage 1," line) enters its start room,
-// so the first door finds the sprite loaded, as every later door does. It runs after that frame's present, not in
-// it: its clock reads let the loading screen's chore present (shims_gl.cpp), which inside the present hung the next
-// frame. ISAAC360_WARM=0 turns it off.
+// so the first door finds the sprite loaded, as every later door does.
+//
+// Off unless ISAAC360_WARM=1. The game code's clock reads let the loading screen's chore present (shims_gl.cpp,
+// load_frames_chore) in the middle of it: inside the present that hung the next frame on the PC (2 runs of 6), and
+// after the present it hung console boot 27 the same way (the load took 408 ms there, against 12 ms on the PC, so
+// only the console's ran long enough for the chore). The chore now waits while it runs, but on the console it cost a
+// 408 ms frame at the start room for the 219 ms it took from the first door: not worth it as it is.
+#include "guest_lock.h"
 #include "runtime.h"
 #include <chrono>
 #include <stdlib.h>
@@ -22,7 +27,7 @@ bool g_firstFloor = false;                          // the run's first floor beg
 bool g_pending = false;                             // its start room was entered: warm at this frame's end
 
 bool enabled() {
-    static const bool on = !getenv("ISAAC360_WARM") || atoi(getenv("ISAAC360_WARM")) != 0;
+    static const bool on = getenv("ISAAC360_WARM") && atoi(getenv("ISAAC360_WARM")) != 0;
     return on;
 }
 
@@ -76,5 +81,10 @@ void warm_log_line(const char* s) {
 void warm_frame_end() {
     if (!g_pending) return;
     g_pending = false;
-    if (X86* c = current_cpu()) load_versus_screen(c);
+    X86* c = current_cpu();
+    if (!c) return;
+    void (*chore)() = guest_main_frames_chore_now();   // no loading screen presents in the middle of it
+    guest_main_frames_chore(0);
+    load_versus_screen(c);
+    guest_main_frames_chore(chore);
 }

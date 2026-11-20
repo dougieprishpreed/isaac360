@@ -25,6 +25,7 @@ enum { kChoreLocks = 1u, kChoreFrames = 2u };
 extern std::atomic<uint32_t> g_mainChores;
 void guest_lock_serve();                            // the main thread: its chores
 void guest_main_frames_chore(void (*fn)());         // the main thread: fn as a chore from now on (0: none)
+void (*guest_main_frames_chore_now())();             // the chore set now (0: none)
 void guest_lock_revoke_slow(struct GuestLock& l, uint32_t me);   // another thread: returns once l is shared
 void guest_lock_main_park();                        // the main thread is about to block: others may take locks
 void guest_lock_main_unpark();
