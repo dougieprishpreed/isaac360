@@ -17,6 +17,7 @@
 #include "guest_lock.h"
 #include "runtime.h"
 #include <chrono>
+#include <thread>
 #include <stdlib.h>
 #include <string.h>
 
@@ -83,8 +84,21 @@ void warm_frame_end() {
     g_pending = false;
     X86* c = current_cpu();
     if (!c) return;
+    // tests: ISAAC360_WARM_TEST_MS=N holds it N ms longer, serving the main thread's chores as the game's clock reads
+    // do (the console's 408 ms on the PC); ISAAC360_WARM_UNGUARDED=1 leaves the loading screen's chore armed (boot 27)
+    static const int testMs = getenv("ISAAC360_WARM_TEST_MS") ? atoi(getenv("ISAAC360_WARM_TEST_MS")) : 0;
+    static const bool unguarded = getenv("ISAAC360_WARM_UNGUARDED") && atoi(getenv("ISAAC360_WARM_UNGUARDED"));
     void (*chore)() = guest_main_frames_chore_now();   // no loading screen presents in the middle of it
-    guest_main_frames_chore(0);
+    if (!unguarded) guest_main_frames_chore(0);
     load_versus_screen(c);
-    guest_main_frames_chore(chore);
+    if (testMs > 0) {
+        std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now() + std::chrono::milliseconds(testMs);
+        while (std::chrono::steady_clock::now() < end) {
+            if (guest_main_frames_chore_now()) guest_lock_serve();
+            std::this_thread::sleep_for(std::chrono::microseconds(100));
+        }
+        recomp_log("warm: held %d ms more (a test), the loading screen's chore %s", testMs,
+                   unguarded ? "armed" : "parked");
+    }
+    if (!unguarded) guest_main_frames_chore(chore);
 }
