@@ -8,7 +8,9 @@ Run it from the folder that holds (or will hold) the isaac360 folder. It asks fo
                          512 MB for everything), and the Womb's L room floor PNG is widened to 8 bits
                          (tools/recomp/console_sfx.py)
   dlls/                  Lua5.3.3r.dll (from the game) and msvcp140.dll (from Windows), rebased to the addresses the
-                         translation uses (tools/recomp/rebase.py)
+                         translation uses (tools/recomp/rebase.py); a DLL already there is kept (rebased if it is a
+                         plain copy), so the msvcp140.dll the XEX was translated from (build/recomp/dlls) can be
+                         put there first, and the folder made on another PC
   save/                  where the game writes its saves
   isaac360_args.txt      options (written once; yours are kept)
   README.txt
@@ -123,6 +125,25 @@ def copy_game(game, out):
     print('  %d files, %.1f MB (%d copied)' % (len(files), total / 1048576.0, copied))
 
 
+def image_base(path):
+    data = open(path, 'rb').read(4096)
+    pe = struct.unpack_from('<I', data, 0x3c)[0]
+    return struct.unpack_from('<I', data, pe + 24 + 28)[0]
+
+
+def prepare_dll(src, dst, base):
+    """A DLL already in dlls/ is kept (the copy the XEX was translated from: build/recomp/dlls), rebased in place if it
+    is a plain copy; otherwise src, rebased."""
+    name = os.path.basename(dst)
+    if os.path.isfile(dst):
+        if image_base(dst) == base:
+            print('  %s: kept (already in dlls)' % name)
+            return
+        print('  %s: already in dlls, not yet rebased' % name)
+        src = dst
+    rebase(src, dst, base)
+
+
 def convert(game, out):
     for need in ('isaac-ng.exe', 'Lua5.3.3r.dll', os.path.join('resources', 'packed', 'sfx.a'),
                  os.path.join('tools', 'ResourceExtractor', 'filelist.txt')):
@@ -130,8 +151,9 @@ def convert(game, out):
             raise SystemExit('%s has no %s: choose isaac-ng.exe in the Steam folder of The Binding of Isaac: Rebirth '
                              'with Repentance installed' % (game, need))
     msvcp = os.path.join(os.environ.get('WINDIR', r'C:\Windows'), 'SysWOW64', 'msvcp140.dll')
-    if not os.path.isfile(msvcp):
-        raise SystemExit('%s is missing: install the Microsoft Visual C++ 2015-2022 Redistributable (x86)' % msvcp)
+    if not os.path.isfile(os.path.join(out, 'dlls', 'msvcp140.dll')) and not os.path.isfile(msvcp):
+        raise SystemExit('%s is missing: install the Microsoft Visual C++ 2015-2022 Redistributable (x86), or put the '
+                         'msvcp140.dll your build made (build\\recomp\\dlls) in isaac360\\dlls' % msvcp)
     t0 = time.time()
     print('Game folder: %s' % game)
     print('Output: %s' % out)
@@ -141,8 +163,8 @@ def convert(game, out):
     print('Converting the sound archives (a few minutes)...')
     console_sfx.convert(game, os.path.join(out, 'game', 'resources', 'packed'))
     print('Preparing the runtime libraries...')
-    rebase(os.path.join(game, 'Lua5.3.3r.dll'), os.path.join(out, 'dlls', 'lua5.3.3r.dll'), LUA_BASE)
-    rebase(msvcp, os.path.join(out, 'dlls', 'msvcp140.dll'), MSVCP_BASE)
+    prepare_dll(os.path.join(game, 'Lua5.3.3r.dll'), os.path.join(out, 'dlls', 'lua5.3.3r.dll'), LUA_BASE)
+    prepare_dll(msvcp, os.path.join(out, 'dlls', 'msvcp140.dll'), MSVCP_BASE)
     os.makedirs(os.path.join(out, 'save'), exist_ok=True)
     args_file = os.path.join(out, 'isaac360_args.txt')
     if not os.path.isfile(args_file):

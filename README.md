@@ -80,7 +80,7 @@ The console reads your game files from the USB drive, in a folder made by `360co
 3. Copy your `default.xex` (and its `licenses` folder) into `isaac360`.
 4. Copy the `isaac360` folder to your Xbox 360's drive, for example as `E:\Apps\isaac360`, and start `default.xex`.
 
-Run `360convert.exe` on the PC that built `default.xex`. The translation is made from that PC's `msvcp140.dll`, and the console needs the same copy.
+The translation is made from the `msvcp140.dll` of the PC that built `default.xex`, and the console needs that same copy. Running `360convert.exe` on that PC takes care of it. To run it elsewhere, first put the `msvcp140.dll` from your build (`build\recomp\dlls`) in `isaac360\dlls`: 360convert keeps a DLL that is already there.
 
 Never share the `isaac360` folder or `default.xex`: they are made from your copy of the game.
 
