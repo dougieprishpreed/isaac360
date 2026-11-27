@@ -12,7 +12,11 @@ everything), and the game's runtime DLLs rebased (tools/recomp/rebase.py). Layou
   isaac360_args.txt        options (--mem MB: the guest address space; NAME=value: a setting the PC takes from
                          the environment, e.g. ISAAC360_SHOTS=600,1200 for screenshots beside the XEX)
 
-    py -3 tools/stage_console.py [--xex build/console/recomp/default.xex] [--out build/console/isaac360]
+    py -3 tools/stage_console.py [--xex build/console/recomp/default.xex] [--out build/console/isaac360] [--ending-test]
+
+--ending-test adds tools/ending_test.lua (the player takes no damage) to an overlay copy of the game's
+resources/scripts/main.lua in save/overlay, for testing the ending; staging without it removes that copy.
+Players get the same folder from tools/convert/360convert.py (360convert.exe) and their own default.xex.
 
 Copy the output folder to the console's drive and start default.xex from the dashboard of a console that runs
 homebrew (such as with ABadAvatar). Never share the output: it is made from your copy of the game.
@@ -59,10 +63,28 @@ def stage_game(out):
     return len(files), copied, total
 
 
+ENDING_TEST_MARK = b'-- isaac360 ending test'
+
+
+def stage_ending_test(out, on):
+    """The ending test script on the game's main.lua in the save overlay (read before the game's own), or none."""
+    path = os.path.join(out, 'save', 'overlay', 'resources', 'scripts', 'main.lua')
+    if on:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, 'wb') as f:
+            f.write(open(os.path.join(GAME, 'resources', 'scripts', 'main.lua'), 'rb').read())
+            f.write(b'\n\n' + open(os.path.join(ROOT, 'tools', 'ending_test.lua'), 'rb').read())
+        print('ending test: the player takes no damage (%s)' % path)
+    elif os.path.isfile(path) and ENDING_TEST_MARK in open(path, 'rb').read():
+        os.remove(path)
+        print('ending test removed')
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
     ap.add_argument('--xex', default=os.path.join(ROOT, 'build', 'console', 'recomp', 'default.xex'))
     ap.add_argument('--out', default=os.path.join(ROOT, 'build', 'console', 'isaac360'))
+    ap.add_argument('--ending-test', action='store_true', help='the player takes no damage (tools/ending_test.lua)')
     args = ap.parse_args()
     os.makedirs(args.out, exist_ok=True)
     count, copied, total = stage_game(args.out)
@@ -81,6 +103,7 @@ def main():
     if os.path.isdir(licenses):
         shutil.copytree(licenses, os.path.join(args.out, 'licenses'), dirs_exist_ok=True)
     os.makedirs(os.path.join(args.out, 'save'), exist_ok=True)
+    stage_ending_test(args.out, args.ending_test)
     args_file = os.path.join(args.out, 'isaac360_args.txt')
     if not os.path.isfile(args_file):
         with open(args_file, 'w', newline='\r\n') as f:
@@ -90,7 +113,7 @@ def main():
     print('staged', os.path.abspath(args.out))
 
 
-README = '''The Binding of Isaac: Rebirth Complete Edition for Xbox 360 (isaac360) - console test build
+README = '''The Binding of Isaac: Rebirth Complete Edition for Xbox 360 (isaac360)
 
 Copy this whole folder to the console's drive (for example E:\\Games\\isaac360) and start
 default.xex from the dashboard of a console that runs homebrew (such as with ABadAvatar).
@@ -101,8 +124,9 @@ Files
                      hold sound effects are converted for the console's memory
   dlls\\              the game's runtime libraries, prepared for the console
   save\\              saves and the game's settings are written here
-  isaac360.log         written each session: copy it off before ejecting the drive
-  isaac360_args.txt    options: --mem MB (address space for the game); a line ISAAC360_DISPLAY=720p
+  isaac360.log       written each session (start-up, loads, slow frames): send it with a
+                     problem report
+  isaac360_args.txt  options: --mem MB (address space for the game); a line ISAAC360_DISPLAY=720p
                      keeps the picture at 1280x720 when the console is set to 1080p; a line
                      ISAAC360_DEADZONE=N sets the sticks' dead zone in percent (default 24; 100
                      turns the sticks off, the d-pad still moves); a line ISAAC360_SWAP_IMAGES=2

@@ -200,10 +200,6 @@ def encode_entry(version, data, hash2):
     return bytes(out)
 
 
-def names():
-    return ar.file_names()
-
-
 def encoded_length(data, version, off, size):
     """Bytes an entry takes in the archive."""
     if version == 0:
@@ -277,12 +273,17 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     parser.add_argument('--out', default=os.path.join(ROOT, 'build', 'console_data'))
     args = parser.parse_args()
-    table = names()
-    packed = os.path.join(args.out, 'resources', 'packed')
+    convert(os.path.join(ROOT, 'game'), os.path.join(args.out, 'resources', 'packed'))
+
+
+def convert(game, packed):
+    """The game folder's four archives that hold sound effects, converted into the folder packed, with sfx.pcm
+    (tools/convert/360convert.py runs this too)."""
+    table = ar.file_names(game)
     os.makedirs(packed, exist_ok=True)
     store = PcmStore(os.path.join(packed, PCM_FILE))
     for name in ARCHIVES:
-        rewrite(os.path.join(ROOT, 'game', 'resources', 'packed', name), os.path.join(packed, name), table, store)
+        rewrite(os.path.join(game, 'resources', 'packed', name), os.path.join(packed, name), table, store)
     store.close()
     print('%s: %d effects, %.1f MB' % (PCM_FILE, len(store.seen), store.at / 1048576.0))
 

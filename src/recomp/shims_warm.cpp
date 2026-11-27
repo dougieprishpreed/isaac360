@@ -9,11 +9,11 @@
 // the same arguments when the run's first floor (the game's "Level::Init m_Stage 1," line) enters its start room,
 // so the first door finds the sprite loaded, as every later door does.
 //
-// Off unless ISAAC360_WARM=1. The game code's clock reads let the loading screen's chore present (shims_gl.cpp,
+// On unless ISAAC360_WARM=0. The game code's clock reads let the loading screen's chore present (shims_gl.cpp,
 // load_frames_chore) in the middle of it: inside the present that hung the next frame on the PC (2 runs of 6), and
 // after the present it hung console boot 27 the same way (the load took 408 ms there, against 12 ms on the PC, so
-// only the console's ran long enough for the chore). The chore now waits while it runs, but on the console it cost a
-// 408 ms frame at the start room for the 219 ms it took from the first door: not worth it as it is.
+// only the console's ran long enough for the chore). The chore waits while it runs: console boot 28 loaded it in
+// 365 ms right after the run's start-up load, and its first door was one 281 ms frame (219 + 364 ms before).
 #include "guest_lock.h"
 #include "runtime.h"
 #include <chrono>
@@ -28,7 +28,7 @@ bool g_firstFloor = false;                          // the run's first floor beg
 bool g_pending = false;                             // its start room was entered: warm at this frame's end
 
 bool enabled() {
-    static const bool on = getenv("ISAAC360_WARM") && atoi(getenv("ISAAC360_WARM")) != 0;
+    static const bool on = !getenv("ISAAC360_WARM") || atoi(getenv("ISAAC360_WARM")) != 0;
     return on;
 }
 

@@ -65,23 +65,24 @@ Copy your game folder (the one with `isaac-ng.exe`, `Lua5.3.3r.dll` and `resourc
    tools\.venv\Scripts\python tools\recomp\shaders.py
    ```
 
-4. Prepare the console's sound archives (written to `build\console_data`):
-
-   ```powershell
-   tools\.venv\Scripts\python tools\recomp\console_sfx.py
-   ```
-
-5. Build `default.xex` in WSL, from the repository folder. The build applies the patches in `tools/xsdk/patches` (the 1920x1080 display) to the xsdk and vulkan4xenon checkouts and builds their libraries (`tools/xsdk/deps.sh`), so give it checkouts of its own, side by side. `XSDK_TOOLCHAIN` is where the xsdk toolchain is installed, `GLSLANG` the glslang program, and `ISAAC_XSDK_BUILD` a folder for the build's objects (by default `/opt/isaac360-xsdk/recomp`). It takes 30 to 60 minutes and writes `build/console/recomp/default.xex`.
+4. Build `default.xex` in WSL, from the repository folder. The build applies the patches in `tools/xsdk/patches` (the 1920x1080 display) to the xsdk and vulkan4xenon checkouts and builds their libraries (`tools/xsdk/deps.sh`), so give it checkouts of its own, side by side. `XSDK_TOOLCHAIN` is where the xsdk toolchain is installed, `GLSLANG` the glslang program, and `ISAAC_XSDK_BUILD` a folder for the build's objects (by default `/opt/isaac360-xsdk/recomp`). It takes 30 to 60 minutes and writes `build/console/recomp/default.xex`.
 
    ```sh
    XSDK=/path/to/deps/xsdk VULKAN4XENON=/path/to/deps/vulkan4xenon XSDK_TOOLCHAIN=/path/to/toolchain GLSLANG=/path/to/glslang tools/xsdk/build_recomp.sh
    ```
 
-6. Stage the folder on your USB drive:
+## Preparing the game files
 
-   ```powershell
-   tools\.venv\Scripts\python tools\stage_console.py --out E:\Apps\isaac360
-   ```
+The console reads your game files from the USB drive, in a folder made by `360convert.exe` (from the releases, or built with `cmd /c tools\convert\build_360convert.cmd`):
+
+1. Put `360convert.exe` in a folder and run it from there. It asks for `isaac-ng.exe` in your Steam game folder.
+2. It makes an `isaac360` folder beside itself, or uses the one already there. It copies the game files the console needs and converts the four archives that hold sound effects for the console's memory. It also prepares the two runtime libraries (`Lua5.3.3r.dll` from the game and `msvcp140.dll` from Windows). This takes a few minutes.
+3. Copy your `default.xex` (and its `licenses` folder) into `isaac360`.
+4. Copy the `isaac360` folder to your Xbox 360's drive, for example as `E:\Apps\isaac360`, and start `default.xex`.
+
+Run `360convert.exe` on the PC that built `default.xex`. The translation is made from that PC's `msvcp140.dll`, and the console needs the same copy.
+
+Never share the `isaac360` folder or `default.xex`: they are made from your copy of the game.
 
 To try the same build on a PC first, `cmd /c tools\recomp\build_win.cmd` makes `build\recomp\isaac360_recomp.exe`.
 
