@@ -53,10 +53,10 @@ Copy your game folder (the one with `isaac-ng.exe`, `Lua5.3.3r.dll` and `resourc
    $env:ISAAC360_IMAGE='build/recomp/dlls/lua5.3.3r.dll'; $env:ISAAC360_TAG='lua'; tools\.venv\Scripts\python tools\recomp\analyze.py; tools\.venv\Scripts\python tools\recomp\translate.py
    ```
 
-   Then its C++ library, and clear the two settings again:
+   Then its C++ library, from the functions the game and its Lua library import, and clear the three settings again:
 
    ```powershell
-   $env:ISAAC360_IMAGE='build/recomp/dlls/msvcp140.dll'; $env:ISAAC360_TAG='msvcp'; tools\.venv\Scripts\python tools\recomp\analyze.py; tools\.venv\Scripts\python tools\recomp\translate.py; Remove-Item Env:ISAAC360_IMAGE, Env:ISAAC360_TAG
+   $env:ISAAC360_IMAGE='build/recomp/dlls/msvcp140.dll'; $env:ISAAC360_TAG='msvcp'; $env:ISAAC360_EXPORTS_FROM='game/isaac-ng.exe,build/recomp/dlls/lua5.3.3r.dll'; tools\.venv\Scripts\python tools\recomp\analyze.py; tools\.venv\Scripts\python tools\recomp\translate.py; Remove-Item Env:ISAAC360_IMAGE, Env:ISAAC360_TAG, Env:ISAAC360_EXPORTS_FROM
    ```
 
 3. Convert the game's shaders, which are read from its archives and its program. This runs glslang in WSL: set `ISAAC360_WSL_DISTRO` to the name of your WSL distribution and `GLSLANG` to the glslang program inside it first.
