@@ -27,4 +27,8 @@ const uint32_t kVorbisGetSamples = 0xaa7fb0;
 const uint32_t kPlayerVtable = 0, kSetColor = 0;
 // the engine's reference count add-ref (ISAAC360_BENCH)
 const uint32_t kRefcountAdd = 0x40c690;
+// the job worker's loop (0xA9E950, Repentance+'s worker thread): the return address of its queue lock's lock call;
+// the worker object holds its flags at +0 (bit 1: stop), the queued count at +0x1C and the lock object at +0x20
+// (shims_kernel32.cpp's idle wait). 0: not in this version.
+const uint32_t kJobWorkerLockReturn = 0xa9e9b7;
 }  // namespace game

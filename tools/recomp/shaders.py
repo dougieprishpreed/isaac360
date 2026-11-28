@@ -482,7 +482,22 @@ void main(void)
 
 def rewrite(label, stage_src):
     if label in REPLACE:
-        return REPLACE[label]
+        out = REPLACE[label]
+        # Repentance+'s hq4x.fs reads ScreenSizePow2 as a uniform (v1.7.5's hq4x.vs passed it on from an attribute,
+        # and Repentance+ draws it with the shared basic vertex shader): the rewrite reads it the way the source does,
+        # or it reads a varying nothing writes, zero, and the Filter option's picture is black (console boot 30)
+        if label == 'resources/shaders/hq4x' and re.search(r'uniform\s+vec3\s+ScreenSizePow2\s*;', stage_src):
+            out = out.replace('varying vec3 ScreenSizePow2Out;', 'uniform vec3 ScreenSizePow2;')
+            out = out.replace('ScreenSizePow2Out', 'ScreenSizePow2')
+        # bloom.fs the same way: BloomAmount and Ratio uniforms in Repentance+ (v1.7.5: OutBloomAmount and OutRatio
+        # varyings from bloom.vs), or the bloom adds nothing
+        if label == 'resources/shaders/bloom' and re.search(r'uniform\s+float\s+BloomAmount\s*;', stage_src):
+            if not re.search(r'uniform\s+vec2\s+Ratio\s*;', stage_src):
+                raise SystemExit('bloom.fs: BloomAmount is a uniform but Ratio is not')
+            out = out.replace('varying float OutBloomAmount;', 'uniform float BloomAmount;')
+            out = out.replace('varying vec2 OutRatio;', 'uniform vec2 Ratio;')
+            out = out.replace('OutBloomAmount', 'BloomAmount').replace('OutRatio', 'Ratio')
+        return out
     for name, pattern, repl in REWRITES:
         if label == name:
             stage_src, n = pattern.subn(repl, stage_src)

@@ -186,6 +186,7 @@ uint32_t gl_get_proc(const std::string& name) {
 uint32_t gl_frame_count() { return g_frames; }
 void hle_archive_streams(uint32_t* now, uint32_t* most);   // hle_archive.cpp
 double hle_vorbis_main_wait_ms();                          // hle_vorbis.cpp
+uint64_t shims_job_idle_waits();                            // shims_kernel32.cpp
 uint32_t (*g_hostFreeMemory)() = 0;                // the console's free memory in bytes (host_xsdk.cpp), for the log
 uint32_t (*g_hostHeapBytes)() = 0;                 // the console's C heap and big blocks (host_xsdk.cpp)
 // A quit the platform asked for (the console's Back + Start) happens here, at a frame's end with the GPU idle: the
@@ -288,12 +289,21 @@ static void log_times() {
     if (timed)
         snprintf(gpu, sizeof(gpu), "; the GPU's work %.1f ms a frame (max %.1f, %u frames timed)",
                  (w.gpuMs - t.work.gpuMs) / timed, gpuMax, timed);
-    recomp_log("time: frame %.1f ms (max %.1f), game %.1f (max %.1f; %.1f of it the game's sleeps), present %.1f (max "
-               "%.1f); %u of %u frames over "
-               "17 ms, %u over 34; waited for the display %.1f, the GPU %.1f, read-backs %.1f ms a frame%s",
-               t.frame / t.frames, t.frameMax, t.game / t.frames, t.gameMax, t.slept / t.frames, t.present / t.frames, t.presentMax, t.over17,
+    // the main thread's waits for the music decoder (core 1), and the job worker's idle waits (shims_kernel32.cpp)
+    static double lastMusic = 0;
+    static uint64_t lastIdle = 0;
+    double music = hle_vorbis_main_wait_ms();
+    uint64_t idle = shims_job_idle_waits();
+    recomp_log("time: frame %.1f ms (max %.1f), game %.1f (max %.1f; %.1f of it the game's sleeps, %.2f music waits), "
+               "present %.1f (max %.1f); %u of %u frames over "
+               "17 ms, %u over 34; waited for the display %.1f, the GPU %.1f, read-backs %.1f ms a frame%s; job worker "
+               "idle waits %llu",
+               t.frame / t.frames, t.frameMax, t.game / t.frames, t.gameMax, t.slept / t.frames,
+               (music - lastMusic) / t.frames, t.present / t.frames, t.presentMax, t.over17,
                t.frames, t.over34, (w.waitAcquire - t.work.waitAcquire) / t.frames, (w.waitFence - t.work.waitFence) / t.frames,
-               (w.waitIdle - t.work.waitIdle) / t.frames, gpu);
+               (w.waitIdle - t.work.waitIdle) / t.frames, gpu, (unsigned long long)(idle - lastIdle));
+    lastMusic = music;
+    lastIdle = idle;
     static bool profiling = getenv("ISAAC360_PROFILE") != 0;
     if (profiling && gl_vk_enabled()) gl_vk_gpu_trace_next();
     memset(&t, 0, sizeof(t));

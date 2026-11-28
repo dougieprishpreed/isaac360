@@ -2171,6 +2171,10 @@ void bloom_rows(Program& p, uint32_t first) {
             int stride = va.stride ? va.stride : va.size * type_bytes(va.type);
             rx = attr_component(va, va.ptr + first * (uint32_t)stride, 0);
         }
+    // Repentance+ gives Ratio as a uniform (v1.7.5 as an attribute)
+    for (size_t u = 0; u < p.uniforms.size(); ++u)
+        if (p.uniforms[u].name == "Ratio" && p.uniforms[u].bytes >= 4)
+            memcpy(&rx, p.push + p.uniforms[u].offset, 4);
     Texture* src = 0;
     for (size_t u = 0; u < p.uniforms.size(); ++u)
         if (p.uniforms[u].bytes < 0 && p.uniforms[u].offset == 0) {

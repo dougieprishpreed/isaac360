@@ -81,6 +81,16 @@ def program_attribs():
     return rows
 
 
+def program_push():
+    """[(name, offset, bytes)] per program's push constants, in build/recomp/gl_shaders.inc's GLVK_PROGRAMS order."""
+    rows = []
+    for line in open(os.path.join(ROOT, 'build', 'recomp', 'gl_shaders.inc')):
+        if line.lstrip().startswith('{0x'):
+            meta = line.split('"')[5]
+            rows.append([(n, int(o), int(b)) for n, o, b in (item.split(':') for item in meta.split(',') if item)])
+    return rows
+
+
 def read_samples():
     """{program index: (attribs [(name, loc, comps)], [(push floats, [vertex floats])])}"""
     out, cur = {}, None
@@ -118,15 +128,32 @@ SYNTH = {'Position': lambda r: [r.uniform(0, 960), r.uniform(0, 540), -1.46],
          'Brightness': lambda r: [r.uniform(-0.2, 0.2)], 'Contrast': lambda r: [r.uniform(0.8, 1.2)],
          'ScreenSize': lambda r: [960.0, 540.0, 1024.0, 1024.0], 'ScreenSizePow2': lambda r: [1024.0, 1024.0, 1.0],
          'PlayerVel': lambda r: [r.uniform(-1, 1), r.uniform(-1, 1)],
-         'CurrentDir': lambda r: [0.0, 0.0] if r.random() < 0.5 else [r.uniform(-1, 1), r.uniform(-1, 1)]}
+         'CurrentDir': lambda r: [0.0, 0.0] if r.random() < 0.5 else [r.uniform(-1, 1), r.uniform(-1, 1)],
+         # Repentance+ gives the effects' values as uniforms (v1.7.5: attributes)
+         'Colorize': lambda r: [r.random(), r.random(), r.random(), 0.0 if r.random() < 0.5 else r.random()],
+         'ColorOffset': lambda r: [r.uniform(-0.5, 0.5) for _ in range(3)],
+         'Amount': lambda r: [r.uniform(0.0, float(os.environ.get('SYNTH_AMOUNT_MAX', '1.0')))], 'BloomAmount': lambda r: [r.random()],
+         'WrapSize': lambda r: [r.uniform(0.25, 1.0), r.uniform(0.25, 1.0)],
+         'Shockwave1': lambda r: [r.random(), r.random(), r.uniform(0, 0.5), r.uniform(0, 0.1)],
+         'Shockwave2': lambda r: [-200.0, 0.0, 0.0, 0.0] if r.random() < 0.5 else
+         [r.random(), r.random(), r.uniform(0, 0.5), r.uniform(0, 0.1)]}
 TRANSFORM = [2 / 960.0, 0, 0, 0, 0, 2 / 540.0, 0, 0, 0, 0, -0.001, 0, -1, -1, 0, 1]
 
 
-def synthetic(index, attribs):
+def synthetic(index, attribs, push_layout=()):
+    """Eight draws of six vertices: attributes by SYNTH, the push constants by the program's layout (Transform the
+    screen's; v1.7.5's programs had Transform alone)."""
     import random
     r = random.Random(index)
+    layout = list(push_layout) or [('Transform', 0, 64)]
+    size = max(o + b for _, o, b in layout)
     draws = []
     for _ in range(8):
+        push = [0.0] * (size // 4)
+        for name, off, nbytes in layout:
+            n = nbytes // 4
+            v = TRANSFORM if name == 'Transform' else SYNTH.get(name, lambda r, n=n: [r.random() for _ in range(n)])(r)
+            push[off // 4:off // 4 + n] = (list(v) + [0.0] * n)[:n]
         verts = []
         per_draw = {name: SYNTH.get(name, lambda r, c=c: [r.random() for _ in range(c)])(r)
                     for name, loc, c in attribs if name not in ('Position', 'TexCoord')}
@@ -134,7 +161,7 @@ def synthetic(index, attribs):
             for name, loc, c in attribs:
                 v = SYNTH[name](r) if name in ('Position', 'TexCoord') else per_draw[name]
                 verts.extend((list(v) + [0.0] * c)[:c])
-        draws.append([list(TRANSFORM), verts])
+        draws.append([push, verts])
     return attribs, draws
 
 
@@ -281,7 +308,7 @@ def check(tag, index, samples):
     if index in samples:
         attribs, draws = samples[index]
     else:
-        attribs, draws = synthetic(index, program_attribs()[index])
+        attribs, draws = synthetic(index, program_attribs()[index], program_push()[index])
         note = ' (synthetic inputs: no run drew it yet)'
 
     in_names = {loc: name for name, (ty, loc) in fs.prog['inputs'].items()}

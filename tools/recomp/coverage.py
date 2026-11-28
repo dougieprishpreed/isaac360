@@ -26,7 +26,7 @@ EXE = os.path.join(ROOT, 'build', 'recomp', 'isaac360_recomp.exe')
 SAVE = os.path.join(ROOT, 'build', 'recomp', 'save_cov')
 LOG = os.path.join(ROOT, 'build', 'recomp', 'cov.log')
 SHOTS = os.path.join(ROOT, 'build', 'recomp', 'cov_shots')
-GAME_LOG = os.path.join(SAVE, 'My Games', 'Binding of Isaac Repentance', 'log.txt')
+GAME_LOG = os.path.join(SAVE, 'My Games', 'Binding of Isaac Repentance^', 'log.txt')   # '+' is '^' (runtime.cpp)
 MENU_PAD = '500:504:E;700:704:E;900:904:E;1100:1104:E;1300:1304:E;1500:1504:E;1700:1704:E;2000:2060:A'
 
 

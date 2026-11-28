@@ -888,8 +888,44 @@ void shims_bench_locks(X86* c, uint32_t scratch) {
 // code does them, for the reference counting that calls them ~2,300 times a frame (translate.py HOST): each was a
 // virtual call into translated code calling the section's import. Anything else (not ready: the game logs it; a
 // timeout; the section already held by this thread, where the game's code waits forever) runs the game's code.
+// Repentance+'s job worker (game::kJobWorkerLockReturn's loop) takes its queue's lock, finds the queue empty, lets the
+// lock go, runs its tick callbacks and goes round again: it never waits (the game's own lock is an uncontended
+// critical section), so on the PC it holds a core. On the console it held one of core 1's two hardware threads,
+// which the music decoder, the texture packer and the sound mixer share (console boot 30: menus at 30 fps). Its
+// lock call with the queue empty waits here first, up to 2 ms, until a push (an unlock of that lock leaving the
+// queue non-empty) or its stop flag; the jobs and ticks run as before, a ticking idle worker at 500 a second.
+std::mutex g_jobIdleLock;
+std::condition_variable g_jobIdleWake;
+std::atomic<uint32_t> g_jobQueueLock(0);            // the worker's lock object, once it has waited
+uint64_t g_jobIdleWaits = 0;
+
+static void job_worker_idle(uint32_t lockObj) {
+    if (g_jobQueueLock.exchange(lockObj, std::memory_order_relaxed) != lockObj)
+        recomp_log("job worker: its empty queue waits for work (lock object %08x)", lockObj);
+    const uint32_t worker = lockObj - 0x20;
+    std::unique_lock<std::mutex> l(g_jobIdleLock);
+    ++g_jobIdleWaits;
+    g_jobIdleWake.wait_for(l, std::chrono::milliseconds(2),
+                           [worker] { return RD32(worker + 0x1c) != 0 || (RD8(worker) & 2) != 0; });
+}
+
+uint64_t shims_job_idle_waits() {
+    std::lock_guard<std::mutex> l(g_jobIdleLock);
+    return g_jobIdleWaits;
+}
+
+static inline void job_worker_pushed(uint32_t lockObj) {
+    if (lockObj == g_jobQueueLock.load(std::memory_order_relaxed) && RD32(lockObj - 0x20 + 0x1c) != 0) {
+        std::lock_guard<std::mutex> l(g_jobIdleLock);
+        g_jobIdleWake.notify_all();
+    }
+}
+
 extern "C" int hle_lockobj_lock(X86* c) {
     uint32_t self = c->r[1], esp = c->r[4];
+    if (game::kJobWorkerLockReturn && RD32(esp) == game::kJobWorkerLockReturn && RD32(self - 0x20 + 0x1c) == 0 &&
+        !(RD8(self - 0x20) & 2))
+        job_worker_idle(self);
     if (!(RD8(self + 4) & 1) || RD32(esp + 4) != 0xffffffffu) return 0;
     uint32_t cs = RD32(self + 8);
     CsSlot* slot = cs_find(cs, guest_thread(c)->id == g_lockMainId);
@@ -911,6 +947,7 @@ extern "C" int hle_lockobj_unlock(X86* c) {
     WR8(cs + 0x18, 0);
     uint32_t me = guest_thread(c)->id;
     guest_lock_leave(*cs_find(cs, me == g_lockMainId)->m, me);
+    job_worker_pushed(self);
     c->r[0] = 0;
     c->r[4] += 4;
     return 1;
