@@ -8,9 +8,10 @@ Run it from the folder that holds (or will hold) the isaac360 folder. It asks fo
                          512 MB for everything), and the Womb's L room floor PNG is widened to 8 bits
                          (tools/recomp/console_sfx.py)
   dlls/                  Lua5.3.3r.dll (from the game) and msvcp140.dll (from Windows), rebased to the addresses the
-                         translation uses (tools/recomp/rebase.py); a DLL already there is kept (rebased if it is a
-                         plain copy), so the msvcp140.dll the XEX was translated from (build/recomp/dlls) can be
-                         put there first, and the folder made on another PC
+                         translation uses (tools/recomp/rebase.py); an msvcp140.dll already there is used as it is
+                         (the one the XEX was translated from, build/recomp/dlls, can be put there first, and the
+                         folder made on another PC), a Lua5.3.3r.dll already there is kept (rebased if it is a
+                         plain copy)
   save/                  where the game writes its saves
   isaac360_args.txt      options (written once; yours are kept)
   README.txt
@@ -164,7 +165,11 @@ def convert(game, out):
     console_sfx.convert(game, os.path.join(out, 'game', 'resources', 'packed'))
     print('Preparing the runtime libraries...')
     prepare_dll(os.path.join(game, 'Lua5.3.3r.dll'), os.path.join(out, 'dlls', 'lua5.3.3r.dll'), LUA_BASE)
-    prepare_dll(msvcp, os.path.join(out, 'dlls', 'msvcp140.dll'), MSVCP_BASE)
+    msvcp_out = os.path.join(out, 'dlls', 'msvcp140.dll')
+    if os.path.isfile(msvcp_out):                   # one already in dlls is used as it is
+        print('  msvcp140.dll: already in dlls, skipped')
+    else:
+        rebase(msvcp, msvcp_out, MSVCP_BASE)
     os.makedirs(os.path.join(out, 'save'), exist_ok=True)
     args_file = os.path.join(out, 'isaac360_args.txt')
     if not os.path.isfile(args_file):
