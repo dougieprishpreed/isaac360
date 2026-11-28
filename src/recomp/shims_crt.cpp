@@ -18,6 +18,7 @@
 #include <vector>
 
 void hle_vorbis_freed(uint32_t p);                  // hle_vorbis.cpp
+void heap_profile_dump();                           // below
 
 namespace {
 void count_line(const char* s) { recomp_log("%s", s); }   // ISAAC360_COUNT_CALLS=mark lines
@@ -51,7 +52,20 @@ void s_fopen(X86* c) {
     }
     uint32_t g = guest_calloc(1, 32);
     static int trace = getenv("ISAAC360_TRACE_FILES") ? 1 : 0;
-    if (trace) recomp_log("fopen %s (%s) -> %08x", path.c_str(), mode.c_str(), g);
+    if (trace) {
+        char b[12];
+        recomp_log("fopen %s (%s) -> %08x, from %08x", path.c_str(), mode.c_str(), g, RD32(c->r[4]));
+        bool odd = false;
+        for (size_t i = 0; i < path.size(); ++i) odd |= (unsigned char)path[i] < 32 || (unsigned char)path[i] > 126;
+        for (uint32_t i = 0; odd && i < 192; i += 8) {      // a name that isn't text: the raw stack, to find the caller
+            std::string row;
+            for (uint32_t k = 0; k < 8; ++k) {
+                snprintf(b, sizeof(b), " %08x", RD32(c->r[4] + 4 * (i + k)));
+                row += b;
+            }
+            recomp_log("  [esp+%03x]%s", 4 * i, row.c_str());
+        }
+    }
     std::lock_guard<std::mutex> l(g_fileLock);
     g_files[g] = f;
     RET_CDECL(c, g);
@@ -376,6 +390,8 @@ void profile_free(uint32_t p) {
 }
 uint32_t traced_alloc(X86* c, uint32_t p, uint32_t size) {
     if (g_heapProfile) profile_alloc(c, p, size);
+    static std::atomic<bool> dumped(false);
+    if (!p && size && g_heapProfile && !dumped.exchange(true)) heap_profile_dump();   // the heap full: what holds it
     if (guest_heap_checking()) guest_heap_note(p, "made from", stack_site(c));
     return p;
 }

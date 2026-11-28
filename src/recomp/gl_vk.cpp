@@ -79,6 +79,7 @@ enum {
     MAX_SWAP = 4,
     COLOR_FORMAT = VK_FORMAT_R8G8B8A8_UNORM,
     OUTPUT_FORMAT = VK_FORMAT_B8G8R8A8_UNORM,
+    ALPHA_FORMAT = VK_FORMAT_R8_UNORM,  // Texture::alpha's images: sampled only (vulkan4xenon has no R8 targets)
 };
 
 // GL enums the layer reads
@@ -131,6 +132,7 @@ struct Image {
     int w, h;
     VkDeviceSize bytes;
     int drawnW, drawnH;                 // a colour target: the area its draws' viewports reach (0: not seen yet)
+    bool alpha;                         // ALPHA_FORMAT, its one channel sampled in all four (Texture::alpha)
 };
 
 struct Garbage {
@@ -161,6 +163,10 @@ struct Texture {
     // packed and uploaded): only the colour is kept, and the image is made by a clear on the GPU
     bool solid;
     uint8_t solidRgba[4];
+    // pixels each four equal bytes: white with its alpha, premultiplied (Repentance+'s TeamMeatEx font pages,
+    // 4096x4096, 4096x2048 and 2048x2048: 144 MB as RGBA, which ran the console out of memory at start-up): kept,
+    // packed and uploaded one byte a texel, its image ALPHA_FORMAT sampled as (a, a, a, a), the values the RGBA gave
+    bool alpha;
     // the image file its pixels are (hle_image.cpp), while nothing changed them: when the game deletes it, its image
     // waits in the reload pool for the next load of that file (next_pixels)
     std::string key;
@@ -539,7 +545,9 @@ bool make_image(Image& im, int w, int h, VkFormat format, bool depth) {
     ii.arrayLayers = 1;
     ii.samples = VK_SAMPLE_COUNT_1_BIT;
     ii.tiling = VK_IMAGE_TILING_OPTIMAL;
+    const bool alpha = format == (VkFormat)ALPHA_FORMAT;
     ii.usage = depth ? VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT
+             : alpha ? VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT
                      : VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT |
                            VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
     ii.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
@@ -577,9 +585,12 @@ bool make_image(Image& im, int w, int h, VkFormat format, bool depth) {
     vi.subresourceRange.aspectMask = depth ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
     vi.subresourceRange.levelCount = 1;
     vi.subresourceRange.layerCount = 1;
+    if (alpha)                                      // the one channel in all four (Texture::alpha)
+        vi.components.r = vi.components.g = vi.components.b = vi.components.a = VK_COMPONENT_SWIZZLE_R;
     vkCreateImageView(g_dev, &vi, 0, &im.view);
     im.w = w;
     im.h = h;
+    im.alpha = alpha;
     return true;
 }
 
@@ -822,19 +833,22 @@ void run_now(void (*fn)(VkCommandBuffer, void*), void* arg) {
 // the ending video's 960x544 frame a 125 ms present each (console boot 26).
 const VkDeviceSize kUploadAlign = 4096;
 
-void upload_rgba(Image& im, int x, int y, int w, int h, const uint8_t* rgba, bool fresh) {
+// An alpha image's (one byte a texel) is never drawn (only 8_8_8_8 targets are), so vulkan4xenon tiles it on the CPU,
+// which reads a cached buffer at the cache's speed and the ring's write-combined memory at ~40 MB/s: it gets a cached
+// buffer of its own.
+void upload_rgba(Image& im, int x, int y, int w, int h, const uint8_t* rgba, bool fresh, int texelBytes = 4) {
     begin_recording();
     end_pass();
     Frame& f = g_frames[g_frame];
-    VkDeviceSize bytes = (VkDeviceSize)w * h * 4;
+    VkDeviceSize bytes = (VkDeviceSize)w * h * texelBytes;
     g_uploaded += bytes;
     Buffer* src = &f.upload;
     VkDeviceSize off = (f.uOff + kUploadAlign - 1) & ~(kUploadAlign - 1);
     Buffer big;
     memset(&big, 0, sizeof(big));
     bool banded = false;
-    if (off + bytes > f.upload.size) {
-        if (bytes > f.upload.size / 2) {
+    if (off + bytes > f.upload.size || texelBytes != 4) {
+        if (bytes > f.upload.size / 2 || texelBytes != 4) {
             static const bool bands = getenv("ISAAC360_UPLOAD_BANDS") != 0;    // the fallback, to check it on the PC
             if (!bands && make_buffer(big, bytes, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_CACHED_BIT)) {
                 src = &big;
@@ -858,7 +872,7 @@ void upload_rgba(Image& im, int x, int y, int w, int h, const uint8_t* rgba, boo
     region.imageOffset.x = x;
     region.imageExtent.width = (uint32_t)w;
     region.imageExtent.depth = 1;
-    const VkDeviceSize row = (VkDeviceSize)w * 4;
+    const VkDeviceSize row = (VkDeviceSize)w * texelBytes;
     int band = banded ? (int)((f.upload.size / 2) / row) : h;
     if (band < 1) band = 1;
     for (int r = 0; r < h; r += band) {
@@ -2015,23 +2029,46 @@ bool materialize(Texture& t) {
         WaitClock::time_point t0;
         ~Timed() { g_materializeMs += since(t0); }
     } timed = {t0};
-    if (!make_image(t.img, t.lw, t.lh, (VkFormat)COLOR_FORMAT, false)) return false;
+    const int texelBytes = t.alpha ? 1 : 4;
+    if (!make_image(t.img, t.lw, t.lh, (VkFormat)(t.alpha ? ALPHA_FORMAT : COLOR_FORMAT), false)) return false;
     if (t.solid) {
         clear_image(t.img, t.solidRgba, true);
         return true;
     }
     if (t.raw) {                                        // not packed yet, or kept for this draw: as they came
-        upload_rgba(t.img, 0, 0, t.lw, t.lh, &(*t.raw)[0], true);
+        upload_rgba(t.img, 0, 0, t.lw, t.lh, &(*t.raw)[0], true, texelBytes);
         release_raw(t);
         return true;
     }
-    std::vector<uint8_t> rgba((size_t)t.lw * t.lh * 4);
-    if (!lz_decompress(&t.lz[0], t.lz.size(), &rgba[0], rgba.size())) {
+    std::vector<uint8_t> px((size_t)t.lw * t.lh * texelBytes);
+    if (!lz_decompress(&t.lz[0], t.lz.size(), &px[0], px.size())) {
         log_once("lz: a packed texture did not unpack");
-        std::fill(rgba.begin(), rgba.end(), 0);
+        std::fill(px.begin(), px.end(), 0);
     }
-    upload_rgba(t.img, 0, 0, t.lw, t.lh, &rgba[0], true);
+    upload_rgba(t.img, 0, 0, t.lw, t.lh, &px[0], true, texelBytes);
     return true;
+}
+
+// An alpha texture the game draws into or changes a part of: RGBA again, with an image of that format made from its
+// pixels (each byte four times), which is its only copy from then on as for any texture (the callers drop the packed
+// pixels next). Outside a render pass.
+void widen_alpha(Texture& t) {
+    if (!t.alpha) return;
+    t.alpha = false;
+    std::vector<uint8_t> a((size_t)t.lw * t.lh, 0);
+    if (t.raw && t.raw->size() == a.size()) a = *t.raw;
+    else if (!t.lz.empty() && !lz_decompress(&t.lz[0], t.lz.size(), &a[0], a.size())) log_once("lz: a packed texture did not unpack");
+    drop_packed(t);
+    if (t.img.image) {
+        if (g_inPass && t.img.view == g_passKey.color) end_pass();
+        retire_image(t.img);
+        g_lastSet = VK_NULL_HANDLE;                     // a new image may reuse a freed view's handle
+    }
+    if (t.lw <= 0 || t.lh <= 0 || !make_image(t.img, t.lw, t.lh, (VkFormat)COLOR_FORMAT, false)) return;
+    std::vector<uint8_t> rgba(a.size() * 4);
+    for (size_t i = 0; i < a.size(); ++i) rgba[4 * i] = rgba[4 * i + 1] = rgba[4 * i + 2] = rgba[4 * i + 3] = a[i];
+    upload_rgba(t.img, 0, 0, t.lw, t.lh, &rgba[0], true);
+    log_once("gl_vk: an alpha texture went back to RGBA (%dx%d)", t.lw, t.lh);
 }
 
 // No memory for an image: the packed textures no draw used this frame or the last give their images back (their
@@ -3084,6 +3121,30 @@ bool to_rgba(uint32_t format, uint32_t type, int w, int h, uint32_t src, std::ve
     return true;
 }
 
+// The guest's RGBA texels each four equal bytes (Texture::alpha) and at least 512x512: one byte a texel. The first
+// texel that isn't ends the look, so pictures cost a read or two. ISAAC360_ALPHA_TEX=0 keeps them RGBA (to compare).
+bool alpha_texels(uint32_t pixels, uint32_t format, uint32_t type, int w, int h, std::vector<uint8_t>& out) {
+    static const bool on = !getenv("ISAAC360_ALPHA_TEX") || atoi(getenv("ISAAC360_ALPHA_TEX")) != 0;
+    size_t n = (size_t)w * h;
+    if (!on || format != GL_RGBA || type != GL_UNSIGNED_BYTE || n < 512 * 512 || !pixels || pixels >= g_mem_size ||
+        n * 4 > g_mem_size - pixels)
+        return false;
+    const uint8_t* p = g_mem + pixels;
+    uint32_t v;
+    memcpy(&v, p, 4);
+    if (v != (v & 0xff) * 0x01010101u) return false;
+    out.resize(n);
+    for (size_t i = 0; i < n; ++i, p += 4) {
+        memcpy(&v, p, 4);
+        if (v != (v & 0xff) * 0x01010101u) {
+            std::vector<uint8_t>().swap(out);
+            return false;
+        }
+        out[i] = p[0];
+    }
+    return true;
+}
+
 // glTexImage2D(target, level, internalformat, w, h, border, format, type, pixels)
 void vk_glTexImage2D(X86* c) {
     struct Timed {
@@ -3096,8 +3157,17 @@ void vk_glTexImage2D(X86* c) {
     static int texLog = getenv("ISAAC360_TEX_LOG") ? atoi(getenv("ISAAC360_TEX_LOG")) : 0;
     if (texLog > 0 && pixels) {
         --texLog;
-        recomp_log("tex: frame %u, %dx%d format 0x%x type 0x%x, %s, from %08x %08x", gl_frame_count(), w, h, format, type,
-                   g_next.buf == pixels ? "named" : "not named", RD32(c->r[4]), RD32(c->r[4] + 0x40));
+        // the first texel and the first one not white, as the guest's bytes
+        uint32_t odd = 0, oddAt = 0;
+        for (uint32_t i = 0; i < (uint32_t)w * (uint32_t)h && format == GL_RGBA; ++i)
+            if ((RD32(pixels + 4 * i) & 0xffffff) != 0xffffff) {
+                odd = RD32(pixels + 4 * i);
+                oddAt = i;
+                break;
+            }
+        recomp_log("tex: frame %u, %dx%d format 0x%x type 0x%x, %s, from %08x %08x; first %08x, first not white %08x at %u",
+                   gl_frame_count(), w, h, format, type, g_next.buf == pixels ? "named" : "not named", RD32(c->r[4]),
+                   RD32(c->r[4] + 0x40), RD32(pixels), odd, oddAt);
     }
     RET_STD(c, 9, 0);
     if (level != 0) {
@@ -3109,6 +3179,7 @@ void vk_glTexImage2D(X86* c) {
     t.format = format;
     t.uploadFrame = gl_frame_count();
     drop_packed(t);
+    t.alpha = false;
     if (w <= 0 || h <= 0) return;
     if (pixels) g_texBytes += (uint64_t)w * h * 4;
     if (pixels && take_named(g_units[g_activeUnit], t, pixels, format, type, w, h)) return;
@@ -3123,6 +3194,9 @@ void vk_glTexImage2D(X86* c) {
         if (solid) {
             t.solid = true;
             memcpy(t.solidRgba, one, 4);
+        } else if (alpha_texels(pixels, format, type, w, h, rgba)) {
+            t.alpha = true;
+            pack_later(g_units[g_activeUnit], t, rgba);
         } else {
             if (!to_rgba(format, type, w, h, pixels, rgba)) rgba.assign((size_t)w * h * 4, 0);
             pack_later(g_units[g_activeUnit], t, rgba);
@@ -3135,7 +3209,7 @@ void vk_glTexImage2D(X86* c) {
         return;
     }
     bool fresh = false;
-    if (!t.img.image || t.img.w != w || t.img.h != h) {
+    if (!t.img.image || t.img.w != w || t.img.h != h || t.img.alpha) {
         if (g_inPass && t.img.view && (t.img.view == g_passKey.color)) end_pass();
         retire_image(t.img);
         if (!make_image(t.img, w, h, (VkFormat)COLOR_FORMAT, false)) return;
@@ -3155,6 +3229,7 @@ void vk_glTexSubImage2D(X86* c) {
     uint32_t format = ARG(c, 6), type = ARG(c, 7), pixels = ARG(c, 8);
     RET_STD(c, 9, 0);
     Texture& t = texture(g_units[g_activeUnit]);
+    widen_alpha(t);                                      // the new pixels may have colour
     materialize(t);
     drop_packed(t);                                      // its pixels change: the image is the only copy now
     std::vector<uint8_t> rgba;
@@ -3180,6 +3255,7 @@ void vk_glFramebufferTexture2D(X86* c) {
         if (ARG(c, 3)) {
             Texture& t = texture(ARG(c, 3));
             t.target = true;
+            widen_alpha(t);                              // alpha images can't be targets
             materialize(t);                              // drawn into: the image is the only copy from now on
             drop_packed(t);
         }

@@ -93,6 +93,22 @@ static void forget_written(const std::string& p) {
     }
 }
 
+// The console's drives take no '+' in a name (0xC0000033, console boot 29), and Repentance+ saves in "Binding of
+// Isaac Repentance+" as "rep+persistentgamedata1.dat": the save folder's and the overlay's names have '^' for it (no
+// name of the game's has one), and listings give it back (recomp_guest_name).
+static std::string saved_name(std::string s) {
+    for (size_t i = 0; i < s.size(); ++i)
+        if (s[i] == '+') s[i] = '^';
+    return s;
+}
+
+std::string recomp_guest_name(const std::string& hostName) {
+    std::string s = hostName;
+    for (size_t i = 0; i < s.size(); ++i)
+        if (s[i] == '^') s[i] = '+';
+    return s;
+}
+
 std::string recomp_host_path(const std::string& p, bool write) {
     std::string s = p;
     for (size_t i = 0; i < s.size(); ++i)
@@ -108,13 +124,13 @@ std::string recomp_host_path(const std::string& p, bool write) {
     if (mg == std::string::npos) mg = s.find("Documents/My Games/");
     bool absolute = (s.size() > 1 && s[1] == ':') || (!s.empty() && s[0] == '/');
     if (mg != std::string::npos) {
-        out = g_cfg.saveDir + "/" + s.substr(mg + 10);
+        out = g_cfg.saveDir + "/" + saved_name(s.substr(mg + 10));
         if (write) make_dirs(out);
     } else if (absolute) {
         out = s;
     } else {
         while (s.compare(0, 2, "./") == 0) s.erase(0, 2);
-        std::string overlay = g_cfg.saveDir + "/overlay/" + s;
+        std::string overlay = g_cfg.saveDir + "/overlay/" + saved_name(s);
         if (write) {
             make_dirs(overlay);
             return overlay;
@@ -150,7 +166,7 @@ std::vector<std::string> recomp_host_dirs(const std::string& p) {
         all.push_back(recomp_host_path(s));
     } else {
         while (s.compare(0, 2, "./") == 0) s.erase(0, 2);
-        all.push_back(g_cfg.saveDir + "/overlay/" + s);
+        all.push_back(g_cfg.saveDir + "/overlay/" + saved_name(s));
         if (!g_cfg.dataOverlay.empty()) all.push_back(g_cfg.dataOverlay + "/" + s);
         all.push_back(g_cfg.gameDir + "/" + s);
     }

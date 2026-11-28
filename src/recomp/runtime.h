@@ -129,6 +129,7 @@ std::string recomp_host_path(const std::string& guestPath);
 std::string recomp_host_path(const std::string& guestPath, bool write);   // write: in the overlay or save folder
 bool recomp_host_exists(const std::string& hostPath, bool* isDir);
 std::vector<std::string> recomp_host_dirs(const std::string& guestDir);   // host folders behind one guest folder
+std::string recomp_guest_name(const std::string& hostName);   // a listed name as the game sees it ('^' is '+')
 void recomp_sample_threads(void (*line)(const char*));   // each guest thread's shim and stack (watchdog)
 void recomp_profile_start();             // ISAAC360_PROFILE: sample the main guest thread (runtime.cpp)
 void recomp_profile_dump(void (*line)(const char*));   // the samples since the last dump, most frequent first

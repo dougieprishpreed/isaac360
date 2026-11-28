@@ -594,7 +594,7 @@ void find_first(X86* c, std::string pattern, bool wide) {
         std::error_code ec;
         for (std::filesystem::directory_iterator it(std::filesystem::u8path(hostDir), ec), end; !ec && it != end;
              it.increment(ec)) {
-            std::string name = it->path().filename().u8string();
+            std::string name = recomp_guest_name(it->path().filename().u8string());
             if (!wild_match(mask.c_str(), name.c_str()) || !seen.insert(lower_name(name)).second) continue;
             FindEntry e;
             e.name = name;
@@ -605,14 +605,14 @@ void find_first(X86* c, std::string pattern, bool wide) {
 #else
         if (DIR* d = opendir(hostDir.c_str())) {
             while (dirent* de = readdir(d)) {
-                std::string name = de->d_name;
+                std::string hostName = de->d_name, name = recomp_guest_name(hostName);
                 if (name == "." || name == ".." || !wild_match(mask.c_str(), name.c_str()) ||
                     !seen.insert(lower_name(name)).second)
                     continue;
                 struct stat st;
                 FindEntry e;
                 e.name = name;
-                e.dir = stat((hostDir + "/" + name).c_str(), &st) == 0 && S_ISDIR(st.st_mode);
+                e.dir = stat((hostDir + "/" + hostName).c_str(), &st) == 0 && S_ISDIR(st.st_mode);
                 e.size = e.dir ? 0 : (uint64_t)st.st_size;
                 found.push_back(e);
             }
