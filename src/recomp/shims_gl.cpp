@@ -3,6 +3,7 @@
 // a thunk: implemented ones run the GL state machine here (drawn through the shared Vulkan renderer), the rest
 // stop with their name the first time the game calls them, so the set grows with what the game really uses.
 #include "runtime.h"
+#include "game_addrs.h"
 #include "gl_vk.h"
 #include "guest_lock.h"
 #include "vfile.h"
@@ -299,6 +300,10 @@ static void log_times() {
     t.work = w;
 }
 
+// the game's own load time totals (ms, by its timeGetTime), 0 where this build's are not known (game_addrs.h)
+static uint32_t anm2_total() { return game::kAnm2Total ? RD32(game::kAnm2Total) : 0; }
+static uint32_t spawn_total() { return game::kSpawnTotal ? RD32(game::kSpawnTotal) : 0; }
+
 // Each room the game enters (its log line, shims_crt.cpp) gets a line when the game leaves it: its first 30 frames
 // (the door's or load's cost) apart from the rest, whose times, slow frames and GPU work are a room's steady cost to
 // compare between builds. With ISAAC360_PROFILE the room's 60th steady frame gets a gpu trace (its draws one by one);
@@ -360,8 +365,8 @@ static void log_room() {
     hle_image_stats(&hits, &misses, &hitBytes, &cached);
     recomp_log("room %s: first %u frames %.0f ms (slowest %.1f; the game's ANM2 loading %u ms, entity spawns %u ms), "
                "%llu images decoded and %llu from the cache (%u MB held)%s", r.name.c_str(), r.entryFrames, r.entry,
-               r.entryMax, r.entryFrames == kRoomEntryFrames ? r.anm2 : RD32(0xbcb4ac) - r.anm2,
-               r.entryFrames == kRoomEntryFrames ? r.spawn : RD32(0xbcc4d4) - r.spawn,
+               r.entryMax, r.entryFrames == kRoomEntryFrames ? r.anm2 : anm2_total() - r.anm2,
+               r.entryFrames == kRoomEntryFrames ? r.spawn : spawn_total() - r.spawn,
                (unsigned long long)(misses - r.imageMisses), (unsigned long long)(hits - r.imageHits),
                (unsigned)(cached >> 20), steady);
     if (recomp_profile_by_room() && r.frames >= 240) recomp_profile_dump(log_line);
@@ -465,8 +470,8 @@ static void room_frame(double ms, double game, double present, double slept) {
         }
         r = RoomTimes();
         r.name = next;
-        r.anm2 = RD32(0xbcb4ac);
-        r.spawn = RD32(0xbcc4d4);
+        r.anm2 = anm2_total();
+        r.spawn = spawn_total();
         uint64_t hitBytes;
         size_t cached;
         hle_image_stats(&r.imageHits, &r.imageMisses, &hitBytes, &cached);
@@ -477,8 +482,8 @@ static void room_frame(double ms, double game, double present, double slept) {
         r.entry += ms;
         if (ms > r.entryMax) r.entryMax = ms;
         if (r.entryFrames == kRoomEntryFrames) {
-            r.anm2 = RD32(0xbcb4ac) - r.anm2;
-            r.spawn = RD32(0xbcc4d4) - r.spawn;
+            r.anm2 = anm2_total() - r.anm2;
+            r.spawn = spawn_total() - r.spawn;
             if (gl_vk_enabled()) gl_vk_work(&r.work);
             guest_heap_stats(&r.heap);
             r.enters = shims_main_lock_enters();
@@ -520,7 +525,7 @@ static void log_slow_frame(double game, double present) {
     // the game's own totals (ms, by its timeGetTime): ANM2 loading (added at 0x408b9a) and entity spawns (0x6bb683),
     // printed at its shutdown as "Total ANM2 loading time" and "Total entity spawn time"
     static uint32_t lastAnm2 = 0, lastSpawn = 0;
-    uint32_t anm2 = RD32(0xbcb4ac), spawn = RD32(0xbcc4d4);
+    uint32_t anm2 = anm2_total(), spawn = spawn_total();
     static double slowMs = getenv("ISAAC360_SLOW_MS") ? atof(getenv("ISAAC360_SLOW_MS")) : 50.0;
     if (profiling) recomp_profile_frame(game + present > slowMs && g_frames > 3);
     if (game + present > slowMs && g_frames > 3 && g_times.slowLogged < 12) {

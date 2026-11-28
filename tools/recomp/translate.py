@@ -48,7 +48,7 @@ SFO = os.environ.get('ISAAC360_SCALAR_FLOATS', '1') != '0'
 TRACE =set(int(x, 16) for x in os.environ.get('ISAAC360_TRACE_FUNCS', '').split(',') if x)
 
 # Instructions of isaac-ng.exe replaced by other C (the exe only, TAG ''): address -> code.
-PATCHES = {
+PATCHES_V175 = {
     # Mounting an archive (F_950420) reads every entry whole to check its stored checksum (a rotate-right-and-add
     # over its 32-bit words) before taking it into the hash table: on the console's USB drive that is all 780 MB
     # of the archives, 80 s, before the first screen. The entry's own checksum stands in for the computed one, so
@@ -65,7 +65,7 @@ PATCHES = {
 # room loads (src/recomp/hle_png.cpp), and its zlib inflate was a fifth of a door's frame (src/recomp/hle_inflate.cpp).
 # The engine's reference counting locks a lock object ~2,300 times a frame, each a translated wrapper around a
 # critical section's import, and its add-ref and release bodies around them (src/recomp/shims_kernel32.cpp).
-HOST = {
+HOST_V175 = {
     0x9b2b60: 'hle_png_filter_row',           # png_read_filter_row (row_info edx; row, prev_row, filter on the stack)
     0x9af810: 'hle_inflate',                  # zlib 1.1's inflate (strm ecx, the flush folded in), libpng's only
     0x9af540: 'hle_inflate_end',              # its inflateEnd (strm ecx): the host's state goes, the game's end runs
@@ -89,6 +89,37 @@ HOST = {
     0x988670: 'hle_archive_read',             # the stream's Read (this ecx, dst, size, count; ret 12)
     # ISAAC360_TRACE_LOOKS (src/recomp/shims_looks.cpp): logs, then lets the game's code run
     0x710f70: 'hle_trace_costume',            # the player's AddCostume (this ecx, item config, a flag; ret 8)
+}
+
+# Repentance+ v1.9.7.17 (game/isaac-ng.exe): the v1.7.5 tables above, as each entry is found in the new program
+# (tools/recomp/port_addresses.py) and checked against the game's own code.
+PATCHES = {
+    # the archive mount's checksum loop (F_a17c.., "Failed to load file %x%x from '%s', checksum is invalid"): as
+    # PATCHES_V175's 0x950730, the entry's own checksum stands in for the computed one
+    0xa17d00: 'esi=RD32((uint32_t)(RD32((uint32_t)(ebp+0xfffff1c8u))+0x14u));goto L_a17d8b;',
+}
+# HOST_V175's entries at their Repentance+ addresses (game_addrs.h has the runtime's own): each function compared with
+# v1.7.5's (the same code but for register choices and its callees' addresses; the Mutex's ready flag is now bit 0)
+HOST = {
+    0xab2d80: 'hle_png_filter_row',
+    0xaaf9d0: 'hle_inflate',
+    0xaaf700: 'hle_inflate_end',
+    0xaa7fb0: 'hle_vorbis_get_samples',
+    0xaa1590: 'hle_vorbis_set_file_offset',
+    0xaa50a0: 'hle_vorbis_pump_first_frame',
+    0xaa7340: 'hle_vorbis_deinit',
+    0xa157f0: 'hle_lockobj_lock',             # KAGE::Mutex (vtable 0xb81c0c) lock and unlock
+    0xa159a0: 'hle_lockobj_unlock',
+    0x40c690: 'hle_refcount_add',
+    0x40c630: 'hle_refcount_release',
+    0x40c6b0: 'hle_refcount_use',
+    0xa12240: 'hle_refcount_peek',
+    0xaa93e0: 'hle_isaac_seed',
+    0xaa94a0: 'hle_isaac_round',
+    0xa89d70: 'hle_isaac_xor',
+    0xa85710: 'hle_tinfl',
+    0xa69510: 'hle_archive_read',
+    0x75d1d0: 'hle_trace_costume',
 }
 
 M = ix.Mnemonic
@@ -1226,6 +1257,12 @@ class Fn:
             return
         if mn in (M.BT, M.BTS, M.BTR, M.BTC):
             n = self.size_of(ins)
+            if n == 2 and ins.op0_kind == OK.REGISTER:
+                # a 16-bit register's bit (bts ax,cx in Repentance+): the offset taken modulo 16
+                bitx = self.get(ins, 1, 2) if ins.op1_kind == OK.REGISTER else '0x%xu' % (ins.immediate(1) & 0xff)
+                op = {M.BT: '', M.BTS: self.put(ins, 0, 2, 'v_|m_'), M.BTR: self.put(ins, 0, 2, 'v_&~m_'), M.BTC: self.put(ins, 0, 2, 'v_^m_')}[mn]
+                E('{uint32_t v_=%s,m_=1u<<((%s)&15);cf=(v_&m_)!=0;%s}' % (self.get(ins, 0, 2), bitx, op))
+                return
             if n != 4: raise Unhandled('bt16')
             if ins.op0_kind == OK.MEMORY and ins.op1_kind == OK.REGISTER:
                 # bit string addressing
@@ -1260,6 +1297,12 @@ class Fn:
             # flags as CMP eax, dest; then the exchange
             E('{uint32_t a_=eax,b_=%s,r_=a_-b_;cf=a_<b_;of=(((a_^b_)&(a_^r_))>>31)&1;af=((a_^b_^r_)>>4)&1;zf=r_==0;sf=r_>>31;pf=X86_PARITY(r_);'
               'if(zf){%s}else eax=b_;}' % (self.get(ins, 0, 4), self.put(ins, 0, 4, self.get(ins, 1, 4))))
+            return
+        if mn == M.CMPXCHG8B:
+            # edx:eax against the quadword: equal, ecx:ebx stored and ZF set; else the quadword to edx:eax, ZF clear
+            a = self.ea(ins)
+            E('{uint32_t p_=%s,lo_=RD32(p_),hi_=RD32(p_+4u);zf=lo_==eax&&hi_==edx;'
+              'if(zf){WR32(p_,ebx);WR32(p_+4u,ecx);}else{eax=lo_;edx=hi_;}}' % a)
             return
         if mn == M.CPUID:
             E('SPILL();x86_cpuid(c);FILL();')

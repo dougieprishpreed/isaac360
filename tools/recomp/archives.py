@@ -222,14 +222,25 @@ def read_table(stream, path):
 
 
 def file_names(game=GAME):
-    """{(hash1, hash2): name} from the game's own file list."""
+    """{(hash1, hash2): name} from the game's own file list. Repentance+'s list leaves out repentance.a's names
+    (resources-dlc3/..., which v1.7.5's list had): each resources/ name stands for its resources-dlc3/ twin too, which
+    names all but 21 of that archive's 4,180 entries."""
     names = {}
     listing = os.path.join(game, 'tools', 'ResourceExtractor', 'filelist.txt')
     with open(listing, encoding='utf-8-sig') as f:
         for line in f:
-            name = line.strip()
-            if name:
-                names[filename_hash(name)] = name.replace('\\', '/')
+            name = line.strip().replace('\\', '/')
+            if not name:
+                continue
+            # a shader's other stage (the list names most fragment shaders, few vertex shaders)
+            stages = [name]
+            if name.endswith(('.fs', '.vs')):
+                stages.append(name[:-3] + ('.vs' if name.endswith('.fs') else '.fs'))
+            for n in stages:
+                names.setdefault(filename_hash(n), n)
+                if n.startswith('resources/'):
+                    twin = 'resources-dlc3/' + n[len('resources/'):]
+                    names.setdefault(filename_hash(twin), twin)
     return names
 
 

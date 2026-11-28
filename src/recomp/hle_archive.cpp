@@ -16,6 +16,7 @@
 // word, set to 0) starts a stream again, the host marks the word after each call, and the stream's end (tinfl's DONE)
 // frees the host's state. ISAAC360_ARCHIVE_CHECK=1 runs the game's code as well (its results kept) and logs any
 // difference from the host's.
+#include "game_addrs.h"
 #include "runtime.h"
 #include <stdlib.h>
 #include <string.h>
@@ -188,7 +189,7 @@ extern "C" int hle_isaac_seed(X86* c) {
         uint32_t regs[8];
         memcpy(regs, c->r, sizeof(regs));
         uint32_t args[1] = {s};
-        guest_call(c, 0x9aee80, 1, args, true);
+        guest_call(c, game::kIsaacSeed, 1, args, true);
         memcpy(c->r, regs, sizeof(regs));
         t_inCheck = false;
         if (!same_ctx(ctx, g)) differ("an ISAAC seeding", ctx);
@@ -213,7 +214,7 @@ extern "C" int hle_isaac_round(X86* c) {
         t_inCheck = true;
         uint32_t regs[8];
         memcpy(regs, c->r, sizeof(regs));
-        guest_call(c, 0x9aef40, 0, 0, true);
+        guest_call(c, game::kIsaacRound, 0, 0, true);
         memcpy(c->r, regs, sizeof(regs));
         t_inCheck = false;
         if (!same_ctx(ctx, g)) differ("an ISAAC round", ctx);
@@ -259,7 +260,7 @@ extern "C" int hle_isaac_xor(X86* c) {
         uint32_t regs[8];
         memcpy(regs, c->r, sizeof(regs));
         uint32_t args[2] = {buf, len};
-        guest_call(c, 0x99ce00, 2, args, true);
+        guest_call(c, game::kIsaacXor, 2, args, true);
         memcpy(c->r, regs, sizeof(regs));
         t_inCheck = false;
         if (len && memcmp(&copy[0], g_mem + buf, len)) differ("a keystream XOR", buf);
@@ -325,7 +326,7 @@ extern "C" int hle_tinfl(X86* c) {
         uint32_t regs[8];
         memcpy(regs, c->r, sizeof(regs));
         uint32_t args[5] = {inSizeAt, outStart, outNext, outSizeAt, flags};
-        int theirs = (int)guest_call(c, 0x99b210, 5, args, false);
+        int theirs = (int)guest_call(c, game::kTinfl, 5, args, false);
         memcpy(c->r, regs, sizeof(regs));
         t_inCheck = false;
         if (mine != theirs || inBytes != RD32(inSizeAt) || outBytes != RD32(outSizeAt) ||
@@ -379,7 +380,7 @@ extern "C" int hle_archive_read(X86* c) {
         uint32_t regs[8];
         memcpy(regs, c->r, sizeof(regs));
         c->r[1] = self;
-        guest_call(c, 0x988190, 0, 0, true);            // the next block (the file's read, the inflate or the XOR)
+        guest_call(c, game::kArchiveNextBlock, 0, 0, true);            // the next block (the file's read, the inflate or the XOR)
         memcpy(c->r, regs, sizeof(regs));
         if (RD8(self + AT_END)) break;
         len = RD32(self + WIN_LEN);
@@ -408,10 +409,9 @@ extern "C" int hle_archive_read(X86* c) {
 // at the target's block (the file seeked as F_988090 seeks it, the keystream stepped, the position that block's
 // start, the window empty) and the game's Seek goes the last bytes. Other versions (deflated, LZW: no such state)
 // go to the game's Seek alone. ISAAC360_ARCHIVE_SEEK=0 turns it off.
-extern "C" void F_9885b0(X86* c);
 
 namespace {
-const uint32_t kStreamVtable = 0xb44954, kSeekSlot = kStreamVtable + 3 * 4, kGameSeek = 0x9885b0;
+const uint32_t kStreamVtable = game::kStreamVtable, kSeekSlot = kStreamVtable + 3 * 4, kGameSeek = game::kArchiveSeek;
 enum { ST_FILE = 0x8, ST_ENTRY = 0xc, ST_SEED = 0xc24 };
 uint64_t g_seekJumps = 0, g_seekBytes = 0;
 
@@ -458,12 +458,13 @@ void archive_seek(X86* c) {
                            (unsigned long long)g_seekJumps, (unsigned long long)(g_seekBytes >> 20), target, size);
         }
     }
-    F_9885b0(c);                                    // the rest of the way (at most a block), and the return
+    x86_call(c, kGameSeek);                         // the rest of the way (at most a block), and the return
 }
 }  // namespace
 
 // after the image loads: the stream's vtable slot to the seek above
 void hle_archive_install() {
+    if (!kStreamVtable || !kGameSeek) return;       // not found in this build yet (game_addrs.h)
     if (RD32(kSeekSlot) != kGameSeek) {
         recomp_log("archive seek: the stream's vtable slot holds %08x, not its Seek: left alone", RD32(kSeekSlot));
         return;

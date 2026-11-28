@@ -78,8 +78,10 @@ def push_block(uniforms):
         meta.append((n, off, size, t))
         members.append('layout(offset = %d) %s %s;' % (off, t, n))
         off += size
-    if off > 128:
-        raise SystemExit('push constants over 128 bytes: %r' % meta)
+    # vulkan4xenon takes 256 with isaac360's patch (tools/xsdk/patches/vulkan4xenon-push-constants.patch; upstream
+    # 128): Repentance+'s champion colour shader needs 144
+    if off > 256:
+        raise SystemExit('push constants over 256 bytes: %r' % meta)
     glsl = 'layout(push_constant) uniform BoiPush { %s } boi_pc;\n' % ' '.join(members)
     glsl += ''.join('#define %s boi_pc.%s\n' % (n, n) for _, n in uniforms)
     return glsl, meta
@@ -291,12 +293,12 @@ void main() { color = vec4(texture(image, v_uv).rgb, 1.0); }
 # under control flow; computed always and selected (the skipped terms are finite for a zero direction).
 REWRITES = [
     ('resources/shaders/water_v2', re.compile(
-        r'if\s*\(\s*CurrentDir0\.x\s*!=\s*0\.0\s*\|\|\s*CurrentDir0\.y\s*!=\s*0\.0\s*\)\s*\{\s*'
+        r'if\s*\(\s*(CurrentDir0?)\.x\s*!=\s*0\.0\s*\|\|\s*\1\.y\s*!=\s*0\.0\s*\)\s*\{\s*'
         r'gradientSum\s*\*=\s*0\.5\s*;\s*'
         r'gradientSum\s*-=\s*(waterGradientLinear\([^;]*\))\s*;\s*'
         r'gradientSum\s*-=\s*(waterGradientLinear\([^;]*\))\s*;\s*\}'),
-     r'{ vec2 boi_current = gradientSum * 0.5 - \1 - \2; '
-     r'gradientSum = mix(gradientSum, boi_current, bvec2(CurrentDir0.x != 0.0 || CurrentDir0.y != 0.0)); }'),
+     r'{ vec2 boi_current = gradientSum * 0.5 - \2 - \3; '
+     r'gradientSum = mix(gradientSum, boi_current, bvec2(\1.x != 0.0 || \1.y != 0.0)); }'),
     # Each wave term's sine, cosine and power once, not once per component: the same operations in the same order on
     # each value (xost does not share them: 358 lines for the six terms, the floors' water in Downpour and Dross)
     ('resources/shaders/water_v2', re.compile(
@@ -489,8 +491,22 @@ def rewrite(label, stage_src):
     return stage_src
 
 
+VERSION_IF = re.compile(r'^[ \t]*#[ \t]*if[ \t]+__VERSION__[ \t]*>=[ \t]*\d+[^\n]*\n(.*?)^[ \t]*#[ \t]*else[^\n]*\n(.*?)^[ \t]*#[ \t]*endif[^\n]*$',
+                        re.M | re.S)
+
+
+def legacy_branch(src):
+    """Repentance+'s shaders declare their inputs twice: in/out under #if __VERSION__ >= 140, attribute/varying (and
+    fragColor as gl_FragColor) under #else. The conversion works on the older form, the one every v1.7.5 shader had:
+    each such block becomes its #else part, the other lines left blank (the line numbers stay)."""
+    def keep_else(m):
+        return '\n' * (m.group(1).count('\n') + 2) + m.group(2)
+    return VERSION_IF.sub(keep_else, src)
+
+
 def program(vs, fs, label=''):
     """Both stages' GLSL 450 and the layer's metadata for one linked program."""
+    vs, fs = legacy_branch(vs), legacy_branch(fs)
     fs = rewrite(label, fs)
     vd, fd = decls(vs), decls(fs)
     uniforms, samplers, seen = [], [], set()
@@ -540,10 +556,11 @@ def compile_spv(glsl, stage, tmp, tag):
 
 
 # The programs built into isaac-ng.exe (its plain sprite and copy shaders): their sources are NUL-terminated strings
-# in its data, at these addresses in v1.7.5, each pair a vertex and a fragment shader, labelled in the order the game
-# compiles them (the labels show in the console's effect and gpu trace lines)
-BUILTIN = [('dump/000+001', 0xb3d8a0, 0xb3d670), ('dump/002+003', 0xb3d730, 0xb3da08),
-           ('dump/004+005', 0xb3d730, 0xb3dba0)]
+# in its data, at these addresses in Repentance+ v1.9.7.17, each pair a vertex and a fragment shader (the labels show in
+# the console's effect and gpu trace lines): v1.7.5's three (a colour-only one, a textured one and a palette one) and
+# one more.
+BUILTIN = [('dump/000+001', 0xb81f10, 0xb820f8), ('dump/002+003', 0xb81fe0, 0xb82320),
+           ('dump/004+005', 0xb81fe0, 0xb82198), ('dump/006+007', 0xb6d360, 0xb6d1f0)]
 
 
 def builtin_sources():
@@ -556,8 +573,8 @@ def builtin_sources():
         start = va - base
         end = data.index(b'\0', start)
         s = data[start:end]
-        if b'void main' not in s:
-            raise SystemExit('no shader at %x in game/isaac-ng.exe: not the Repentance v1.7.5 program?' % va)
+        if not re.search(rb'void\s+main', s):
+            raise SystemExit('no shader at %x in game/isaac-ng.exe: not the Repentance+ v1.9.7.17 program?' % va)
         return s
 
     return [(label, string_at(vs), string_at(fs)) for label, vs, fs in BUILTIN]
@@ -570,6 +587,16 @@ def sources():
     for n in sorted(files):
         if n.endswith('.vs') and n[:-3] + '.fs' in files:
             progs.append((n[:-3], files[n], files[n[:-3] + '.fs']))
+    # Repentance+ links most fragment shaders with shared vertex shaders (resources/shaders/basic_*.vs) instead of
+    # an x.vs of their own: each such fragment shader with every shared one whose varyings it can take
+    def varyings(src):
+        return {nm for k, _, nm, _, _ in decls(legacy_branch(src.decode('latin1'))) if k == 'varying'}
+    shared = [n for n in sorted(files) if os.path.basename(n).startswith('basic_') and n.endswith('.vs')]
+    for n in sorted(files):
+        if n.endswith('.fs') and n[:-3] + '.vs' not in files:
+            for v in shared:
+                if varyings(files[n]) <= varyings(files[v]):
+                    progs.append((n[:-3], files[v], files[n]))
     progs.extend(builtin_sources())
     unique, seen = [], set()
     for label, vs, fs in progs:
@@ -606,7 +633,10 @@ def main():
                 plain = PLAIN_VARIANTS[label]
                 vglsl, fglsl, pmeta = program(vs.decode('latin-1'), plain, label + '#plain')
                 if pmeta != meta:
-                    raise SystemExit('the plain variant of %s lays out its inputs differently' % label)
+                    # Repentance+'s coloroffset takes its effects as uniforms of its fragment stage, linked with a
+                    # shared vertex stage: no per-vertex effects to test, so no twin (gl_vk.cpp draws it as it is)
+                    print('%-40s no plain twin: its effects are not per-vertex attributes here' % label)
+                    continue
                 pv = blob(compile_spv(vglsl, 'vert', tmp, tag + 'p'), 'vert')
                 pf = blob(compile_spv(fglsl, 'frag', tmp, tag + 'p'), 'frag')
                 rows.append((label + '#plain', fnv64(vs), fnv64(plain.encode()), pv, pf, pmeta))

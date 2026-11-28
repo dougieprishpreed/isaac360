@@ -3,6 +3,7 @@
 // through SSE: translated, over the 5-14 MB of pixels a room loads, a large part of the console's pause at a door.
 // The filters are the PNG specification's, so the bytes are the same; ISAAC360_PNG_CHECK=1 runs the game's as well
 // and logs any row that differs.
+#include "game_addrs.h"
 #include "runtime.h"
 #include <stdlib.h>
 #include <string.h>
@@ -66,7 +67,7 @@ extern "C" int hle_png_filter_row(X86* c) {
         memcpy(regs, c->r, sizeof(regs));
         uint32_t args[3] = {row, prevRow, filter};
         g_inCheck = true;
-        guest_call(c, 0x9b2b60, 3, args, false);
+        guest_call(c, game::kPngFilterRow, 3, args, false);
         g_inCheck = false;
         memcpy(c->r, regs, sizeof(regs));
         ++g_rows;

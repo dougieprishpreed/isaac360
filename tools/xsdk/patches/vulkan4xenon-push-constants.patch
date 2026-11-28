@@ -1,0 +1,26 @@
+diff --git a/src/objects.h b/src/objects.h
+index 3c21396..9ae85a2 100644
+--- a/src/objects.h
++++ b/src/objects.h
+@@ -36,7 +36,7 @@ enum {
+ 	V4X_MAX_DESCRIPTOR_SETS = 4,
+ 	// Binding numbers run from 0 to this less one.
+ 	V4X_MAX_DESCRIPTOR_BINDINGS = 32,
+-	V4X_MAX_PUSH_CONSTANT_BYTES = 128,
++	V4X_MAX_PUSH_CONSTANT_BYTES = 256,
+ 	// Float constant registers a stage has, each four floats (xsdk:include/xsdk/gpu.h).
+ 	V4X_FLOAT_CONSTANTS = 256,
+ 	// The GPU loads constants in whole groups of 4 from a multiple of 4 (xsdk:include/xsdk/gpu.h); xost gives each
+diff --git a/src/pipeline.c b/src/pipeline.c
+index ebc1345..47e1533 100644
+--- a/src/pipeline.c
++++ b/src/pipeline.c
+@@ -36,7 +36,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreatePipelineLayout(VkDevice device, const VkP
+ 	for (uint32_t i = 0; i < pCreateInfo->pushConstantRangeCount; i++) {
+ 		const VkPushConstantRange *const range = &pCreateInfo->pPushConstantRanges[i];
+ 		if (range->offset + range->size > V4X_MAX_PUSH_CONSTANT_BYTES)
+-			return v4x_host_unsupported("push constants past 128 bytes");
++			return v4x_host_unsupported("push constants past 256 bytes");
+ 	}
+ 	PipelineLayout *const layout = v4x_host_alloc(
+ 		v4x_host_device_allocator(device, pAllocator), sizeof *layout, VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);

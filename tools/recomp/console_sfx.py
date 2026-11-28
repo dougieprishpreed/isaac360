@@ -226,7 +226,15 @@ def rewrite(src, dst, table, store):
         h1, h2, off, size, check = e
         name = table.get((h1, h2), '')
         enc = None
-        if name.lower().endswith('.png'):
+        kind = os.path.splitext(name.lower())[1]
+        if not name:
+            # an entry the game's file list doesn't name: by its contents
+            stream = io.BytesIO(data)
+            stream.seek(off)
+            head = ar.decode_entry(stream, version, size, h2)[:12]
+            kind = '.png' if head[:8] == PNG_SIG else '.wav' if head[:4] == b'RIFF' and head[8:12] == b'WAVE' else ''
+            name = '%08x-%08x%s' % (h1, h2, kind)
+        if kind == '.png':
             stream = io.BytesIO(data)
             stream.seek(off)
             png = ar.decode_entry(stream, version, size, h2)
@@ -238,7 +246,7 @@ def rewrite(src, dst, table, store):
                 e[3] = len(new)
                 e[4] = ar.checksum(new)
                 print('  %s: %d-bit samples widened to 8 (%d -> %d bytes)' % (name, png[24], len(png), len(new)))
-        elif name.lower().endswith('.wav'):
+        elif kind == '.wav':
             stream = io.BytesIO(data)
             stream.seek(off)
             wav = ar.decode_entry(stream, version, size, h2)

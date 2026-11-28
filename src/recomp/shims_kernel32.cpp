@@ -1,6 +1,7 @@
 // KERNEL32/WINMM/ADVAPI32/ole32/SHELL32/dbghelp imports (stdcall). Handles and synchronisation objects are host
 // objects keyed by guest values.
 #include "runtime.h"
+#include "game_addrs.h"
 #include "guest_lock.h"
 #include <algorithm>
 #include <ctype.h>
@@ -557,9 +558,16 @@ void fill_find_data(uint32_t fd, const FindEntry& e) {
     for (size_t i = 0; i < e.name.size() && i < 259; ++i) WR16(fd + 44 + 2 * (uint32_t)i, (uint8_t)e.name[i]);
 }
 
-void k_FindFirstFileW(X86* c) {
-    std::u16string w = guest_wstr(ARG(c, 0));
-    std::string pattern(w.begin(), w.end());
+// WIN32_FIND_DATAA (Repentance+ lists its mods folder with FindFirstFileA): the name in bytes at +44
+void fill_find_data_a(uint32_t fd, const FindEntry& e) {
+    memset(g_mem + fd, 0, 320);
+    WR32(fd, e.dir ? 0x10 : 0x80);
+    WR32(fd + 28, (uint32_t)(e.size >> 32));
+    WR32(fd + 32, (uint32_t)e.size);
+    guest_write_str(fd + 44, e.name, 260);
+}
+
+void find_first(X86* c, std::string pattern, bool wide) {
     if (getenv("ISAAC360_TRACE_FILES")) recomp_log("FindFirstFileW %s", pattern.c_str());
     for (size_t i = 0; i < pattern.size(); ++i)
         if (pattern[i] == '\\') pattern[i] = '/';
@@ -618,9 +626,25 @@ void k_FindFirstFileW(X86* c) {
         return;
     }
     uint32_t h = g_nextFind++;
-    fill_find_data(ARG(c, 1), found[0]);
+    if (wide) fill_find_data(ARG(c, 1), found[0]);
+    else fill_find_data_a(ARG(c, 1), found[0]);
     g_finds[h] = std::make_pair(found, (size_t)1);
     RET_STD(c, 2, h);
+}
+void k_FindFirstFileW(X86* c) {
+    std::u16string w = guest_wstr(ARG(c, 0));
+    find_first(c, std::string(w.begin(), w.end()), true);
+}
+void k_FindFirstFileA(X86* c) { find_first(c, guest_str(ARG(c, 0)), false); }
+void k_FindNextFileA(X86* c) {
+    std::map<uint32_t, std::pair<std::vector<FindEntry>, size_t> >::iterator it = g_finds.find(ARG(c, 0));
+    if (it == g_finds.end() || it->second.second >= it->second.first.size()) {
+        g_lastError = 18;                                   // ERROR_NO_MORE_FILES
+        RET_STD(c, 2, 0);
+        return;
+    }
+    fill_find_data_a(ARG(c, 1), it->second.first[it->second.second++]);
+    RET_STD(c, 2, 1);
 }
 void k_FindNextFileW(X86* c) {
     std::map<uint32_t, std::pair<std::vector<FindEntry>, size_t> >::iterator it = g_finds.find(ARG(c, 0));
@@ -697,6 +721,7 @@ const ShimDef kKernel[] = {
     {"kernel32.dll!LockFileEx", k_LockFileEx},
     {"kernel32.dll!UnlockFileEx", k_UnlockFileEx},
     {"kernel32.dll!FindFirstFileW", k_FindFirstFileW},
+    {"kernel32.dll!FindFirstFileA", k_FindFirstFileA}, {"kernel32.dll!FindNextFileA", k_FindNextFileA},
     {"kernel32.dll!FindNextFileW", k_FindNextFileW},
     {"kernel32.dll!FindClose", k_FindClose},
     {"kernel32.dll!GlobalAlloc", k_GlobalAlloc},
@@ -820,7 +845,7 @@ void shims_bench_locks(X86* c, uint32_t scratch) {
     // 0xb3d508 whose +0Ch locks and +10h unlocks, a ready flag, the section)
     const uint32_t cs = scratch, ref = scratch + 0x40, lockObj = ref + 8;
     WR16(ref + 4, 1);
-    WR32(lockObj, 0x00b3d508u);
+    WR32(lockObj, game::kMutexVtable);
     WR8(lockObj + 4, 1);
     WR32(lockObj + 8, cs);
     const uint32_t enter = shim_proc_address("kernel32.dll", "EnterCriticalSection");
@@ -848,7 +873,7 @@ void shims_bench_locks(X86* c, uint32_t scratch) {
     t0 = Clock::now();
     for (uint32_t i = 0; i < n; ++i) {
         c->r[1] = ref;
-        guest_call(c, 0x407770, 0, 0, true);
+        guest_call(c, game::kRefcountAdd, 0, 0, true);
     }
     double addRef = std::chrono::duration<double, std::nano>(Clock::now() - t0).count() / n;
     c->r[4] = esp;
@@ -865,7 +890,7 @@ void shims_bench_locks(X86* c, uint32_t scratch) {
 // timeout; the section already held by this thread, where the game's code waits forever) runs the game's code.
 extern "C" int hle_lockobj_lock(X86* c) {
     uint32_t self = c->r[1], esp = c->r[4];
-    if (!RD8(self + 4) || RD32(esp + 4) != 0xffffffffu) return 0;
+    if (!(RD8(self + 4) & 1) || RD32(esp + 4) != 0xffffffffu) return 0;
     uint32_t cs = RD32(self + 8);
     CsSlot* slot = cs_find(cs, guest_thread(c)->id == g_lockMainId);
     cs_enter(c, cs, slot);
@@ -881,7 +906,7 @@ extern "C" int hle_lockobj_lock(X86* c) {
 
 extern "C" int hle_lockobj_unlock(X86* c) {
     uint32_t self = c->r[1];
-    if (!RD8(self + 4)) return 0;
+    if (!(RD8(self + 4) & 1)) return 0;
     uint32_t cs = RD32(self + 8);
     WR8(cs + 0x18, 0);
     uint32_t me = guest_thread(c)->id;
@@ -898,7 +923,7 @@ extern "C" int hle_lockobj_unlock(X86* c) {
 // A release that would reach 0 (the object's teardown follows) and anything the lock object's fast path would not
 // take run the game's code.
 static CsSlot* refcount_lock(X86* c, uint32_t lockObj, uint32_t* cs) {
-    if (RD32(lockObj) != 0x00b3d508u || !RD8(lockObj + 4)) return 0;
+    if (RD32(lockObj) != game::kMutexVtable || !(RD8(lockObj + 4) & 1)) return 0;
     *cs = RD32(lockObj + 8);
     CsSlot* slot = cs_find(*cs, guest_thread(c)->id == g_lockMainId);
     cs_enter(c, *cs, slot);

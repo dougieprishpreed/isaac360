@@ -233,6 +233,17 @@ void shims_user32_register() {
     shim_register_dynamic("dwmapi.dll", "DwmIsCompositionEnabled", dwm_IsCompositionEnabled);
 }
 
+// CreateWindowExW (shims_rplus.cpp): the client size as CreateWindowExA takes it, and the window procedure
+void shims_user32_set_client(int w, int h, uint32_t wndProc) {
+    static const char* fixed = getenv("ISAAC360_WINDOW");
+    if (fixed && sscanf(fixed, "%dx%d", &g_clientW, &g_clientH) == 2) {
+    } else if (w > 1 && h > 1) {
+        g_clientW = w;
+        g_clientH = h;
+    }
+    if (wndProc) g_wndProc = wndProc;
+}
+
 // the game's window client size (gl_vk.cpp sizes the default framebuffer by it)
 void gl_window_size(int& w, int& h) {
     w = g_clientW;

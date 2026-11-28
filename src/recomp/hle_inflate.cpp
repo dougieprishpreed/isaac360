@@ -5,6 +5,7 @@
 // same. A stream starts again where its totals are both 0 (inflateInit and inflateReset zero them); inflateEnd
 // (0x9af540) lets the host's state go before the game's own end runs. ISAAC360_INFLATE_CHECK=1 runs the game's inflate
 // and feeds the host's the same input beside it, logging output that differs.
+#include "game_addrs.h"
 #include "runtime.h"
 #include <stdlib.h>
 #include <string.h>
@@ -98,7 +99,7 @@ void check(X86* c, uint32_t strm) {
     uint32_t regs[8];
     memcpy(regs, c->r, sizeof(regs));
     g_inCheck = true;
-    uint32_t ret = guest_call(c, 0x9af810, 0, 0, false);
+    uint32_t ret = guest_call(c, game::kInflate, 0, 0, false);
     g_inCheck = false;
     memcpy(c->r, regs, sizeof(regs));
     c->r[0] = ret;

@@ -226,7 +226,7 @@ void guest_backtrace(X86* c) {
     int shown = 0;
     for (uint32_t a = sp; a < sp + 0x4000 && a + 4 <= g_mem_size && shown < 24; a += 4) {
         uint32_t v = RD32(a);
-        if (v >= kGuestImageBase + 0x1000 && v < kGuestImageBase + 0x5e8000) {
+        if (v >= kGuestImageBase + 0x1000 && v < kGuestImageBase + 0x718000) {
             recomp_log("  [esp+%04x] %08x", a - sp, v);
             ++shown;
         }
@@ -643,6 +643,157 @@ uint32_t guest_calloc(uint32_t n, uint32_t size) {
     return p;
 }
 
+// ------------------------------------------------------------------------------------------------ virtual memory
+// VirtualAlloc's reservations for the game's own allocator (Repentance+ links mimalloc, which takes 4 MB segments
+// from the OS, aligned to 4 MB, and commits and decommits within them). They come from the top of guest memory down,
+// the heap growing up to the lowest of them (g_heapEnd). Commits are tracked per 64 KB page: a page committed is zero
+// as on Windows (the host commits it fresh, or it is cleared), a page decommitted whole goes back to the host
+// (RecompConfig::decommitMemory), and decommitted bytes in a page still committed are cleared, so a later commit
+// finds them zero too. A release decommits the whole reservation.
+namespace {
+std::map<uint32_t, uint32_t> g_vmRegions;                    // reservation base -> size (64 KB multiples)
+std::vector<uint8_t> g_vmCommitted;                          // per 64 KB page of guest memory
+uint32_t g_vmCommittedBytes = 0;
+
+void vm_raise_heap_end() {
+    g_heapEnd = g_vmRegions.empty() ? g_mem_size : g_vmRegions.begin()->first;
+}
+
+void vm_commit_pages(uint32_t first, uint32_t last) {
+    for (uint32_t p = first; p < last;) {
+        if (g_vmCommitted[p]) {
+            ++p;
+            continue;
+        }
+        uint32_t q = p;
+        while (q < last && !g_vmCommitted[q]) g_vmCommitted[q++] = 1;
+        if (!g_cfg.commitMemory || !g_cfg.commitMemory(g_mem, p * kPage, (q - p) * kPage))
+            memset(g_mem + p * kPage, 0, (size_t)(q - p) * kPage);
+        g_vmCommittedBytes += (q - p) * kPage;
+        p = q;
+    }
+}
+
+void vm_decommit(uint32_t a, uint32_t size) {
+    uint32_t end = a + size, first = (a + kPage - 1) / kPage, last = end / kPage;
+    for (uint32_t p = a / kPage; p * kPage < end; ++p) {   // bytes of pages that stay: cleared
+        if (!g_vmCommitted[p] || (p >= first && p < last)) continue;
+        uint32_t s = std::max(a, p * kPage), e = std::min(end, (p + 1) * kPage);
+        memset(g_mem + s, 0, e - s);
+    }
+    for (uint32_t p = first; p < last;) {
+        if (!g_vmCommitted[p]) {
+            ++p;
+            continue;
+        }
+        uint32_t q = p;
+        while (q < last && g_vmCommitted[q]) g_vmCommitted[q++] = 0;
+        if (!g_cfg.decommitMemory || !g_cfg.decommitMemory(g_mem, p * kPage, (q - p) * kPage))
+            memset(g_mem + p * kPage, 0, (size_t)(q - p) * kPage);
+        g_vmCommittedBytes -= (q - p) * kPage;
+        p = q;
+    }
+}
+
+// the reservation holding a, or end
+std::map<uint32_t, uint32_t>::iterator vm_region_of(uint32_t a) {
+    std::map<uint32_t, uint32_t>::iterator it = g_vmRegions.upper_bound(a);
+    if (it == g_vmRegions.begin()) return g_vmRegions.end();
+    --it;
+    return a < it->first + it->second ? it : g_vmRegions.end();
+}
+}  // namespace
+
+uint32_t guest_vm_reserve(uint32_t want, uint32_t size) {
+    std::lock_guard<std::mutex> g(g_heapLock);
+    if (g_vmCommitted.empty()) g_vmCommitted.assign(g_mem_size / kPage + 1, 0);
+    size = (size + kPage - 1) & ~(kPage - 1);
+    if (!size) return 0;
+    uint32_t at = 0;
+    if (want) {
+        want &= ~(kPage - 1);
+        if (want < g_heapTop || want + size > g_mem_size || want + size < want) return 0;
+        std::map<uint32_t, uint32_t>::iterator next = g_vmRegions.lower_bound(want);
+        if (next != g_vmRegions.end() && next->first < want + size) return 0;
+        if (next != g_vmRegions.begin()) {
+            std::map<uint32_t, uint32_t>::iterator prev = next;
+            --prev;
+            if (prev->first + prev->second > want) return 0;
+        }
+        at = want;
+    } else {
+        // the highest gap that fits, aligned to 4 MB for 4 MB or more (mimalloc's segments), else to 64 KB
+        uint32_t align = size >= (4u << 20) ? (4u << 20) : kPage;
+        uint32_t top = g_mem_size;
+        for (std::map<uint32_t, uint32_t>::reverse_iterator it = g_vmRegions.rbegin();; ++it) {
+            uint32_t bottom = it == g_vmRegions.rend() ? g_heapTop : it->first + it->second;
+            if (top >= size) {
+                uint32_t cand = (top - size) & ~(align - 1);
+                if (cand >= bottom && cand + size <= top) {
+                    at = cand;
+                    break;
+                }
+            }
+            if (it == g_vmRegions.rend()) break;
+            top = it->first;
+        }
+        if (!at) return 0;
+    }
+    g_vmRegions[at] = size;
+    vm_raise_heap_end();
+    return at;
+}
+
+bool guest_vm_commit(uint32_t a, uint32_t size) {
+    std::lock_guard<std::mutex> g(g_heapLock);
+    std::map<uint32_t, uint32_t>::iterator r = vm_region_of(a);
+    if (r == g_vmRegions.end() || a + size > r->first + r->second) return false;
+    vm_commit_pages(a / kPage, (a + size + kPage - 1) / kPage);
+    return true;
+}
+
+bool guest_vm_decommit(uint32_t a, uint32_t size) {
+    std::lock_guard<std::mutex> g(g_heapLock);
+    std::map<uint32_t, uint32_t>::iterator r = vm_region_of(a);
+    if (r == g_vmRegions.end()) return false;
+    if (!size || a + size > r->first + r->second) size = r->first + r->second - a;
+    vm_decommit(a, size);
+    return true;
+}
+
+bool guest_vm_release(uint32_t a) {
+    std::lock_guard<std::mutex> g(g_heapLock);
+    std::map<uint32_t, uint32_t>::iterator r = g_vmRegions.find(a);
+    if (r == g_vmRegions.end()) return false;
+    vm_decommit(r->first, r->second);
+    g_vmRegions.erase(r);
+    vm_raise_heap_end();
+    return true;
+}
+
+// VirtualQuery's view of a: 0 free, 1 reserved, 2 committed; base and size of the run of pages in that state
+int guest_vm_query(uint32_t a, uint32_t* allocBase, uint32_t* base, uint32_t* size) {
+    std::lock_guard<std::mutex> g(g_heapLock);
+    std::map<uint32_t, uint32_t>::iterator r = vm_region_of(a);
+    if (r == g_vmRegions.end()) {
+        *allocBase = 0;
+        *base = a & ~(kPage - 1);
+        *size = kPage;
+        return 0;
+    }
+    uint32_t p = a / kPage, end = (r->first + r->second) / kPage, q = p;
+    uint8_t state = g_vmCommitted[p];
+    while (q < end && g_vmCommitted[q] == state) ++q;
+    uint32_t s = p;
+    while (s > r->first / kPage && g_vmCommitted[s - 1] == state) --s;
+    *allocBase = r->first;
+    *base = s * kPage;
+    *size = (q - s) * kPage;
+    return state ? 2 : 1;
+}
+
+uint32_t guest_vm_committed_bytes() { return g_vmCommittedBytes; }
+
 // ------------------------------------------------------------------------------------------------ images
 namespace {
 struct Image {
@@ -657,6 +808,30 @@ std::vector<Image> g_images;
 
 uint32_t le32(const uint8_t* p) { return p[0] | (p[1] << 8) | (p[2] << 16) | ((uint32_t)p[3] << 24); }
 uint16_t le16(const uint8_t* p) { return (uint16_t)(p[0] | (p[1] << 8)); }
+
+// Repentance+ ships in Steam's DRM wrapper (SteamStub 3.1): the entry point is the stub's, in .bind, which checks
+// that Steam runs and jumps to the program's own entry. Its header is the 0xF0 bytes before the stub's entry, each
+// word XORed with the one before it (the first is the key); with the signature 0xC0DEC0DF, the program's entry is at
+// +0x20 and the flags at +0x3C (4: the code is not encrypted, as v1.9.7.17's). The run starts at the program's entry.
+void steamstub_entry(Image& im) {
+    uint32_t h = im.entry - 0xF0;
+    if (im.entry < im.base + 0x1000 || h < im.base) return;
+    uint32_t words[0xF0 / 4], key = RD32(h);
+    for (uint32_t i = 1; i < 0xF0 / 4; ++i) {
+        uint32_t v = RD32(h + 4 * i);
+        words[i] = v ^ key;
+        key = v;
+    }
+    if (words[1] != 0xC0DEC0DFu) return;
+    uint32_t oep = words[8], flags = words[15];
+    if (!(flags & 4)) {
+        recomp_log("%s: Steam DRM with an encrypted code section (flags %x): not supported", im.path.c_str(), flags);
+        return;
+    }
+    recomp_log("%s: Steam DRM wrapper (flags %x): the program's entry %08x, not the stub's %08x", im.path.c_str(), flags,
+               im.base + oep, im.entry);
+    im.entry = im.base + oep;
+}
 
 bool load_image(const std::string& path, Image* out) {
     FILE* f = fopen(path.c_str(), "rb");
@@ -688,6 +863,7 @@ bool load_image(const std::string& path, Image* out) {
         memcpy(g_mem + im.base + va, d + raw, std::min(vsize ? vsize : rsize, rsize));
     }
     im.entry += im.base;
+    steamstub_entry(im);
     const uint8_t* dirs = opt + 96;
     // imports
     uint32_t impRva = le32(dirs + 8);
@@ -824,7 +1000,7 @@ static void sample_register(X86* c, const char* name) {
 bool recomp_is_main_cpu(X86* c) { return g_sampleCpu[0] == c; }
 
 static bool guest_code(uint32_t v) {
-    return (v >= kGuestImageBase + 0x1000 && v < kGuestImageBase + 0x5e8000) || (v >= 0x00C61000 && v < 0x00D60000);
+    return (v >= kGuestImageBase + 0x1000 && v < kGuestImageBase + 0x718000) || (v >= 0x00D41000 && v < 0x00E16000);
 }
 
 // one line a guest thread: the shim it is in and the return addresses on its stack, innermost first. Read while
@@ -1755,7 +1931,7 @@ int recomp_run(const RecompConfig& cfg) {
     g_heapEnd = g_mem_size;
     shims_after_load();
     // the game's DLLs, rebased by tools/recomp/rebase.py into the free space after isaac-ng.exe's image
-    // (Lua5.3.3r.dll at 0x00C60000, msvcp140.dll at 0x00CA0000), so guest memory is 16 MB plus the heap
+    // (Lua5.3.3r.dll at 0x00D40000, msvcp140.dll at 0x00D80000), so guest memory is 16 MB plus the heap
     const std::string dlls[2] = {cfg.dllDir + "/msvcp140.dll", cfg.dllDir + "/lua5.3.3r.dll"};
     for (int i = 0; i < 2; ++i) {
         Image dll;

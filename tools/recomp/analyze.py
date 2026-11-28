@@ -88,9 +88,24 @@ def imported_names(images, dll):
     return names
 
 
+def steamstub_entry(img):
+    """The program's own entry under Steam's DRM wrapper (SteamStub 3.1, Repentance+): the stub's header is the 0xF0
+    bytes before its entry, each word XORed with the one before (the first is the key); signature 0xC0DEC0DF, the
+    entry's RVA at +0x20. None without one."""
+    ep = img.base + img.pe.OPTIONAL_HEADER.AddressOfEntryPoint
+    words = [img.u32(ep - 0xF0 + 4 * i) for i in range(0xF0 // 4)]
+    plain = [0] + [words[i] ^ words[i - 1] for i in range(1, len(words))]
+    if plain[1] != 0xC0DEC0DF:
+        return None
+    return img.base + plain[8]
+
+
 def seeds(img):
     pe = img.pe
     out = {img.base + pe.OPTIONAL_HEADER.AddressOfEntryPoint: 'entry'}
+    oep = steamstub_entry(img)
+    if oep:
+        out[oep] = 'entry'
     # ISAAC360_EXPORTS_FROM=image,image...: only the exports those images import are roots (msvcp140.dll: the game
     # takes 34 of its 1,124, and the console holds every function translated)
     used = None

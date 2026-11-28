@@ -8,6 +8,7 @@ void shims_crt_init();
 void shims_kernel32_register();
 void shims_steam_register();
 void shims_user32_register();
+void shims_rplus_register();
 void shims_gl_register();
 void shims_al_register();
 void shims_input_register();
@@ -53,6 +54,7 @@ void shims_register_all() {
     shims_kernel32_register();
     shims_steam_register();
     shims_user32_register();
+    shims_rplus_register();
     shims_gl_register();
     shims_al_register();
     shims_input_register();

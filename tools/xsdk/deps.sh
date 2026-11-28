@@ -5,7 +5,8 @@
 #   [DEPS=/opt/isaac360-xsdk/deps TOOLCHAIN=/opt/ctr360-xsdk/toolchain/bin/powerpc-xsdk-elf- JOBS=2] tools/xsdk/deps.sh
 #
 # Patches: xsdk-display-output (XSDK_DISPLAY_OUTPUT: the output's own size shown 1:1, a 1080p output's 1920x1080)
-# and vulkan4xenon-display-output (v4x_set_display_output: the display and swapchain at that size). A patch already
+# and vulkan4xenon-display-output (v4x_set_display_output: the display and swapchain at that size), and
+# vulkan4xenon-push-constants (256 bytes of push constants, not 128: Repentance+'s champion shader takes 144). A patch already
 # in its checkout is left as it is; one that no longer applies (a new upstream head) stops here.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"

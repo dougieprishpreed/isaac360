@@ -1,4 +1,4 @@
-"""360convert: prepares your Steam copy of The Binding of Isaac: Rebirth (Repentance v1.7.5) for the Xbox 360 port.
+"""360convert: prepares your Steam copy of The Binding of Isaac: Rebirth (Repentance+ v1.9.7.17) for the Xbox 360 port.
 
 Run it from the folder that holds (or will hold) the isaac360 folder. It asks for isaac-ng.exe in your Steam game folder
 (a file open dialog), then writes into ./isaac360, making the folder if there is none:
@@ -33,8 +33,8 @@ sys.path.insert(0, os.path.join(HERE, '..'))
 import console_sfx  # noqa: E402
 import stage_console  # noqa: E402
 
-LUA_BASE = 0x00C60000                               # README.md, "Building" step 1
-MSVCP_BASE = 0x00CA0000
+LUA_BASE = 0x00D40000                               # README.md, "Building" step 1
+MSVCP_BASE = 0x00D80000
 
 
 def choose_game():
@@ -149,7 +149,7 @@ def convert(game, out):
                  os.path.join('tools', 'ResourceExtractor', 'filelist.txt')):
         if not os.path.isfile(os.path.join(game, need)):
             raise SystemExit('%s has no %s: choose isaac-ng.exe in the Steam folder of The Binding of Isaac: Rebirth '
-                             'with Repentance installed' % (game, need))
+                             'with Repentance+ (v1.9.7.17)' % (game, need))
     msvcp = os.path.join(os.environ.get('WINDIR', r'C:\Windows'), 'SysWOW64', 'msvcp140.dll')
     if not os.path.isfile(os.path.join(out, 'dlls', 'msvcp140.dll')) and not os.path.isfile(msvcp):
         raise SystemExit('%s is missing: install the Microsoft Visual C++ 2015-2022 Redistributable (x86), or put the '
@@ -182,7 +182,7 @@ def convert(game, out):
 def main():
     argv = [a for a in sys.argv[1:] if a != '--no-pause']
     pause = '--no-pause' not in sys.argv[1:]
-    print('360convert: The Binding of Isaac: Rebirth (Repentance v1.7.5) for isaac360')
+    print('360convert: The Binding of Isaac: Rebirth (Repentance+ v1.9.7.17) for isaac360')
     print('Your game files stay yours: never share the isaac360 folder.\n')
     code = 0
     try:

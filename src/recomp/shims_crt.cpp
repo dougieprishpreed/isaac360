@@ -90,6 +90,23 @@ void s_ftell(X86* c) {
     VFile* f = host_file(ARG(c, 0));
     RET_CDECL(c, f ? (uint32_t)vf_tell(f) : (uint32_t)-1);
 }
+// fgetpos(stream, fpos_t*) / fsetpos(stream, const fpos_t*): the position as a 64-bit offset
+void s_fgetpos(X86* c) {
+    VFile* f = host_file(ARG(c, 0));
+    if (!f) {
+        RET_CDECL(c, (uint32_t)-1);
+        return;
+    }
+    int64_t at = vf_tell(f);
+    WR32(ARG(c, 1), (uint32_t)at);
+    WR32(ARG(c, 1) + 4, (uint32_t)((uint64_t)at >> 32));
+    RET_CDECL(c, 0);
+}
+void s_fsetpos(X86* c) {
+    VFile* f = host_file(ARG(c, 0));
+    int64_t at = (int64_t)((uint64_t)RD32(ARG(c, 1)) | ((uint64_t)RD32(ARG(c, 1) + 4) << 32));
+    RET_CDECL(c, f ? (uint32_t)vf_seek(f, at, 0) : (uint32_t)-1);
+}
 void s_fflush(X86* c) {
     VFile* f = host_file(ARG(c, 0));
     if (f) vf_flush(f);
@@ -188,10 +205,15 @@ std::string format_guest(const std::string& fmt, uint32_t va) {
     return out;
 }
 
-// __stdio_common_vsprintf(options(8), buffer, count, format, locale, va_list) -> int
-void s_vsprintf(X86* c) {
-    uint32_t buf = ARG(c, 2), count = ARG(c, 3);
-    std::string s = format_guest(guest_str(ARG(c, 4)), ARG(c, 6));
+// the game's log line for each room it enters: its format string, wherever the build keeps it
+bool room_format(uint32_t a) {
+    static const char kRoom[] = "Room %d.%d(%s)\n";
+    return a && a + sizeof(kRoom) <= g_mem_size && !memcmp(g_mem + a, kRoom, sizeof(kRoom));
+}
+
+// the game's formatted strings (its log lines among them): traced and watched, then written to buf (count bytes at most)
+uint32_t vsprintf_common(X86* c, uint32_t buf, uint32_t count, uint32_t fmt, uint32_t va, std::string& s) {
+    s = format_guest(guest_str(fmt), va);
     // ISAAC360_TRACE_PRINTF=1 logs the first 3000 strings, =N the first N; ISAAC360_TRACE_PRINTF_ONLY="a,b" only those
     // holding one of the words (a whole run's game log lines without its file lookups)
     static int trace = getenv("ISAAC360_TRACE_PRINTF") ? (atoi(getenv("ISAAC360_TRACE_PRINTF")) > 1 ? atoi(getenv("ISAAC360_TRACE_PRINTF")) : 3000) : 0;
@@ -215,7 +237,7 @@ void s_vsprintf(X86* c) {
         recomp_log("printf> %s", s.substr(0, 200).c_str());
     }
     // the game's log line for each room it enters ("Room %d.%d(%s)\n" in isaac-ng.exe): the room lines' boundary
-    if (ARG(c, 4) == 0xb2e1cc) {
+    if (room_format(fmt)) {
         gl_room_entered(s.c_str());
         looks_room_entered();
     }
@@ -228,9 +250,23 @@ void s_vsprintf(X86* c) {
     if (s.find("Lua Debug: count: on") != std::string::npos) recomp_count_mark(true, count_line);
     if (s.find("Lua Debug: count: off") != std::string::npos) recomp_count_mark(false, count_line);
     if (buf && count) guest_write_str(buf, s, count);
-    RET_CDECL(c, (uint32_t)s.size());
+    return (uint32_t)s.size();
+}
+// __stdio_common_vsprintf(options(8), buffer, count, format, locale, va_list) -> int
+void s_vsprintf(X86* c) {
+    std::string s;
+    RET_CDECL(c, vsprintf_common(c, ARG(c, 2), ARG(c, 3), ARG(c, 4), ARG(c, 6), s));
 }
 void s_vsprintf_s(X86* c) { s_vsprintf(c); }
+// __stdio_common_vsnprintf_s(options(8), buffer, size, count, format, locale, va_list) -> int: at most count characters
+// (_TRUNCATE: as many as fit), -1 when cut short
+void s_vsnprintf_s(X86* c) {
+    uint32_t size = ARG(c, 3), count = ARG(c, 4);
+    uint32_t cap = count == 0xffffffffu || count >= size ? size : count + 1;
+    std::string s;
+    uint32_t n = vsprintf_common(c, ARG(c, 2), cap, ARG(c, 5), ARG(c, 7), s);
+    RET_CDECL(c, n < cap ? n : 0xffffffffu);
+}
 // __stdio_common_vfprintf(options(8), stream, format, locale, va_list)
 void s_vfprintf(X86* c) {
     std::string s = format_guest(guest_str(ARG(c, 3)), ARG(c, 5));
@@ -311,14 +347,15 @@ void big_alloc_log(X86* c, uint32_t size) {
 bool g_heapProfile = getenv("ISAAC360_HEAP_PROFILE") != 0;
 std::map<uint32_t, std::pair<std::string, uint32_t> > g_live;
 std::mutex g_liveLock;
-// the first three return addresses in isaac-ng.exe on c's stack
+// the first return addresses in isaac-ng.exe's code on c's stack: three, or ISAAC360_HEAP_PROFILE_DEPTH
 std::string stack_site(X86* c) {
+    static const int depth = getenv("ISAAC360_HEAP_PROFILE_DEPTH") ? atoi(getenv("ISAAC360_HEAP_PROFILE_DEPTH")) : 3;
     std::string site;
     char b[16];
     int found = 0;
-    for (int i = 0; i < 64 && found < 3; ++i) {
+    for (int i = 0; i < 256 && found < depth; ++i) {
         uint32_t v = RD32(c->r[4] + 4 * i);
-        if (v >= 0x00401000 && v < 0x00E00000) {
+        if (v >= 0x00401000 && v < 0x00B18000) {
             sprintf(b, found ? " %08x" : "%08x", v);
             site += b;
             ++found;
@@ -675,6 +712,7 @@ const ShimDef kCrt[] = {
     {"api-ms-win-crt-stdio-l1-1-0.dll!fread", s_fread},
     {"api-ms-win-crt-stdio-l1-1-0.dll!fwrite", s_fwrite},
     {"api-ms-win-crt-stdio-l1-1-0.dll!fseek", s_fseek},
+    {"api-ms-win-crt-stdio-l1-1-0.dll!fgetpos", s_fgetpos}, {"api-ms-win-crt-stdio-l1-1-0.dll!fsetpos", s_fsetpos},
     {"api-ms-win-crt-stdio-l1-1-0.dll!ftell", s_ftell},
     {"api-ms-win-crt-stdio-l1-1-0.dll!fflush", s_fflush},
     {"api-ms-win-crt-stdio-l1-1-0.dll!_fileno", s_fileno},
@@ -683,6 +721,7 @@ const ShimDef kCrt[] = {
     {"api-ms-win-crt-stdio-l1-1-0.dll!_set_fmode", s_set_fmode},
     {"api-ms-win-crt-stdio-l1-1-0.dll!__p__commode", s_p_commode},
     {"api-ms-win-crt-stdio-l1-1-0.dll!__stdio_common_vsprintf", s_vsprintf},
+    {"api-ms-win-crt-stdio-l1-1-0.dll!__stdio_common_vsnprintf_s", s_vsnprintf_s},
     {"api-ms-win-crt-stdio-l1-1-0.dll!__stdio_common_vsprintf_s", s_vsprintf_s},
     {"api-ms-win-crt-stdio-l1-1-0.dll!__stdio_common_vfprintf", s_vfprintf},
     {"api-ms-win-crt-stdio-l1-1-0.dll!__stdio_common_vsscanf", s_vsscanf},

@@ -12,16 +12,16 @@
 // - AddCostume (0x710f70, a HOST hook in translate.py): each add (the item, the caller) with the player's costume
 //   records (+0x1168..+0x116c, 0x130 bytes each) and its 16 layer slots (+0x1174, 16 bytes each) as they are before
 //   it, and once more when the game next enters a room (after the add).
+#include "game_addrs.h"
 #include "runtime.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-extern "C" void F_677f50(X86* c);
 uint32_t gl_frame_count();                          // shims_gl.cpp
 
 namespace {
-const uint32_t kPlayerVtable = 0xb2cd60, kSetColorSlot = kPlayerVtable + 0x30, kSetColor = 0x677f50;
+const uint32_t kPlayerVtable = game::kPlayerVtable, kSetColorSlot = kPlayerVtable + 0x30, kSetColor = game::kSetColor;
 const unsigned kMaxLines = 4000;                    // the trace's share of the log (the console's USB drive)
 bool g_on = false;
 uint32_t g_player = 0;                              // the player whose costume map is due at the next room
@@ -89,12 +89,12 @@ void set_color_traced(X86* c) {
                    f[0], f[1], f[2], f[3], f[4], f[5], f[6], f[7], f[8], f[9], f[10], duration, (int32_t)RD32(sp + 12),
                    RD8(sp + 16), RD8(sp + 20));
     }
-    F_677f50(c);                                    // pops the return address and its five arguments
+    x86_call(c, kSetColor);                         // pops the return address and its five arguments
 }
 }  // namespace
 
 void looks_trace_init() {
-    g_on = getenv("ISAAC360_TRACE_LOOKS") != 0;
+    g_on = getenv("ISAAC360_TRACE_LOOKS") != 0 && kPlayerVtable && kSetColor;
     if (!g_on) return;
     if (RD32(kSetColorSlot) != kSetColor) {
         recomp_log("looks: the player's vtable slot holds %08x, not SetColor: colours not traced", RD32(kSetColorSlot));

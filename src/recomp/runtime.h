@@ -50,6 +50,13 @@ uint32_t guest_calloc(uint32_t n, uint32_t size);
 uint32_t guest_block_size(uint32_t p);
 uint32_t guest_heap_used();
 uint32_t guest_heap_top();                  // the heap's high mark: the console commits up to it
+// VirtualAlloc's reservations (runtime.cpp, "virtual memory"): from the top of guest memory down, 64 KB granular
+uint32_t guest_vm_reserve(uint32_t want, uint32_t size);   // want 0: anywhere; the base, or 0
+bool guest_vm_commit(uint32_t a, uint32_t size);          // fresh pages zero
+bool guest_vm_decommit(uint32_t a, uint32_t size);        // size 0: to the reservation's end
+bool guest_vm_release(uint32_t a);                        // a: the reservation's base
+int guest_vm_query(uint32_t a, uint32_t* allocBase, uint32_t* base, uint32_t* size);   // 0 free, 1 reserved, 2 committed
+uint32_t guest_vm_committed_bytes();
 struct GuestHeapStats {
     uint64_t allocs, big, scanned;            // all, over 2 KB (first fit), free runs looked at for those
     uint32_t freeRuns;                        // free runs over 2 KB now

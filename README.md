@@ -21,7 +21,7 @@ Nothing from the game is included here. You build the console files from your ow
 ## What you need
 
 - An Xbox 360 that runs homebrew (such as with ABadAvatar) and has about 1.2 GB of free space.
-- Your copy of **The Binding of Isaac: Rebirth** with Afterbirth, Afterbirth+ and Repentance, the Windows Steam version at **Repentance v1.7.5**. Other versions of `isaac-ng.exe` are not supported.
+- Your copy of **The Binding of Isaac: Rebirth** with Afterbirth, Afterbirth+ and Repentance, the Windows Steam version at **v1.9.7.17** (Repentance+). Other versions of `isaac-ng.exe` are not supported.
 - A Windows PC to build on, with:
   - Visual Studio 2022 Build Tools, LLVM (clang-cl), CMake and Ninja;
   - Python 3 with a virtual environment in `tools/.venv` holding `iced-x86` and `pefile`;
@@ -34,11 +34,11 @@ Copy your game folder (the one with `isaac-ng.exe`, `Lua5.3.3r.dll` and `resourc
 1. Rebase the two DLLs to the addresses the translation uses:
 
    ```powershell
-   tools\.venv\Scripts\python tools\recomp\rebase.py game\Lua5.3.3r.dll 0x00C60000
+   tools\.venv\Scripts\python tools\recomp\rebase.py game\Lua5.3.3r.dll 0x00D40000
    ```
 
    ```powershell
-   tools\.venv\Scripts\python tools\recomp\rebase.py C:\Windows\SysWOW64\msvcp140.dll 0x00CA0000
+   tools\.venv\Scripts\python tools\recomp\rebase.py C:\Windows\SysWOW64\msvcp140.dll 0x00D80000
    ```
 
 2. Analyse and translate the game's program (this takes 20 to 30 minutes):

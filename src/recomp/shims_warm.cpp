@@ -14,6 +14,7 @@
 // after the present it hung console boot 27 the same way (the load took 408 ms there, against 12 ms on the PC, so
 // only the console's ran long enough for the chore). The chore waits while it runs: console boot 28 loaded it in
 // 365 ms right after the run's start-up load, and its first door was one 281 ms frame (219 + 364 ms before).
+#include "game_addrs.h"
 #include "guest_lock.h"
 #include "runtime.h"
 #include <chrono>
@@ -22,13 +23,14 @@
 #include <string.h>
 
 namespace {
-const uint32_t kGamePtr = 0xbc9aec, kIntro = 0x1b470, kSprite = 0x38, kLoaded = 0x109, kSpriteLoad = 0x406d50;
+const uint32_t kGamePtr = game::kGamePtr, kIntro = game::kIntro, kSprite = game::kIntroSprite,
+               kLoaded = game::kSpriteLoaded, kSpriteLoad = game::kSpriteLoad;
 const char kVersusScreen[] = "gfx/ui/boss/versusscreen.anm2";
 bool g_firstFloor = false;                          // the run's first floor began; its start room comes next
 bool g_pending = false;                             // its start room was entered: warm at this frame's end
 
 bool enabled() {
-    static const bool on = !getenv("ISAAC360_WARM") || atoi(getenv("ISAAC360_WARM")) != 0;
+    static const bool on = kGamePtr && kIntro && (!getenv("ISAAC360_WARM") || atoi(getenv("ISAAC360_WARM")) != 0);
     return on;
 }
 

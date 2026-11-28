@@ -19,6 +19,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "game_addrs.h"
 #include "runtime.h"
 #include <algorithm>
 #include <atomic>
@@ -39,7 +40,6 @@
 #include "../third_party/stb/stb_vorbis.c"
 #include "../third_party/miniz/miniz_tinfl.h"
 
-extern "C" void F_9aa630(X86* c);                       // the game's get_samples, for ISAAC360_VORBIS_CHECK
 
 namespace {
 // the game's decoder object: its input fields (stb_vorbis before the vendor and comment fields)
@@ -754,7 +754,7 @@ bool give_back(std::unique_lock<std::mutex>& l, X86* c, uint32_t f, const uint32
     if (pump) {
         t_bypass = true;
         c->r[1] = f;
-        guest_call(c, 0x9a7910, 0, 0, true);
+        guest_call(c, game::kVorbisPumpFirstFrame, 0, 0, true);
         t_bypass = false;
         memcpy(c->r, regs, 8 * sizeof(uint32_t));
     }
@@ -845,7 +845,7 @@ extern "C" int hle_vorbis_get_samples(X86* c) {
     if (g_check) {
         // the game's decoder on the same read: its samples go to the game, the host's are compared with them
         t_bypass = true;
-        F_9aa630(c);
+        x86_call(c, game::kVorbisGetSamples);       // the game's get_samples
         t_bypass = false;
         uint32_t theirs = c->r[0];
         int maxDiff = 0;

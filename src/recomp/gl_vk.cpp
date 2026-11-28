@@ -8,7 +8,7 @@
 //   Faces: with y not flipped, GL's counter-clockwise is Vulkan's clockwise.
 // * Shaders were converted offline (tools/recomp/shaders.py); a program is found by its sources' hashes.
 // * vulkan4xenon's rules (crab360, Spire360): a pass whose first act is a full clear begins DONT_CARE and
-//   clears with vkCmdClearAttachments; matrices stay block members (push constants, 128 bytes); staging
+//   clears with vkCmdClearAttachments; matrices stay block members (push constants, 256 bytes patched); staging
 //   buffers are only copied from and prefer cached memory.
 // * Vertex data and indices are copied out of guest memory for each draw, in host byte order.
 #include "gl_vk.h"
@@ -73,7 +73,7 @@ enum {
     PIXEL_READS = 256,                  // single pixels glReadPixels may queue a frame
     MAX_SETS = 2048,
     SAMPLER_SLOTS = 4,                  // set 0 bindings 0..3 (the game's programs use at most two)
-    PUSH_BYTES = 128,
+    PUSH_BYTES = 256,                   // vulkan4xenon's, with tools/xsdk/patches (upstream 128)
     MAX_ATTRIBS = 16,
     MAX_UNITS = 16,
     MAX_SWAP = 4,
@@ -251,6 +251,7 @@ struct PipeKey {
     int program;
     bool blend, cull, depthTest, depthWrite, hasDepth, plain;
     uint32_t src, dst, srcA, dstA, cullFace, depthFunc, frontFace, topology;
+    uint32_t blendEq;                       // glBlendEquation (Repentance+), GL_FUNC_ADD before
     bool operator<(const PipeKey& o) const { return memcmp(this, &o, sizeof(*this)) < 0; }
 };
 
@@ -331,6 +332,7 @@ float g_clearColor[4] = {0, 0, 0, 0};
 float g_clearDepth = 1.0f;
 bool g_blend = false, g_cull = false, g_depthTest = false, g_alphaTest = false, g_depthMask = true;
 uint32_t g_src = 1, g_dst = 0, g_srcA = 1, g_dstA = 0, g_cullFace = GL_BACK, g_frontFace = GL_CCW, g_depthFunc = GL_LESS;
+uint32_t g_blendEq = 0x8006;                        // GL_FUNC_ADD
 uint32_t g_alphaFunc = 0x0207;
 float g_alphaRef = 0.0f;
 std::map<std::string, int> g_onceLogged;
@@ -357,7 +359,7 @@ struct RecState {
     int viewport[4];
     float clearColor[4], clearDepth;
     bool blend, cull, depthTest, alphaTest, depthMask;
-    uint32_t src, dst, srcA, dstA, cullFace, frontFace, depthFunc, alphaFunc;
+    uint32_t src, dst, srcA, dstA, cullFace, frontFace, depthFunc, alphaFunc, blendEq;
     float alphaRef;
     uint32_t program;
     uint8_t push[PUSH_BYTES];
@@ -1150,7 +1152,11 @@ VkPipeline pipeline(const PipeKey& k, Program& p) {
     memset(&blend, 0, sizeof(blend));
     blend.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
     blend.blendEnable = k.blend ? VK_TRUE : VK_FALSE;
-    blend.colorBlendOp = blend.alphaBlendOp = VK_BLEND_OP_ADD;
+    // glBlendEquation's mode: GL_FUNC_ADD (0, before any call, or 0x8006), SUBTRACT, REVERSE_SUBTRACT, MIN, MAX
+    blend.colorBlendOp = blend.alphaBlendOp = k.blendEq == 0x800A ? VK_BLEND_OP_SUBTRACT
+                                              : k.blendEq == 0x800B ? VK_BLEND_OP_REVERSE_SUBTRACT
+                                              : k.blendEq == 0x8007 ? VK_BLEND_OP_MIN
+                                              : k.blendEq == 0x8008 ? VK_BLEND_OP_MAX : VK_BLEND_OP_ADD;
     blend.srcColorBlendFactor = blend_factor(k.src);
     blend.dstColorBlendFactor = blend_factor(k.dst);
     blend.srcAlphaBlendFactor = blend_factor(k.srcA);
@@ -2305,6 +2311,7 @@ void rec_state(RecState& s, const Program* p) {
     s.dst = g_dst;
     s.srcA = g_srcA;
     s.dstA = g_dstA;
+    s.blendEq = g_blendEq;
     s.cullFace = g_cullFace;
     s.frontFace = g_frontFace;
     s.depthFunc = g_depthFunc;
@@ -2556,6 +2563,7 @@ void emit_draw(Program& p, VkPrimitiveTopology topo, int count, uint32_t nverts,
         k.dst = g_dst;
         k.srcA = g_srcA;
         k.dstA = g_dstA;
+        k.blendEq = g_blendEq == 0x8006 ? 0 : g_blendEq;
     }
     k.cull = g_cull;
     k.cullFace = g_cull ? g_cullFace : 0;
@@ -2946,6 +2954,11 @@ void vk_glBlendFunc(X86* c) {
     g_src = g_srcA = ARG(c, 0);
     g_dst = g_dstA = ARG(c, 1);
     RET_STD(c, 2, 0);
+}
+void vk_glBlendEquation(X86* c) {
+    g_blendEq = ARG(c, 0);
+    if (g_blendEq != 0x8006) log_once("glBlendEquation 0x%x", g_blendEq);
+    RET_STD(c, 1, 0);
 }
 void vk_glCullFace(X86* c) { g_cullFace = ARG(c, 0); RET_STD(c, 1, 0); }
 void vk_glFrontFace(X86* c) { g_frontFace = ARG(c, 0); RET_STD(c, 1, 0); }
@@ -3375,7 +3388,13 @@ void vk_glShaderSource(X86* c) {
     o.known = false;
     for (size_t i = 0; i < sizeof(GLVK_PROGRAMS) / sizeof(GLVK_PROGRAMS[0]); ++i)
         if (GLVK_PROGRAMS[i].vsHash == o.hash || GLVK_PROGRAMS[i].fsHash == o.hash) o.known = true;
-    if (!o.known) recomp_log("gl_vk: shader %016llx was not converted (%u bytes)", (unsigned long long)o.hash, (unsigned)src.size());
+    if (!o.known) {
+        std::string text = src.substr(0, 600);
+        for (size_t i = 0; i < text.size(); ++i)
+            if ((unsigned char)text[i] < 32) text[i] = ' ';
+        recomp_log("gl_vk: shader %016llx was not converted (%u bytes): %s", (unsigned long long)o.hash,
+                   (unsigned)src.size(), text.c_str());
+    }
     RET_STD(c, 4, 0);
 }
 void vk_glCompileShader(X86* c) { RET_STD(c, 1, 0); }
@@ -3386,6 +3405,12 @@ void vk_glGetShaderiv(X86* c) {
     RET_STD(c, 3, 0);
 }
 void vk_glDeleteShader(X86* c) { RET_STD(c, 1, 0); }
+// glGetShaderInfoLog / glGetProgramInfoLog(object, size, GLsizei* length, char* log): nothing to report
+void vk_glGetInfoLog(X86* c) {
+    if (ARG(c, 2)) WR32(ARG(c, 2), 0);
+    if (ARG(c, 3) && ARG(c, 1)) WR8(ARG(c, 3), 0);
+    RET_STD(c, 4, 0);
+}
 // the game deletes its programs only as it shuts down (boot 14's quit); their pipelines live as long as the layer
 void vk_glDeleteProgram(X86* c) { RET_STD(c, 1, 0); }
 void vk_glDetachShader(X86* c) { RET_STD(c, 2, 0); }
@@ -3519,6 +3544,15 @@ void vk_glUniform1f(X86* c) {
     RET_STD(c, 2, 0);
 }
 void vk_glUniform4fv(X86* c) { uniform_floats((int)ARG(c, 0), ARG(c, 2), 4 * (int)ARG(c, 1)); RET_STD(c, 3, 0); }
+// the other vector forms Repentance+ uses (glUniform3fv first); a uniform's array past its first element is not
+// laid out here (none of the game's shaders has one)
+void vk_glUniform1fv(X86* c) { uniform_floats((int)ARG(c, 0), ARG(c, 2), (int)ARG(c, 1)); RET_STD(c, 3, 0); }
+void vk_glUniform2fv(X86* c) { uniform_floats((int)ARG(c, 0), ARG(c, 2), 2 * (int)ARG(c, 1)); RET_STD(c, 3, 0); }
+void vk_glUniform3fv(X86* c) { uniform_floats((int)ARG(c, 0), ARG(c, 2), 3 * (int)ARG(c, 1)); RET_STD(c, 3, 0); }
+// glUniform2f/3f/4f(location, values...): the arguments are the floats, in order on the stack
+void vk_glUniform2f(X86* c) { uniform_floats((int)ARG(c, 0), c->r[4] + 8, 2); RET_STD(c, 3, 0); }
+void vk_glUniform3f(X86* c) { uniform_floats((int)ARG(c, 0), c->r[4] + 8, 3); RET_STD(c, 4, 0); }
+void vk_glUniform4f(X86* c) { uniform_floats((int)ARG(c, 0), c->r[4] + 8, 4); RET_STD(c, 5, 0); }
 void vk_glEnableVertexAttribArray(X86* c) { uint32_t i = ARG(c, 0); if (i < MAX_ATTRIBS) g_va[i].enabled = true; RET_STD(c, 1, 0); }
 void vk_glDisableVertexAttribArray(X86* c) { uint32_t i = ARG(c, 0); if (i < MAX_ATTRIBS) g_va[i].enabled = false; RET_STD(c, 1, 0); }
 // glVertexAttribPointer(index, size, type, normalized, stride, pointer): client memory (no buffer is ever bound)
@@ -3550,7 +3584,7 @@ struct Entry { const char* name; ShimFn fn; };
 const Entry kEntries[] = {
     {"glGetString", vk_glGetString}, {"glGetStringi", vk_glGetStringi}, {"glGetError", vk_glGetError},
     {"glGetIntegerv", vk_glGetIntegerv}, {"glEnable", vk_glEnable}, {"glDisable", vk_glDisable},
-    {"glBlendFuncSeparate", vk_glBlendFuncSeparate}, {"glBlendFunc", vk_glBlendFunc}, {"glCullFace", vk_glCullFace},
+    {"glBlendFuncSeparate", vk_glBlendFuncSeparate}, {"glBlendFunc", vk_glBlendFunc}, {"glBlendEquation", vk_glBlendEquation}, {"glCullFace", vk_glCullFace},
     {"glFrontFace", vk_glFrontFace}, {"glDepthFunc", vk_glDepthFunc}, {"glDepthMask", vk_glDepthMask},
     {"glAlphaFunc", vk_glAlphaFunc}, {"glClampColorARB", vk_glClampColorARB}, {"glClampColor", vk_glClampColorARB},
     {"glClearColor", vk_glClearColor}, {"glClearDepth", vk_glClearDepth}, {"glClear", vk_glClear},
@@ -3565,11 +3599,14 @@ const Entry kEntries[] = {
     {"glGetRenderbufferParameteriv", vk_glGetRenderbufferParameteriv}, {"glDeleteRenderbuffers", vk_glDeleteRenderbuffers},
     {"glReadPixels", vk_glReadPixels}, {"glCreateShader", vk_glCreateShader}, {"glShaderSource", vk_glShaderSource},
     {"glCompileShader", vk_glCompileShader}, {"glGetShaderiv", vk_glGetShaderiv}, {"glDeleteShader", vk_glDeleteShader},
+    {"glGetShaderInfoLog", vk_glGetInfoLog}, {"glGetProgramInfoLog", vk_glGetInfoLog},
     {"glDeleteProgram", vk_glDeleteProgram}, {"glDetachShader", vk_glDetachShader},
     {"glCreateProgram", vk_glCreateProgram}, {"glAttachShader", vk_glAttachShader}, {"glLinkProgram", vk_glLinkProgram},
     {"glGetProgramiv", vk_glGetProgramiv}, {"glUseProgram", vk_glUseProgram}, {"glGetAttribLocation", vk_glGetAttribLocation},
     {"glGetUniformLocation", vk_glGetUniformLocation}, {"glUniform1i", vk_glUniform1i}, {"glUniform1f", vk_glUniform1f},
     {"glUniform4fv", vk_glUniform4fv}, {"glUniformMatrix4fv", vk_glUniformMatrix4fv},
+    {"glUniform1fv", vk_glUniform1fv}, {"glUniform2fv", vk_glUniform2fv}, {"glUniform3fv", vk_glUniform3fv},
+    {"glUniform2f", vk_glUniform2f}, {"glUniform3f", vk_glUniform3f}, {"glUniform4f", vk_glUniform4f},
     {"glEnableVertexAttribArray", vk_glEnableVertexAttribArray}, {"glDisableVertexAttribArray", vk_glDisableVertexAttribArray},
     {"glVertexAttribPointer", vk_glVertexAttribPointer}, {"glDrawElements", vk_glDrawElements}, {"glDrawArrays", vk_glDrawArrays},
 };
@@ -4046,6 +4083,7 @@ void replay_state(const RecCmd& c, const uint32_t* from, const uint32_t* to, int
     g_alphaTest = s.alphaTest;
     g_depthMask = s.depthMask;
     g_src = s.src;
+    g_blendEq = s.blendEq;
     g_dst = s.dst;
     g_srcA = s.srcA;
     g_dstA = s.dstA;

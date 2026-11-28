@@ -4,6 +4,7 @@
 
 # Your copy of the game, and everything built from it.
 /game/
+/game_v*/
 build/
 *.xex
 *.pdb
